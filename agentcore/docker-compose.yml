@@ -1,0 +1,149 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentcore-postgres
+    environment:
+      POSTGRES_USER: agentcore
+      POSTGRES_PASSWORD: agentcore
+      POSTGRES_DB: agentcore
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/setup-rls.sql:/docker-entrypoint-initdb.d/setup-rls.sql
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentcore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentcore-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: agentcore-redis
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentcore-net
+
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    container_name: agentcore-pgbouncer
+    environment:
+      PGBOUNCER_DATABASE: agentcore
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USERNAME: agentcore
+      POSTGRESQL_PASSWORD: agentcore
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: 1000
+      PGBOUNCER_DEFAULT_POOL_SIZE: 20
+      PGBOUNCER_MIN_POOL_SIZE: 5
+    ports:
+      - "6432:6432"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentcore-net
+
+  agentcore-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentcore-api
+    command: node dist/index.js
+    environment:
+      DATABASE_URL: postgresql://agentcore:agentcore@pgbouncer:6432/agentcore
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentcore-net
+
+  agentcore-workers:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentcore-workers
+    command: node dist/queues/workers.js
+    environment:
+      DATABASE_URL: postgresql://agentcore:agentcore@pgbouncer:6432/agentcore
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    networks:
+      - agentcore-net
+
+  agentcore-dashboard:
+    build:
+      context: ../dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000/api
+        NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws/realtime
+    container_name: agentcore-dashboard
+    environment:
+      NEXT_PUBLIC_API_URL: http://agentcore-api:4000/api
+      NEXT_PUBLIC_WS_URL: ws://agentcore-api:4000/ws/realtime
+    ports:
+      - "3000:3000"
+    depends_on:
+      agentcore-api:
+        condition: service_healthy
+    networks:
+      - agentcore-net
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  agentcore-net:
+    driver: bridge

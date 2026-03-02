@@ -5,7 +5,7 @@ import { masterAgents } from './master-agents.js';
 import { companies } from './companies.js';
 
 export const contactSourceEnum = pgEnum('contact_source', [
-  'linkedin_search', 'linkedin_profile', 'cv_upload', 'manual', 'web_search',
+  'linkedin_search', 'linkedin_profile', 'cv_upload', 'manual', 'web_search', 'inbound',
 ]);
 
 export const contactStatusEnum = pgEnum('contact_status', [

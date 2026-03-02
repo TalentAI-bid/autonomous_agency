@@ -77,9 +77,11 @@ export default async function authRoutes(fastify: FastifyInstance) {
     });
 
     return reply.status(201).send({
-      accessToken,
-      user: { id: user!.id, email: user!.email, name: user!.name, role: user!.role },
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+      data: {
+        token: accessToken,
+        user: { id: user!.id, email: user!.email, name: user!.name, role: user!.role },
+        tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+      },
     });
   });
 
@@ -112,7 +114,16 @@ export default async function authRoutes(fastify: FastifyInstance) {
       path: '/',
     });
 
-    return { accessToken, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
+    // Look up tenant for response
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
+
+    return {
+      data: {
+        token: accessToken,
+        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        tenant: tenant ? { id: tenant.id, name: tenant.name, slug: tenant.slug } : undefined,
+      },
+    };
   });
 
   // POST /api/auth/refresh
@@ -141,7 +152,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
       path: '/',
     });
 
-    return { accessToken };
+    return { data: { token: accessToken } };
   });
 
   // POST /api/auth/logout

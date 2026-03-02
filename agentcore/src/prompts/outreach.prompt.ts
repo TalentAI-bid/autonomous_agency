@@ -3,8 +3,26 @@ export interface OutreachEmail {
   body: string;
 }
 
-export function buildSystemPrompt(tone: string = 'professional'): string {
-  return `You are an expert recruiter/business development specialist writing personalized outreach emails.
+export function buildSystemPrompt(tone: string = 'professional', context?: {
+  useCase?: string;
+  description?: string;
+  mission?: string;
+  valueProposition?: string;
+  emailRules?: string[];
+}): string {
+  const role = context?.useCase === 'recruitment'
+    ? 'expert recruiter'
+    : context?.useCase === 'sales'
+      ? 'expert sales professional'
+      : context?.description
+        ? context.description
+        : 'expert business development specialist';
+
+  const rulesSection = context?.emailRules?.length
+    ? `\n\nMANDATORY EMAIL RULES — you MUST follow these in EVERY email:\n${context.emailRules.map((r, i) => `${i + 1}. ${r}`).join('\n')}`
+    : '';
+
+  return `You are an ${role} writing personalized outreach emails.
 
 Tone: ${tone}
 Style guidelines:
@@ -15,6 +33,7 @@ Style guidelines:
 - NO generic phrases like "I hope this finds you well" or "I came across your profile"
 - DO reference specific skills, experience, or achievements
 - Subject line: punchy, 6-8 words, no clickbait
+${rulesSection}
 
 Always respond with valid JSON containing "subject" and "body" fields.`;
 }
@@ -35,6 +54,7 @@ export function buildUserPrompt(data: {
     tone: string;
   };
   senderName?: string;
+  useCase?: string;
 }): string {
   const topSkills = data.contact.skills.slice(0, 3).join(', ');
 
@@ -43,6 +63,31 @@ export function buildUserPrompt(data: {
     : data.opportunity.stepNumber === 2
       ? 'This is a follow-up to an unanswered first email. Reference that you reached out before, but keep it brief.'
       : 'This is a final follow-up. Keep it very short and graceful.';
+
+  if (data.useCase === 'sales') {
+    return `Write a personalized sales outreach email for this prospect.
+
+PROSPECT:
+- First Name: ${data.contact.firstName}
+- Current Role: ${data.contact.title} at ${data.contact.companyName} (authority context — this is who we are selling to)
+- Location: ${data.contact.location}
+- Key Expertise: ${topSkills}
+
+PRODUCT CONTEXT:
+- What We Offer: ${data.opportunity.title}
+- Our Company: ${data.opportunity.company}
+- Value Proposition: ${data.opportunity.valueProposition}
+- Tone: ${data.opportunity.tone}
+${data.senderName ? `- Sender: ${data.senderName}` : ''}
+
+CONTEXT: ${stepContext}
+
+Return JSON:
+{
+  "subject": "Short compelling subject line",
+  "body": "Email body text (can use basic HTML like <p>, <br>, <strong>)"
+}`;
+  }
 
   return `Write a personalized outreach email for this candidate.
 

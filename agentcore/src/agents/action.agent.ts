@@ -4,6 +4,7 @@ import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents, users, interviews } from '../db/schema/index.js';
 import { sendEmail } from '../tools/smtp.tool.js';
 import { buildSystemPrompt, buildUserPrompt } from '../prompts/action.prompt.js';
+import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
 
 function nextBusinessDay(): Date {
@@ -118,7 +119,7 @@ export class ActionAgent extends BaseAgent {
 
           await sendEmail({
             tenantId: this.tenantId,
-            from: `recruitment@agentcore.app`,
+            from: env.SMTP_USER || 'recruitment@agentcore.app',
             to: contact.email,
             subject: `Interview Invitation — ${(config.targetRoles as string[])?.[0] ?? 'Open Position'}`,
             html: calendarHtml,
@@ -134,7 +135,7 @@ export class ActionAgent extends BaseAgent {
         try {
           await sendEmail({
             tenantId: this.tenantId,
-            from: `system@agentcore.app`,
+            from: env.SMTP_USER || 'system@agentcore.app',
             to: owner.email,
             subject: `Interview Scheduled: ${contact.firstName ?? ''} ${contact.lastName ?? ''} — ${(config.targetRoles as string[])?.[0] ?? 'Open Position'}`,
             html: `<div style="font-family: sans-serif; max-width: 800px;">

@@ -30,8 +30,8 @@ export default function RegisterPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await apiPost<AuthResponse>('/auth/register', form);
-      login(res.data.token, res.data.user, res.data.tenant);
+      const res = await apiPost<{ token: string; user: AuthResponse['data']['user']; tenant: AuthResponse['data']['tenant'] }>('/auth/register', form);
+      login(res.token, res.user, res.tenant);
       router.push('/dashboard');
     } catch {
       toast({ title: 'Registration failed', description: 'Please check your details and try again', variant: 'destructive' });

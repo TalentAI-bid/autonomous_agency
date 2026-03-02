@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
-import type { MasterAgent, AgentConfig } from '@/types';
+import type { MasterAgent, AgentConfig, Company, Document } from '@/types';
 
 export function useAgents() {
   return useQuery({
@@ -82,5 +82,58 @@ export function useDeleteAgent() {
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ success: boolean }>(`/master-agents/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+}
+
+interface AgentStats {
+  totalContacts: number;
+  byStatus: Record<string, number>;
+  avgScore: number | null;
+}
+
+export function useAgentStats(id: string) {
+  return useQuery({
+    queryKey: ['agents', id, 'stats'],
+    queryFn: () => apiGet<AgentStats>(`/master-agents/${id}/stats`),
+    enabled: !!id,
+    staleTime: 15000,
+  });
+}
+
+interface AgentEmail {
+  id: string;
+  fromEmail: string | null;
+  toEmail: string | null;
+  subject: string | null;
+  sentAt: string | null;
+  openedAt: string | null;
+  repliedAt: string | null;
+  messageId: string | null;
+}
+
+export function useAgentEmails(id: string) {
+  return useQuery({
+    queryKey: ['agents', id, 'emails'],
+    queryFn: () => apiGet<AgentEmail[]>(`/master-agents/${id}/emails`),
+    enabled: !!id,
+    staleTime: 15000,
+  });
+}
+
+export function useAgentCompanies(id: string) {
+  return useQuery({
+    queryKey: ['agents', id, 'companies'],
+    queryFn: () => apiGet<Company[]>(`/master-agents/${id}/companies`),
+    enabled: !!id,
+    staleTime: 15000,
+  });
+}
+
+export function useAgentDocuments(id: string) {
+  return useQuery({
+    queryKey: ['agents', id, 'documents'],
+    queryFn: () => apiGet<Document[]>(`/master-agents/${id}/documents`),
+    enabled: !!id,
+    staleTime: 15000,
   });
 }

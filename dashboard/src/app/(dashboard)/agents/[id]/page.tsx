@@ -1,7 +1,8 @@
 'use client';
 
+import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
-import { useMasterAgent, useStartAgent, useStopAgent } from '@/hooks/use-agents';
+import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { AgentMonitor } from '@/components/agents/agent-monitor';
@@ -10,21 +11,35 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, getStatusColor } from '@/lib/utils';
-import { Play, Square, Activity, Users, Bot } from 'lucide-react';
+import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+type Tab = 'overview' | 'contacts' | 'companies' | 'documents' | 'emails';
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
   const { data: agentRes, isLoading } = useMasterAgent(id);
   const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 20 });
+  const { data: stats } = useAgentStats(id);
+  const { data: emails } = useAgentEmails(id);
+  const { data: companiesData } = useAgentCompanies(id);
+  const { data: documentsData } = useAgentDocuments(id);
   const startAgent = useStartAgent();
   const stopAgent = useStopAgent();
   const { toast } = useToast();
-  const events = useRealtimeStore((s) => s.events.filter((e) => (e.data as Record<string, unknown>)?.masterAgentId === id));
+  const allEvents = useRealtimeStore((s) => s.events);
+  const events = useMemo(
+    () => allEvents.filter((e) => (e.data as Record<string, unknown>)?.masterAgentId === id),
+    [allEvents, id],
+  );
 
   const agent = agentRes;
   const contacts = contactsRes?.data ?? [];
-  const totalContacts = contactsRes?.pagination?.total ?? 0;
+  const totalContacts = stats?.totalContacts ?? contactsRes?.pagination?.total ?? 0;
+  const config = (agent?.config ?? {}) as Record<string, unknown>;
+  const agentCompanies = companiesData ?? [];
+  const agentDocuments = documentsData ?? [];
 
   async function handleStart() {
     try {
@@ -61,6 +76,26 @@ export default function AgentDetailPage() {
       </div>
     );
   }
+
+  const targetRoles = (config.targetRoles as string[]) ?? [];
+  const requiredSkills = (config.requiredSkills as string[]) ?? [];
+  const locations = (config.locations as string[]) ?? [];
+  const byStatus = stats?.byStatus ?? {};
+
+  const funnelStages = [
+    { label: 'Discovered', value: byStatus.discovered ?? 0, color: 'bg-blue-500' },
+    { label: 'Enriched', value: byStatus.enriched ?? 0, color: 'bg-indigo-500' },
+    { label: 'Scored', value: byStatus.scored ?? 0, color: 'bg-purple-500' },
+    { label: 'Contacted', value: byStatus.contacted ?? 0, color: 'bg-emerald-500' },
+  ];
+
+  const tabs: { key: Tab; label: string; icon: React.ElementType; count?: number }[] = [
+    { key: 'overview', label: 'Overview', icon: BarChart3 },
+    { key: 'contacts', label: 'Contacts', icon: Users, count: totalContacts },
+    { key: 'companies', label: 'Companies', icon: Building2, count: agentCompanies.length },
+    { key: 'documents', label: 'Documents', icon: FileText, count: agentDocuments.length },
+    { key: 'emails', label: 'Emails', icon: Mail, count: emails?.length ?? 0 },
+  ];
 
   return (
     <div className="space-y-6">
@@ -108,25 +143,170 @@ export default function AgentDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Agent Monitor */}
-      <AgentMonitor masterAgentId={id} />
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-border">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+              {tab.count !== undefined && tab.count > 0 && (
+                <Badge variant="secondary" className="text-xs ml-1 px-1.5 py-0">
+                  {tab.count}
+                </Badge>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Contacts */}
+      {/* Tab Content */}
+      {activeTab === 'overview' && (
+        <>
+          {/* Agent Monitor */}
+          <AgentMonitor masterAgentId={id} />
+
+          {/* Pipeline Stats + Parsed Requirements */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4" />
+                  Pipeline Stats
+                  {stats?.avgScore != null && (
+                    <Badge variant="outline" className="ml-auto text-xs">Avg Score: {stats.avgScore}</Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {funnelStages.map((stage) => (
+                  <div key={stage.label} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">{stage.label}</span>
+                      <span className="font-medium">{stage.value}</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${stage.color} rounded-full transition-all`}
+                        style={{ width: totalContacts > 0 ? `${(stage.value / totalContacts) * 100}%` : '0%' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {totalContacts === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    No contacts yet. Run the agent to start the pipeline.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Target className="w-4 h-4" />
+                  Parsed Requirements
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {targetRoles.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5">
+                      {agent.useCase === 'sales' ? 'Target Decision-Makers' : 'Target Roles'}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {targetRoles.map((role) => (
+                        <Badge key={role} variant="secondary" className="text-xs">{role}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {requiredSkills.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5">
+                      {agent.useCase === 'sales' ? 'Target Company Attributes' : 'Required Skills'}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {requiredSkills.map((skill) => (
+                        <Badge key={skill} variant="outline" className="text-xs">{skill}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {locations.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5">Locations</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {locations.map((loc) => (
+                        <Badge key={loc} variant="outline" className="text-xs">{loc}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {targetRoles.length === 0 && requiredSkills.length === 0 && locations.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Requirements will appear after the agent runs.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Live Events */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-500" />
+                Live Events
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
+              {events.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">
+                  {agent.status === 'running' ? 'Waiting for events...' : 'No events. Start the agent to see activity.'}
+                </p>
+              ) : (
+                events.map((event, i) => (
+                  <div key={i} className="flex gap-2 text-xs border-l-2 border-border pl-2 py-1">
+                    <div className="min-w-0 flex-1">
+                      <span className={`font-medium ${getStatusColor(event.event)}`}>{event.event}</span>
+                      {event.data && typeof event.data === 'object' && 'message' in event.data && (
+                        <p className="text-muted-foreground mt-0.5 truncate">{String(event.data.message)}</p>
+                      )}
+                    </div>
+                    <span className="text-muted-foreground shrink-0">{formatDate(event.timestamp)}</span>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {activeTab === 'contacts' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Users className="w-4 h-4" />
-              Recent Contacts ({totalContacts})
+              Contacts ({totalContacts})
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {contacts.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
-                No contacts discovered yet. Run the agent to start finding candidates.
+                No contacts discovered yet. Run the agent to start finding {agent.useCase === 'sales' ? 'prospects' : 'candidates'}.
               </p>
             ) : (
-              contacts.slice(0, 10).map((contact) => (
+              contacts.map((contact) => (
                 <div key={contact.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{[contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || 'Unknown'}</p>
@@ -147,36 +327,108 @@ export default function AgentDetailPage() {
             )}
           </CardContent>
         </Card>
+      )}
 
-        {/* Live Events */}
+      {activeTab === 'companies' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-500" />
-              Live Events
+              <Building2 className="w-4 h-4" />
+              Companies ({agentCompanies.length})
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
-            {events.length === 0 ? (
+          <CardContent className="space-y-2">
+            {agentCompanies.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
-                {agent.status === 'running' ? 'Waiting for events...' : 'No events. Start the agent to see activity.'}
+                No companies discovered yet.
               </p>
             ) : (
-              events.map((event, i) => (
-                <div key={i} className="flex gap-2 text-xs border-l-2 border-border pl-2 py-1">
-                  <div className="min-w-0 flex-1">
-                    <span className={`font-medium ${getStatusColor(event.event)}`}>{event.event}</span>
-                    {event.data && typeof event.data === 'object' && 'message' in event.data && (
-                      <p className="text-muted-foreground mt-0.5 truncate">{String(event.data.message)}</p>
+              agentCompanies.map((company) => (
+                <div key={company.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{company.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {[company.industry, company.size, company.domain].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-2 shrink-0">
+                    {company.funding && (
+                      <Badge variant="outline" className="text-xs">{company.funding}</Badge>
+                    )}
+                    {company.techStack && company.techStack.length > 0 && (
+                      <Badge variant="secondary" className="text-xs">{company.techStack.length} tech</Badge>
                     )}
                   </div>
-                  <span className="text-muted-foreground shrink-0">{formatDate(event.timestamp)}</span>
                 </div>
               ))
             )}
           </CardContent>
         </Card>
-      </div>
+      )}
+
+      {activeTab === 'documents' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <FileText className="w-4 h-4" />
+              Documents ({agentDocuments.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {agentDocuments.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No documents yet.
+              </p>
+            ) : (
+              agentDocuments.map((doc) => (
+                <div key={doc.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{doc.fileName || doc.type}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {doc.type} · {formatDate(doc.createdAt)}
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="text-xs">{doc.status}</Badge>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'emails' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Mail className="w-4 h-4" />
+              Emails Sent ({emails?.length ?? 0})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 max-h-[500px] overflow-y-auto">
+            {!emails || emails.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No emails sent yet. Emails are sent after scoring in the pipeline.
+              </p>
+            ) : (
+              emails.map((email) => (
+                <div key={email.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{email.subject ?? 'No subject'}</p>
+                    <p className="text-xs text-muted-foreground truncate">To: {email.toEmail}</p>
+                  </div>
+                  <div className="flex items-center gap-2 ml-2 shrink-0">
+                    {email.repliedAt && <Badge variant="success" className="text-xs">Replied</Badge>}
+                    {email.openedAt && !email.repliedAt && <Badge variant="outline" className="text-xs">Opened</Badge>}
+                    {email.sentAt && (
+                      <span className="text-xs text-muted-foreground">{formatDate(email.sentAt)}</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

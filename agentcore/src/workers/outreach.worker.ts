@@ -9,19 +9,25 @@ export function createOutreachWorker(tenantId: string): Worker {
   return new Worker(
     getQueueName(tenantId, 'outreach'),
     async (job: Job) => {
-      const task = await createTaskRecord(job, 'outreach');
+      let task: { id: string; tenantId: string } | undefined;
+      try {
+        task = await createTaskRecord(job, 'outreach');
+      } catch (taskErr) {
+        logger.warn({ err: taskErr, tenantId, jobId: job.id }, 'Failed to create task record for outreach — continuing without it');
+      }
+
       const agent = new OutreachAgent({
         tenantId,
-        masterAgentId: (job.data as Record<string, unknown>).masterAgentId as string ?? '',
+        masterAgentId: (job.data as Record<string, unknown>).masterAgentId as string || '',
         agentType: 'outreach',
       });
       try {
         const result = await agent.execute(job.data as Record<string, unknown>);
-        await completeTaskRecord(tenantId, task.id, result);
+        if (task) await completeTaskRecord(tenantId, task.id, result);
         return result;
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        await failTaskRecord(tenantId, task.id, message);
+        if (task) await failTaskRecord(tenantId, task.id, message);
         logger.error({ err, tenantId, jobId: job.id }, 'Outreach worker failed');
         throw err;
       } finally {

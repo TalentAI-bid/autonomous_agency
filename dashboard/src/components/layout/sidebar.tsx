@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, Bot, Users, Megaphone,
-  FileText, BarChart3, Settings, Zap,
+  LayoutDashboard, Bot, Users, Building2, Megaphone,
+  FileText, BarChart3, Settings, Zap, Kanban, Mail, Inbox, CalendarClock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRealtimeStore } from '@/stores/realtime.store';
@@ -12,11 +12,19 @@ import { useRealtimeStore } from '@/stores/realtime.store';
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/agents', label: 'Agents', icon: Bot },
-  { href: '/contacts', label: 'Contacts', icon: Users },
   { href: '/campaigns', label: 'Campaigns', icon: Megaphone },
-  { href: '/documents', label: 'Documents', icon: FileText },
+  { href: '/crm', label: 'CRM', icon: Kanban },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/mailbox', label: 'Mailbox', icon: Inbox },
+  { href: '/schedule', label: 'Schedule', icon: CalendarClock },
+  { href: '/settings/email', label: 'Email', icon: Mail },
   { href: '/settings', label: 'Settings', icon: Settings },
+];
+
+const allDataItems = [
+  { href: '/contacts', label: 'Contacts', icon: Users },
+  { href: '/companies', label: 'Companies', icon: Building2 },
+  { href: '/documents', label: 'Documents', icon: FileText },
 ];
 
 export function Sidebar() {
@@ -38,25 +46,52 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + '/');
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-                active
-                  ? 'bg-zinc-800 text-foreground font-medium'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground',
-              )}
-            >
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              {label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 py-4 px-2 overflow-y-auto">
+        <div className="space-y-0.5">
+          {navItems.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(href + '/');
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                  active
+                    ? 'bg-zinc-800 text-foreground font-medium'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground',
+                )}
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                {label}
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* All Data section */}
+        <div className="mt-6 pt-4 border-t border-sidebar-border">
+          <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">All Data</p>
+          <div className="space-y-0.5">
+            {allDataItems.map(({ href, label, icon: Icon }) => {
+              const active = pathname === href || pathname.startsWith(href + '/');
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                    active
+                      ? 'bg-zinc-800 text-foreground font-medium'
+                      : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-foreground',
+                  )}
+                >
+                  <Icon className="w-4 h-4 flex-shrink-0" />
+                  {label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       </nav>
 
       {/* Footer */}

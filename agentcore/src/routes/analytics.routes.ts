@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, sql, and, count } from 'drizzle-orm';
+import { eq, sql, and, count, isNotNull, gt, avg } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { contacts, campaigns, masterAgents, interviews, emailsSent, campaignContacts } from '../db/schema/index.js';
 
@@ -55,25 +55,33 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
         .from(interviews)
         .where(eq(interviews.tenantId, request.tenantId));
 
-      // Aggregate campaign stats
-      const campaignStats = await tx
-        .select({ stats: campaigns.stats })
-        .from(campaigns)
-        .where(eq(campaigns.tenantId, request.tenantId));
+      // Direct email counts from emailsSent table
+      const [emailSentCount] = await tx
+        .select({ count: count() })
+        .from(emailsSent)
+        .innerJoin(campaignContacts, eq(emailsSent.campaignContactId, campaignContacts.id))
+        .innerJoin(campaigns, eq(campaignContacts.campaignId, campaigns.id))
+        .where(and(eq(campaigns.tenantId, request.tenantId), isNotNull(emailsSent.sentAt)));
 
-      let totalSent = 0;
-      let totalOpened = 0;
-      let totalReplied = 0;
-      let totalMeetingsBooked = 0;
-      for (const c of campaignStats) {
-        const s = c.stats as { sent?: number; opened?: number; replied?: number; meetingsBooked?: number } | null;
-        if (s) {
-          totalSent += s.sent || 0;
-          totalOpened += s.opened || 0;
-          totalReplied += s.replied || 0;
-          totalMeetingsBooked += s.meetingsBooked || 0;
-        }
-      }
+      const [emailOpenedCount] = await tx
+        .select({ count: count() })
+        .from(emailsSent)
+        .innerJoin(campaignContacts, eq(emailsSent.campaignContactId, campaignContacts.id))
+        .innerJoin(campaigns, eq(campaignContacts.campaignId, campaigns.id))
+        .where(and(eq(campaigns.tenantId, request.tenantId), isNotNull(emailsSent.openedAt)));
+
+      const [emailRepliedCount] = await tx
+        .select({ count: count() })
+        .from(emailsSent)
+        .innerJoin(campaignContacts, eq(emailsSent.campaignContactId, campaignContacts.id))
+        .innerJoin(campaigns, eq(campaignContacts.campaignId, campaigns.id))
+        .where(and(eq(campaigns.tenantId, request.tenantId), isNotNull(emailsSent.repliedAt)));
+
+      // Average contact score
+      const [avgScoreResult] = await tx
+        .select({ avg: avg(contacts.score) })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, request.tenantId), gt(contacts.score, 0)));
 
       return {
         contacts: {
@@ -89,14 +97,14 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
           running: runningAgentCount?.count || 0,
         },
         emails: {
-          sent: totalSent,
-          opened: totalOpened,
-          replied: totalReplied,
+          sent: emailSentCount?.count || 0,
+          opened: emailOpenedCount?.count || 0,
+          replied: emailRepliedCount?.count || 0,
         },
         interviews: {
           scheduled: interviewCount?.count || 0,
         },
-        meetingsBooked: totalMeetingsBooked,
+        avgScore: avgScoreResult?.avg ? Math.round(Number(avgScoreResult.avg)) : null,
       };
     });
 

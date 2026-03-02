@@ -1,11 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, count, avg, gt, inArray } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { masterAgents, agentConfigs } from '../db/schema/index.js';
-import { registerTenantWorkers } from '../queues/workers.js';
+import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents } from '../db/schema/index.js';
+import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { extractJSON } from '../tools/together-ai.tool.js';
+import { removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
+import logger from '../utils/logger.js';
+import {
+  buildSystemPrompt as buildPipelineSystemPrompt,
+  buildUserPrompt as buildPipelineUserPrompt,
+  type PipelineBuilderInput,
+  type PipelineProposal,
+} from '../prompts/pipeline-builder.prompt.js';
 
 const createMasterAgentSchema = z.object({
   name: z.string().min(1).max(255),
@@ -54,6 +63,35 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({ data: agent });
   });
 
+  // POST /api/master-agents/analyze-pipeline — AI pipeline analysis
+  const analyzePipelineSchema = z.object({
+    useCase: z.enum(['recruitment', 'sales', 'custom']),
+    targetRole: z.string().optional(),
+    requiredSkills: z.array(z.string()).optional(),
+    experienceLevel: z.string().optional(),
+    locations: z.array(z.string()).optional(),
+    targetIndustry: z.string().optional(),
+    companySize: z.string().optional(),
+    additionalContext: z.string().optional(),
+    scoringThreshold: z.number().min(0).max(100).default(70),
+    emailTone: z.string().default('professional'),
+    enableOutreach: z.boolean().default(true),
+  });
+
+  fastify.post('/analyze-pipeline', async (request) => {
+    const parsed = analyzePipelineSchema.safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+    const input = parsed.data as PipelineBuilderInput;
+    const messages = [
+      { role: 'system' as const, content: buildPipelineSystemPrompt() },
+      { role: 'user' as const, content: buildPipelineUserPrompt(input) },
+    ];
+
+    const proposal = await extractJSON<PipelineProposal>(request.tenantId, messages);
+    return { data: proposal };
+  });
+
   // GET /api/master-agents/:id
   fastify.get<{ Params: { id: string } }>('/:id', async (request) => {
     const { id } = request.params;
@@ -91,6 +129,15 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
         .returning({ id: masterAgents.id });
     });
     if (result.length === 0) throw new NotFoundError('MasterAgent', id);
+
+    // Clean up repeatable jobs — prevents orphaned polls after agent deletion
+    try {
+      await removeAllEmailListenerJobs(request.tenantId);
+      await removeAllEmailSendJobs(request.tenantId);
+    } catch (err) {
+      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'Failed to remove repeatable jobs on delete');
+    }
+
     return { success: true };
   });
 
@@ -157,6 +204,19 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     const result = await masterAgent.execute({ masterAgentId: id, mission: agent.mission });
     await masterAgent.close();
 
+    // Re-fetch config from DB after execute() — it may have updated the config
+    const [freshAgent] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({ config: masterAgents.config }).from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
+    logger.info({ tenantId: request.tenantId, agentId: id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from /start');
+    await removeAllEmailListenerJobs(request.tenantId);
+    await removeAllEmailSendJobs(request.tenantId);
+    await scheduleAgentJobs(request.tenantId, id, agentCfg);
+    logger.info({ tenantId: request.tenantId, agentId: id }, 'Agent jobs scheduled from /start');
+
     return { data: { status: 'running', ...result } };
   });
 
@@ -171,7 +231,112 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     });
     if (!agent) throw new NotFoundError('MasterAgent', id);
 
-    // In Prompt 2: actually pause/drain all agent queues for this master agent
+    // Clean up all repeatable email jobs for this tenant
+    try {
+      await removeAllEmailListenerJobs(request.tenantId);
+      await removeAllEmailSendJobs(request.tenantId);
+    } catch (err) {
+      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'Failed to remove repeatable jobs on stop');
+    }
+
     return { data: { status: 'paused' } };
+  });
+
+  // GET /api/master-agents/:id/stats — Agent pipeline stats
+  fastify.get<{ Params: { id: string } }>('/:id/stats', async (request) => {
+    const { id } = request.params;
+
+    const data = await withTenant(request.tenantId, async (tx) => {
+      const [totalResult] = await tx
+        .select({ count: count() })
+        .from(contacts)
+        .where(and(eq(contacts.masterAgentId, id), eq(contacts.tenantId, request.tenantId)));
+
+      const byStatusRows = await tx
+        .select({ status: contacts.status, count: count() })
+        .from(contacts)
+        .where(and(eq(contacts.masterAgentId, id), eq(contacts.tenantId, request.tenantId)))
+        .groupBy(contacts.status);
+
+      const [avgScoreResult] = await tx
+        .select({ avg: avg(contacts.score) })
+        .from(contacts)
+        .where(and(eq(contacts.masterAgentId, id), eq(contacts.tenantId, request.tenantId), gt(contacts.score, 0)));
+
+      return {
+        totalContacts: totalResult?.count || 0,
+        byStatus: Object.fromEntries(byStatusRows.map((r) => [r.status, r.count])),
+        avgScore: avgScoreResult?.avg ? Math.round(Number(avgScoreResult.avg)) : null,
+      };
+    });
+
+    return { data };
+  });
+
+  // GET /api/master-agents/:id/emails — Sent emails for this agent
+  fastify.get<{ Params: { id: string } }>('/:id/emails', async (request) => {
+    const { id } = request.params;
+
+    const data = await withTenant(request.tenantId, async (tx) => {
+      // Find campaigns for this master agent
+      const agentCampaigns = await tx
+        .select({ id: campaigns.id })
+        .from(campaigns)
+        .where(and(eq(campaigns.masterAgentId, id), eq(campaigns.tenantId, request.tenantId)));
+
+      if (agentCampaigns.length === 0) return [];
+
+      const campaignIds = agentCampaigns.map((c) => c.id);
+
+      // Get emails through campaignContacts -> emailsSent
+      const emails = await tx
+        .select({
+          id: emailsSent.id,
+          fromEmail: emailsSent.fromEmail,
+          toEmail: emailsSent.toEmail,
+          subject: emailsSent.subject,
+          sentAt: emailsSent.sentAt,
+          openedAt: emailsSent.openedAt,
+          repliedAt: emailsSent.repliedAt,
+          messageId: emailsSent.messageId,
+        })
+        .from(emailsSent)
+        .innerJoin(campaignContacts, eq(emailsSent.campaignContactId, campaignContacts.id))
+        .where(inArray(campaignContacts.campaignId, campaignIds))
+        .orderBy(desc(emailsSent.sentAt))
+        .limit(50);
+
+      return emails;
+    });
+
+    return { data };
+  });
+
+  // GET /api/master-agents/:id/companies — Companies discovered by this agent
+  fastify.get<{ Params: { id: string } }>('/:id/companies', async (request) => {
+    const { id } = request.params;
+
+    const data = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(companies)
+        .where(and(eq(companies.masterAgentId, id), eq(companies.tenantId, request.tenantId)))
+        .orderBy(desc(companies.createdAt))
+        .limit(100);
+    });
+
+    return { data };
+  });
+
+  // GET /api/master-agents/:id/documents — Documents for this agent
+  fastify.get<{ Params: { id: string } }>('/:id/documents', async (request) => {
+    const { id } = request.params;
+
+    const data = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(documents)
+        .where(and(eq(documents.masterAgentId, id), eq(documents.tenantId, request.tenantId)))
+        .orderBy(desc(documents.createdAt))
+        .limit(100);
+    });
+
+    return { data };
   });
 }

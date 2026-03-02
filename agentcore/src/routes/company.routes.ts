@@ -23,14 +23,15 @@ export default async function companyRoutes(fastify: FastifyInstance) {
 
   // GET /api/companies
   fastify.get<{
-    Querystring: { cursor?: string; limit?: string; search?: string; industry?: string };
+    Querystring: { cursor?: string; limit?: string; search?: string; industry?: string; masterAgentId?: string };
   }>('/', async (request) => {
     const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
-    const { cursor, search, industry } = request.query;
+    const { cursor, search, industry, masterAgentId } = request.query;
 
     const results = await withTenant(request.tenantId, async (tx) => {
       const conditions = [eq(companies.tenantId, request.tenantId)];
       if (industry) conditions.push(eq(companies.industry, industry));
+      if (masterAgentId) conditions.push(eq(companies.masterAgentId, masterAgentId));
       if (search) {
         conditions.push(sql`(
           ${companies.name} ILIKE ${'%' + search + '%'} OR

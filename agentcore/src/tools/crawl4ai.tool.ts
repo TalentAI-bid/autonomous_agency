@@ -13,7 +13,17 @@ const MAX_POLL_ATTEMPTS = 15; // 30s total
 interface CrawlResult {
   status?: string;
   task_id?: string;
-  results?: Array<{ markdown?: string; content?: string; url?: string }>;
+  results?: Array<{
+    markdown?: string | {
+      raw_markdown?: string;
+      markdown_with_citations?: string;
+      references_markdown?: string;
+      fit_markdown?: string;
+    };
+    extracted_content?: string;
+    content?: string;
+    url?: string;
+  }>;
 }
 
 export async function scrape(tenantId: string, url: string, _instruction?: string): Promise<string> {
@@ -48,7 +58,8 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
 
     // If synchronous result
     if (data.results?.length) {
-      const text = data.results[0]?.markdown ?? data.results[0]?.content ?? '';
+      const md = data.results[0]?.markdown;
+      const text = typeof md === 'string' ? md : (md?.raw_markdown ?? data.results[0]?.extracted_content ?? '');
       if (text) await redis.setex(cacheKey, CACHE_TTL_SEC, text);
       return text;
     }
@@ -64,7 +75,8 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
         if (!pollRes.ok) continue;
         const pollData = await pollRes.json() as CrawlResult;
         if (pollData.status === 'completed' && pollData.results?.length) {
-          const text = pollData.results[0]?.markdown ?? pollData.results[0]?.content ?? '';
+          const md = pollData.results[0]?.markdown;
+          const text = typeof md === 'string' ? md : (md?.raw_markdown ?? pollData.results[0]?.extracted_content ?? '');
           if (text) await redis.setex(cacheKey, CACHE_TTL_SEC, text);
           return text;
         }

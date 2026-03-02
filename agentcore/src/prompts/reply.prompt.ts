@@ -15,8 +15,28 @@ export interface ReplyAnalysis {
   returnDate?: string; // ISO date for out_of_office
 }
 
-export function buildSystemPrompt(): string {
-  return `You are an email response classifier for a recruitment/sales automation system. Analyze email replies and classify them accurately.
+export function buildSystemPrompt(context?: {
+  useCase?: string;
+  description?: string;
+  mission?: string;
+  valueProposition?: string;
+}): string {
+  const systemType = context?.useCase === 'recruitment'
+    ? 'recruitment automation system'
+    : context?.useCase === 'sales'
+      ? 'sales automation system'
+      : context?.description
+        ? context.description
+        : 'business automation system';
+
+  const businessSection = context
+    ? `\n\nBusiness context:
+- Description: ${context.description ?? 'N/A'}
+- Mission: ${context.mission ?? 'N/A'}
+- Value proposition: ${context.valueProposition ?? 'N/A'}`
+    : '';
+
+  return `You are an email response classifier for a ${systemType}. Analyze email replies and classify them accurately.${businessSection}
 
 Classification definitions:
 - interested: Positive response, wants to know more, open to conversation, or agrees to meeting
@@ -50,7 +70,7 @@ Return JSON:
   "classification": "interested|objection|not_now|out_of_office|unsubscribe|bounce|other",
   "sentiment": 0.5,
   "reasoning": "Brief explanation of classification",
-  "suggestedResponse": "Optional: draft response if objection or other that needs reply",
+  "suggestedResponse": "Draft a brief, appropriate response to this email",
   "returnDate": "Optional: ISO date string if out_of_office"
 }`;
 }

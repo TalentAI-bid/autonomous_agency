@@ -1,0 +1,291 @@
+{
+  "timestamp": "2026-02-21T21:05:15.473Z",
+  "results": [
+    {
+      "step": "1_job_search",
+      "status": "pass",
+      "durationMs": 895,
+      "data": {
+        "query": "rust blockchain developer remote",
+        "totalResults": 33,
+        "top3": [
+          {
+            "template": "default.html",
+            "url": "https://cryptocurrencyjobs.co/rust/",
+            "title": "Cryptocurrency Rust Jobs - Cryptocurrency Jobs",
+            "content": "Find the best cryptocurrency Rust jobs. Bitcoin Rust jobs. Blockchain Rust jobs. Ethereum Rust jobs. Remote cryptocurrency Rust jobs.",
+            "publishedDate": null,
+            "thumbnail": null,
+            "engine": "brave",
+            "parsed_url": [
+              "https",
+              "cryptocurrencyjobs.co",
+              "/rust/",
+              "",
+              "",
+              ""
+            ],
+            "img_src": "",
+            "priority": "",
+            "engines": [
+              "brave",
+              "google"
+            ],
+            "positions": [
+              1,
+              5
+            ],
+            "score": 2.4,
+            "category": "general"
+          },
+          {
+            "template": "default.html",
+            "url": "https://rustjobs.dev/",
+            "title": "Rust Jobs | RustJobs.dev",
+            "content": "Find your next Rust role at RustJobs.dev, the leading hiring platform for Rust developers. Explore exclusive opportunities from top companies worldwide.",
+            "publishedDate": null,
+            "thumbnail": "",
+            "engine": "brave",
+            "parsed_url": [
+              "https",
+              "rustjobs.dev",
+              "/",
+              "",
+              "",
+              ""
+            ],
+            "img_src": "",
+            "priority": "",
+            "engines": [
+              "duckduckgo",
+              "brave",
+              "google"
+            ],
+            "positions": [
+              15,
+              3,
+              6
+            ],
+            "score": 1.7,
+            "category": "general"
+          },
+          {
+            "title": "rust blockchain developer jobs in Remote - Indeed.com",
+            "url": "https://www.indeed.com/q-rust-blockchain-developer-l-remote-jobs.html",
+            "content": "42 Rust Blockchain Developer jobs available in Remote on Indeed.com. Apply to Blockchain Engineer, Developer, Full Stack Developer and more!",
+            "engine": "duckduckgo",
+            "template": "default.html",
+            "parsed_url": [
+              "https",
+              "www.indeed.com",
+              "/q-rust-blockchain-developer-l-remote-jobs.html",
+              "",
+              "",
+              ""
+            ],
+            "img_src": "",
+            "thumbnail": "",
+            "priority": "",
+            "engines": [
+              "duckduckgo"
+            ],
+            "positions": [
+              1
+            ],
+            "score": 1,
+            "category": "general",
+            "publishedDate": null
+          }
+        ]
+      }
+    },
+    {
+      "step": "2_job_scrape_extract",
+      "status": "pass",
+      "durationMs": 4015,
+      "data": {
+        "url": "https://cryptocurrencyjobs.co/rust/",
+        "textLength": 51538,
+        "extracted": {
+          "title": "Web3 Security Triager (AuditAgent & AgentArena)",
+          "company": "Nethermind",
+          "location": "Remote",
+          "requiredSkills": [
+            "AI",
+            "Rust",
+            "Security",
+            "Solana",
+            "Solidity",
+            "Web3"
+          ],
+          "experienceYears": 0,
+          "description": "Web3 Security Triager role involving AuditAgent & AgentArena, focusing on security in blockchain technology."
+        }
+      }
+    },
+    {
+      "step": "3_candidate_search",
+      "status": "pass",
+      "durationMs": 1072,
+      "data": {
+        "query": "AI Rust Security developer site:linkedin.com/in/",
+        "totalResults": 40,
+        "profileResults": 40,
+        "top3Profiles": [
+          {
+            "template": "default.html",
+            "url": "https://www.linkedin.com/in/noahleonardscott/",
+            "title": "Noah Scott - Cybersecurity & AI | Rust Developer | ACM Algo Officer | OSS Webmaster | Linux Systems Enthusiast | B.S. CS (Cybersecurity) @ CSUF | LinkedIn",
+            "content": "Cybersecurity & AI | Rust Developer | ACM Algo Officer | OSS Webmaster | Linux Systems Enthusiast | B.S. CS (Cybersecurity) @ CSUF · Hi, I’m Noah Scott—a cybersecurity student, Linux tinkerer, and passionate technologist driven by a desire ...",
+            "publishedDate": null,
+            "thumbnail": "",
+            "engine": "brave",
+            "parsed_url": [
+              "https",
+              "www.linkedin.com",
+              "/in/noahleonardscott/",
+              "",
+              "",
+              ""
+            ],
+            "img_src": "",
+            "priority": "",
+            "engines": [
+              "brave"
+            ],
+            "positions": [
+              1
+            ],
+            "score": 1,
+            "category": "general"
+          },
+          {
+            "title": "Rust Developer | AI Safety & Red-Teaming - LinkedIn",
+            "url": "https://www.linkedin.com/in/ryanjcardwell",
+            "content": "Rust Developer | AI Safety & Red-Teaming | EOD Veteran | SDVOSB | Open to Projects · I build high-performance systems in Rust and solve hard problems at the intersection of AI, security, and ...",
+            "engine": "duckduckgo",
+            "template": "default.html",
+            "parsed_url": [
+              "https",
+              "www.linkedin.com",
+              "/in/ryanjcardwell",
+              "",
+              "",
+              ""
+            ],
+            "img_src": "",
+            "thumbnail": "",
+            "priority": "",
+            "engines": [
+              "duckduckgo"
+            ],
+            "positions": [
+              1
+            ],
+            "score": 1,
+            "category": "general",
+            "publishedDate": null
+          },
+          {
+            "url": "https://et.linkedin.com/in/yeabsra-gebriel-5b056a240",
+            "title": "yeabsra gebriel - Software Engineer | Rust Developer 🦀 | Security-Minded ...",
+            "content": "Addis Ababa, Addis Ababa, Ethiopia · Senior Software Engineer · BITS HUBI am a specialist in Rust for systems-level security and performance, and equally proficient in crafting dynamic web applications with React and Django. My work ...",
+            "thumbnail": null,
+            "engine": "google",
+            "template": "default.html",
+            "parsed_url": [
+              "https",
+              "et.linkedin.com",
+              "/in/yeabsra-gebriel-5b056a240",
+              "",
+              "",
+              ""
+            ],
+            "img_src": "",
+            "priority": "",
+            "engines": [
+              "google"
+            ],
+            "positions": [
+              1
+            ],
+            "score": 1,
+            "category": "general",
+            "publishedDate": null
+          }
+        ]
+      }
+    },
+    {
+      "step": "4_candidate_scrape_extract",
+      "status": "pass",
+      "durationMs": 4224,
+      "data": {
+        "url": "https://www.linkedin.com/in/noahleonardscott/",
+        "scrapedLength": 4360,
+        "snippetLength": 398,
+        "extracted": {
+          "firstName": "Noah",
+          "lastName": "Scott",
+          "title": "Cybersecurity & AI | Rust Developer | ACM Algo Officer | OSS Webmaster | Linux Systems Enthusiast | B.S. CS (Cybersecurity) @ CSUF",
+          "company": "",
+          "location": "",
+          "skills": [
+            "Cybersecurity",
+            "AI",
+            "Rust",
+            "Linux Systems",
+            "Open Source Software"
+          ],
+          "experience": [],
+          "email": "",
+          "linkedinUrl": "https://www.linkedin.com/in/noahleonardscott/"
+        }
+      }
+    },
+    {
+      "step": "5_candidate_scoring",
+      "status": "pass",
+      "durationMs": 1321,
+      "data": {
+        "scoring": {
+          "overall": 80,
+          "breakdown": {
+            "skillMatch": 83,
+            "experienceMatch": 100,
+            "relevance": 90
+          },
+          "reasoning": "Candidate has strong alignment in AI, Rust, and cybersecurity skills, with relevant open-source and Linux experience. Missing Solana, Solidity, and Web3 specifics, but role accepts 0+ years experience, making them a good fit with learning potential."
+        },
+        "jobRequirements": {
+          "title": "Web3 Security Triager (AuditAgent & AgentArena)",
+          "company": "Nethermind",
+          "location": "Remote",
+          "requiredSkills": [
+            "AI",
+            "Rust",
+            "Security",
+            "Solana",
+            "Solidity",
+            "Web3"
+          ],
+          "experienceYears": 0,
+          "description": "Web3 Security Triager role involving AuditAgent & AgentArena, focusing on security in blockchain technology."
+        }
+      }
+    },
+    {
+      "step": "6_outreach_email_dryrun",
+      "status": "pass",
+      "durationMs": 2660,
+      "data": {
+        "email": {
+          "subject": "Web3 Security Role at Nethermind for a Talented Rust & AI Developer",
+          "body": "Hi Noah,\n\nI came across your profile and was impressed by your expertise in cybersecurity, AI, Rust, and open-source contributions. Your background aligns perfectly with the Web3 Security Triager role at Nethermind, where we focus on AuditAgent & AgentArena for blockchain security.\n\nYour experience with Linux systems and AI, combined with your passion for cybersecurity, makes you a strong candidate. While Solana and Solidity are new areas, your foundational skills and learning agility are exactly what we value for this role.\n\nThis is a remote position offering growth in Web3. Would you be open to a quick chat to discuss further?\n\nBest regards,\n[Your Name]\nTalent Team, Nethermind"
+        },
+        "dryRun": true,
+        "smtpSent": false
+      }
+    }
+  ]
+}

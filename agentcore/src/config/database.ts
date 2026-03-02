@@ -29,7 +29,7 @@ export async function withTenant<T>(
   callback: (tx: Transaction) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL app.current_tenant_id = ${tenantId}`);
+    await tx.execute(sql`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`);
     return callback(tx);
   });
 }

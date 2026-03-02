@@ -2,18 +2,21 @@ import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents } from '../db/schema/index.js';
-import { sendEmail } from '../tools/smtp.tool.js';
+import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents, emailAccounts } from '../db/schema/index.js';
+import { enqueueEmail } from '../tools/email-queue.tool.js';
+import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
 import { buildSystemPrompt, buildUserPrompt, type OutreachEmail } from '../prompts/outreach.prompt.js';
+import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
 
 export class OutreachAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const { contactId, campaignId, stepNumber = 1, masterAgentId } = input as {
+    const { contactId, campaignId, stepNumber = 1, masterAgentId, dryRun = false } = input as {
       contactId: string;
       campaignId?: string;
       stepNumber?: number;
       masterAgentId: string;
+      dryRun?: boolean;
     };
 
     logger.info({ tenantId: this.tenantId, contactId, stepNumber }, 'OutreachAgent starting');
@@ -46,22 +49,38 @@ export class OutreachAgent extends BaseAgent {
     });
     const config = (agent?.config as Record<string, unknown>) ?? {};
 
-    // 3. Load campaign + step info
+    // 2b. Load configured email account (if set in agent config)
+    let emailAccountId: string | undefined;
+    let fromEmail = env.SMTP_USER || 'recruitment@agentcore.app';
+    const configuredEmailAccountId = config.emailAccountId as string | undefined;
+    if (configuredEmailAccountId) {
+      const [emailAccount] = await withTenant(this.tenantId, async (tx) => {
+        return tx.select().from(emailAccounts)
+          .where(and(eq(emailAccounts.id, configuredEmailAccountId), eq(emailAccounts.tenantId, this.tenantId), eq(emailAccounts.isActive, true)))
+          .limit(1);
+      });
+      if (emailAccount) {
+        fromEmail = emailAccount.fromEmail;
+        emailAccountId = emailAccount.id;
+      }
+    }
+
+    // 3. Load campaign + step info (fall back to campaignId from master agent config)
+    const effectiveCampaignId = campaignId ?? (config.campaignId as string) ?? null;
     let campaignContactId: string | null = null;
     let totalSteps = 3;
     let stepDelay = 0;
-    let fromEmail = `recruitment@agentcore.app`;
 
-    if (campaignId) {
+    if (effectiveCampaignId) {
       const [campaign] = await withTenant(this.tenantId, async (tx) => {
-        return tx.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+        return tx.select().from(campaigns).where(eq(campaigns.id, effectiveCampaignId)).limit(1);
       });
 
       if (campaign) {
         const steps = await withTenant(this.tenantId, async (tx) => {
-          return tx.select().from(campaignSteps).where(eq(campaignSteps.campaignId, campaignId));
+          return tx.select().from(campaignSteps).where(eq(campaignSteps.campaignId, effectiveCampaignId));
         });
-        totalSteps = steps.length;
+        totalSteps = steps.length || 3;
 
         const currentStep = steps.find((s) => s.stepNumber === stepNumber);
         if (currentStep) {
@@ -71,7 +90,7 @@ export class OutreachAgent extends BaseAgent {
         // Get or create campaignContact
         const existing = await withTenant(this.tenantId, async (tx) => {
           return tx.select().from(campaignContacts)
-            .where(and(eq(campaignContacts.campaignId, campaignId), eq(campaignContacts.contactId, contactId)))
+            .where(and(eq(campaignContacts.campaignId, effectiveCampaignId), eq(campaignContacts.contactId, contactId)))
             .limit(1);
         });
         if (existing.length > 0) {
@@ -79,7 +98,7 @@ export class OutreachAgent extends BaseAgent {
         } else {
           const [newCC] = await withTenant(this.tenantId, async (tx) => {
             return tx.insert(campaignContacts).values({
-              campaignId,
+              campaignId: effectiveCampaignId,
               contactId,
               currentStep: stepNumber,
               status: 'active',
@@ -92,6 +111,7 @@ export class OutreachAgent extends BaseAgent {
     }
 
     // 4. Generate email with Claude
+    const emailRules = (config.emailRules as string[]) ?? undefined;
     const email = await this.extractClaudeEmail({
       contactFirstName: contact.firstName ?? 'there',
       contactTitle: contact.title ?? '',
@@ -105,29 +125,33 @@ export class OutreachAgent extends BaseAgent {
         tone: (config.emailTone as string) ?? 'professional',
       },
       stepNumber,
+      context: {
+        useCase: agent?.useCase,
+        description: agent?.description ?? undefined,
+        mission: agent?.mission ?? undefined,
+        valueProposition: (config.valueProposition as string) ?? undefined,
+        emailRules,
+      },
     });
 
-    // 5. Send email
+    // 5. Enqueue email (or skip in dry-run mode)
     const trackingId = randomUUID();
-    const { messageId } = await sendEmail({
-      tenantId: this.tenantId,
-      from: fromEmail,
-      to: contact.email,
-      subject: email.subject,
-      html: email.body,
-      trackingId,
-    });
+    let queuedId: string | null = null;
+    let messageId: string;
 
-    // 6. Record email sent
-    if (campaignContactId) {
-      const stepRecord = campaignId
-        ? await withTenant(this.tenantId, async (tx) => {
-            return tx.select().from(campaignSteps)
-              .where(and(eq(campaignSteps.campaignId, campaignId), eq(campaignSteps.stepNumber, stepNumber)))
-              .limit(1);
-          })
-        : [];
+    const stepRecord = effectiveCampaignId
+      ? await withTenant(this.tenantId, async (tx) => {
+          return tx.select().from(campaignSteps)
+            .where(and(eq(campaignSteps.campaignId, effectiveCampaignId), eq(campaignSteps.stepNumber, stepNumber)))
+            .limit(1);
+        })
+      : [];
 
+    if (dryRun) {
+      messageId = `dry-run-${trackingId}`;
+      logger.info({ tenantId: this.tenantId, contactId, dryRun: true }, 'OutreachAgent: dry-run, skipping email enqueue');
+
+      // Still record in emailsSent for dry-run visibility
       await withTenant(this.tenantId, async (tx) => {
         await tx.insert(emailsSent).values({
           campaignContactId,
@@ -136,39 +160,87 @@ export class OutreachAgent extends BaseAgent {
           toEmail: contact.email!,
           subject: email.subject,
           body: email.body,
-          sentAt: new Date(),
           messageId,
         });
+      });
+    } else {
+      const result = await enqueueEmail({
+        tenantId: this.tenantId,
+        contactId,
+        campaignContactId: campaignContactId ?? undefined,
+        emailAccountId,
+        fromEmail,
+        toEmail: contact.email!,
+        subject: email.subject,
+        body: email.body,
+        trackingId,
+        masterAgentId,
+        campaignId: effectiveCampaignId ?? undefined,
+        stepId: stepRecord[0]?.id ?? undefined,
+      });
+      queuedId = result.queuedId;
+      messageId = `queued-${queuedId}`;
+    }
 
-        // Update campaignContact step
+    // 6. Update campaignContact step if available
+    if (campaignContactId) {
+      await withTenant(this.tenantId, async (tx) => {
         await tx.update(campaignContacts)
           .set({ currentStep: stepNumber, lastActionAt: new Date(), status: 'active' })
           .where(eq(campaignContacts.id, campaignContactId!));
       });
     }
 
-    // 7. Update contact status
-    await withTenant(this.tenantId, async (tx) => {
-      await tx.update(contacts)
-        .set({ status: 'contacted', updatedAt: new Date() })
-        .where(eq(contacts.id, contactId));
-    });
+    // 7. Update contact status + CRM (skip in dry-run)
+    if (!dryRun) {
+      await withTenant(this.tenantId, async (tx) => {
+        await tx.update(contacts)
+          .set({ status: 'contacted', updatedAt: new Date() })
+          .where(eq(contacts.id, contactId));
+      });
 
-    // 8. Dispatch next step if applicable
-    if (stepNumber < totalSteps && campaignId) {
+      // Ensure CRM deal exists
+      try {
+        await ensureDeal({
+          tenantId: this.tenantId,
+          contactId,
+          masterAgentId,
+          campaignId: effectiveCampaignId ?? undefined,
+        });
+      } catch (err) {
+        logger.warn({ err, contactId }, 'Failed to ensure CRM deal');
+      }
+
+      // Log CRM activity
+      try {
+        await logActivity({
+          tenantId: this.tenantId,
+          contactId,
+          masterAgentId,
+          type: 'email_sent',
+          title: `Outreach email queued: ${email.subject}`,
+          metadata: { queuedId, stepNumber, campaignId: effectiveCampaignId },
+        });
+      } catch (err) {
+        logger.warn({ err, contactId }, 'Failed to log CRM activity');
+      }
+    }
+
+    // 8. Dispatch next step if applicable (skip in dry-run)
+    if (!dryRun && stepNumber < totalSteps && effectiveCampaignId) {
       await this.dispatchNext('outreach', {
         contactId,
-        campaignId,
+        campaignId: effectiveCampaignId,
         stepNumber: stepNumber + 1,
         masterAgentId,
       }, { delay: stepDelay || 3 * 86400000 });
     }
 
-    await this.emitEvent('email:sent', { contactId, campaignId, stepNumber, messageId });
+    await this.emitEvent(dryRun ? 'email:drafted' : 'email:sent', { contactId, campaignId: effectiveCampaignId, stepNumber, messageId, dryRun });
 
-    logger.info({ tenantId: this.tenantId, contactId, messageId, stepNumber }, 'OutreachAgent completed');
+    logger.info({ tenantId: this.tenantId, contactId, messageId, stepNumber, dryRun }, 'OutreachAgent completed');
 
-    return { messageId, subject: email.subject, stepNumber };
+    return { messageId, queuedId, subject: email.subject, body: dryRun ? email.body : undefined, stepNumber, dryRun };
   }
 
   private async extractClaudeEmail(params: {
@@ -179,8 +251,9 @@ export class OutreachAgent extends BaseAgent {
     location: string;
     opportunity: { title: string; company: string; valueProposition: string; tone: string };
     stepNumber: number;
+    context?: { useCase?: string; description?: string; mission?: string; valueProposition?: string; emailRules?: string[] };
   }): Promise<OutreachEmail> {
-    const systemPrompt = buildSystemPrompt(params.opportunity.tone);
+    const systemPrompt = buildSystemPrompt(params.opportunity.tone, params.context);
     const userPrompt = buildUserPrompt({
       contact: {
         firstName: params.contactFirstName,
@@ -190,6 +263,7 @@ export class OutreachAgent extends BaseAgent {
         location: params.location,
       },
       opportunity: { ...params.opportunity, stepNumber: params.stepNumber },
+      useCase: params.context?.useCase,
     });
 
     const response = await this.callClaude(systemPrompt, userPrompt);

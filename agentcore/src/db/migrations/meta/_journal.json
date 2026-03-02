@@ -8,6 +8,48 @@
       "when": 1771466027720,
       "tag": "0000_parched_deadpool",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772050957453,
+      "tag": "0001_violet_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772158494047,
+      "tag": "0002_pretty_warbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1772221178860,
+      "tag": "0003_brief_justice",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1772280000000,
+      "tag": "0004_mailbox_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1772400000000,
+      "tag": "0005_email_listener_last_error",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1772500000000,
+      "tag": "0006_companies_master_agent_id",
+      "breakpoints": true
     }
   ]
 }

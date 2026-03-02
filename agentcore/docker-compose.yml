@@ -10,7 +10,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./scripts/setup-rls.sql:/docker-entrypoint-initdb.d/setup-rls.sql
     deploy:
       resources:
         limits:
@@ -44,20 +43,17 @@ services:
       - agentcore-net
 
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    image: edoburu/pgbouncer:latest
     container_name: agentcore-pgbouncer
     environment:
-      PGBOUNCER_DATABASE: agentcore
-      POSTGRESQL_HOST: postgres
-      POSTGRESQL_PORT: 5432
-      POSTGRESQL_USERNAME: agentcore
-      POSTGRESQL_PASSWORD: agentcore
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_MAX_CLIENT_CONN: 1000
-      PGBOUNCER_DEFAULT_POOL_SIZE: 20
-      PGBOUNCER_MIN_POOL_SIZE: 5
+      DATABASE_URL: postgres://agentcore:agentcore@postgres:5432/agentcore
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      MIN_POOL_SIZE: 5
+      AUTH_TYPE: scram-sha-256
     ports:
-      - "6432:6432"
+      - "6432:5432"
     deploy:
       resources:
         limits:
@@ -66,7 +62,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432"]
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432"]
       interval: 10s
       timeout: 5s
       retries: 5

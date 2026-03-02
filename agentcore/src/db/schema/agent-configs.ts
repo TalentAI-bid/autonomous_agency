@@ -3,7 +3,7 @@ import { tenants } from './tenants.js';
 import { masterAgents } from './master-agents.js';
 
 export const agentTypeEnum = pgEnum('agent_type', [
-  'discovery', 'enrichment', 'document', 'scoring', 'outreach', 'reply', 'action',
+  'discovery', 'enrichment', 'document', 'scoring', 'outreach', 'reply', 'action', 'email-listen', 'email-send', 'mailbox',
 ]);
 
 export const agentConfigs = pgTable('agent_configs', {

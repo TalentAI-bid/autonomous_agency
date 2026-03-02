@@ -50,9 +50,21 @@ export function useWebSocket() {
     });
     wsManager.subscribe('email:sent', () => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
+      queryClient.invalidateQueries({ queryKey: ['mailbox'] });
     });
     wsManager.subscribe('campaign:metrics', () => {
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
+    });
+
+    // Mailbox real-time updates
+    wsManager.subscribe('mailbox:thread_updated', () => {
+      queryClient.invalidateQueries({ queryKey: ['mailbox'] });
+    });
+    wsManager.subscribe('email:replied', () => {
+      queryClient.invalidateQueries({ queryKey: ['mailbox'] });
+    });
+    wsManager.subscribe('email:inbound_classified', () => {
+      queryClient.invalidateQueries({ queryKey: ['mailbox'] });
     });
 
     return () => {

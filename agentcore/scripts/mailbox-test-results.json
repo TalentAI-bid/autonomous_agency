@@ -1,0 +1,117 @@
+{
+  "timestamp": "2026-02-28T00:29:46.509Z",
+  "results": [
+    {
+      "test": "1_migration_verification",
+      "status": "pass",
+      "durationMs": 35,
+      "data": {
+        "emailThreadColumns": 14,
+        "checks": "all passed"
+      }
+    },
+    {
+      "test": "2_thread_email_inbound",
+      "status": "pass",
+      "durationMs": 87890,
+      "data": {
+        "threadId": "692ace24-8f2f-40ab-aa7f-8a8488643988",
+        "dealId": "be26dbf8-cbcf-4ebc-b2ee-c193be6757f8",
+        "hasAnalysis": true
+      }
+    },
+    {
+      "test": "3_thread_email_outbound",
+      "status": "pass",
+      "durationMs": 39976,
+      "data": {
+        "threadId": "692ace24-8f2f-40ab-aa7f-8a8488643988",
+        "messageCount": 2
+      }
+    },
+    {
+      "test": "4_deal_auto_stage",
+      "status": "pass",
+      "durationMs": 9,
+      "data": {
+        "stage": "meeting-booked",
+        "position": 3,
+        "name": "Meeting Booked"
+      }
+    },
+    {
+      "test": "5_bulk_action_archive",
+      "status": "pass",
+      "durationMs": 9,
+      "data": {
+        "affected": 1,
+        "status": "archived"
+      }
+    },
+    {
+      "test": "6_digest",
+      "status": "pass",
+      "durationMs": 10,
+      "data": {
+        "active": 1,
+        "needsAction": 0,
+        "waiting": 0,
+        "highPriority": 1
+      }
+    },
+    {
+      "test": "7_api_get_threads",
+      "status": "pass",
+      "durationMs": 24,
+      "data": {
+        "status": 200,
+        "count": 1
+      }
+    },
+    {
+      "test": "8_api_get_thread_detail",
+      "status": "pass",
+      "durationMs": 11,
+      "data": {
+        "status": 200,
+        "messageCount": 2,
+        "subject": "Partnership Opportunity"
+      }
+    },
+    {
+      "test": "9_api_get_digest",
+      "status": "pass",
+      "durationMs": 9,
+      "data": {
+        "status": 200,
+        "digest": {
+          "needsAction": 0,
+          "active": 1,
+          "waiting": 0,
+          "highPriority": 1,
+          "totalThreads": 1
+        }
+      }
+    },
+    {
+      "test": "10_api_patch_thread",
+      "status": "pass",
+      "durationMs": 7,
+      "data": {
+        "status": 200,
+        "updated": {
+          "id": "692ace24-8f2f-40ab-aa7f-8a8488643988",
+          "status": "active",
+          "priority": "high",
+          "nextAction": "Reply with available times for a call next week"
+        }
+      }
+    },
+    {
+      "test": "11_summarize_thread",
+      "status": "skip",
+      "durationMs": 0,
+      "data": "CLAUDE_API_KEY not set"
+    }
+  ]
+}

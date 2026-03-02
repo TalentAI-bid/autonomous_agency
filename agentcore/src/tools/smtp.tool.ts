@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { createRedisConnection } from '../queues/setup.js';
+import { decrypt } from '../utils/crypto.js';
+import type { EmailAccount } from '../db/schema/index.js';
 import logger from '../utils/logger.js';
 
 export interface SendEmailOpts {
@@ -12,13 +14,15 @@ export interface SendEmailOpts {
   html: string;
   text?: string;
   trackingId?: string;
+  /** Optional email account config. Falls back to env SMTP settings. */
+  emailAccount?: EmailAccount;
 }
 
 const redis: Redis = createRedisConnection();
 
 const DAILY_EMAIL_LIMIT = 50;
 
-function getTransporter() {
+function getTransporterFromEnv() {
   if (!env.SMTP_HOST) throw new Error('SMTP_HOST not configured');
   return nodemailer.createTransport({
     host: env.SMTP_HOST,
@@ -27,8 +31,18 @@ function getTransporter() {
   });
 }
 
+function getTransporterFromAccount(account: EmailAccount) {
+  if (!account.smtpHost) throw new Error(`Email account ${account.id} has no SMTP host configured`);
+  const password = account.smtpPass ? decrypt(account.smtpPass) : undefined;
+  return nodemailer.createTransport({
+    host: account.smtpHost,
+    port: account.smtpPort ?? 587,
+    auth: account.smtpUser ? { user: account.smtpUser, pass: password } : undefined,
+  });
+}
+
 function injectTrackingPixel(html: string, trackingId: string): string {
-  const pixel = `<img src="http://localhost:${env.PORT}/track/open/${trackingId}" width="1" height="1" style="display:none" alt="">`;
+  const pixel = `<img src="${env.PUBLIC_API_URL}/track/open/${trackingId}" width="1" height="1" style="display:none" alt="">`;
   if (html.includes('</body>')) {
     return html.replace('</body>', `${pixel}</body>`);
   }
@@ -36,22 +50,27 @@ function injectTrackingPixel(html: string, trackingId: string): string {
 }
 
 export async function sendEmail(opts: SendEmailOpts): Promise<{ messageId: string }> {
-  const { tenantId, from, to, subject, html, text, trackingId } = opts;
+  const { tenantId, from, to, subject, html, text, trackingId, emailAccount } = opts;
 
-  // Rate limit: 50 emails/sender/day
-  const today = new Date().toISOString().slice(0, 10);
-  const rateLimitKey = `tenant:${tenantId}:ratelimit:email:${from}:${today}`;
-  const count = await redis.incr(rateLimitKey);
-  if (count === 1) {
-    await redis.expire(rateLimitKey, 86400);
-  }
-  if (count > DAILY_EMAIL_LIMIT) {
-    throw new Error(`Daily email limit (${DAILY_EMAIL_LIMIT}) reached for sender ${from}`);
+  // Rate limit: 50 emails/sender/day (for env-based sending)
+  if (!emailAccount) {
+    const today = new Date().toISOString().slice(0, 10);
+    const rateLimitKey = `tenant:${tenantId}:ratelimit:email:${from}:${today}`;
+    const count = await redis.incr(rateLimitKey);
+    if (count === 1) {
+      await redis.expire(rateLimitKey, 86400);
+    }
+    if (count > DAILY_EMAIL_LIMIT) {
+      throw new Error(`Daily email limit (${DAILY_EMAIL_LIMIT}) reached for sender ${from}`);
+    }
   }
 
   const htmlWithTracking = trackingId ? injectTrackingPixel(html, trackingId) : html;
 
-  const transporter = getTransporter();
+  const transporter = emailAccount
+    ? getTransporterFromAccount(emailAccount)
+    : getTransporterFromEnv();
+
   const info = await transporter.sendMail({
     from,
     to,

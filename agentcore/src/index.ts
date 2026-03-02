@@ -3,16 +3,19 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { env } from './config/env.js';
-import { closeDatabase } from './config/database.js';
+import { db, closeDatabase } from './config/database.js';
 import authPlugin from './middleware/auth.js';
 import tenantPlugin from './middleware/tenant.js';
 import rateLimitPlugin from './middleware/rate-limit.js';
 import realtimePlugin, { startRealtimeRelay } from './websocket/realtime.js';
 import { closeAllQueues } from './queues/queues.js';
-import { closeAllWorkers } from './queues/workers.js';
+import { closeAllWorkers, registerTenantWorkers, scheduleAgentJobs } from './queues/workers.js';
 import { closeRedisConnections } from './queues/setup.js';
 import { errorHandler } from './utils/errors.js';
 import logger from './utils/logger.js';
+import { eq } from 'drizzle-orm';
+import { masterAgents, tenants } from './db/schema/index.js';
+import { withTenant } from './config/database.js';
 
 // Route imports
 import authRoutes from './routes/auth.routes.js';
@@ -24,6 +27,13 @@ import companyRoutes from './routes/company.routes.js';
 import campaignRoutes from './routes/campaign.routes.js';
 import documentRoutes from './routes/document.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
+import chatRoutes from './routes/chat.routes.js';
+import emailAccountRoutes from './routes/email-account.routes.js';
+import emailListenerRoutes from './routes/email-listener.routes.js';
+import crmRoutes from './routes/crm.routes.js';
+import mailboxRoutes from './routes/mailbox.routes.js';
+import scheduleRoutes from './routes/schedule.routes.js';
+import trackingRoutes from './routes/tracking.routes.js';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -42,6 +52,7 @@ async function buildApp() {
   await fastify.register(cors, {
     origin: env.CORS_ORIGIN,
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   });
 
   await fastify.register(cookie);
@@ -79,6 +90,15 @@ async function buildApp() {
   await fastify.register(campaignRoutes, { prefix: '/api/campaigns' });
   await fastify.register(documentRoutes, { prefix: '/api/documents' });
   await fastify.register(analyticsRoutes, { prefix: '/api/analytics' });
+  await fastify.register(chatRoutes, { prefix: '/api/chat' });
+  await fastify.register(emailAccountRoutes, { prefix: '/api/email-accounts' });
+  await fastify.register(emailListenerRoutes, { prefix: '/api/email-listeners' });
+  await fastify.register(crmRoutes, { prefix: '/api/crm' });
+  await fastify.register(mailboxRoutes, { prefix: '/api/mailbox' });
+  await fastify.register(scheduleRoutes, { prefix: '/api/schedule' });
+
+  // Tracking pixel route — registered WITHOUT /api prefix (email clients hit this directly)
+  await fastify.register(trackingRoutes, { prefix: '/track' });
 
   return fastify;
 }
@@ -107,6 +127,41 @@ async function start() {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     logger.info(`AgentCore API running on http://0.0.0.0:${env.PORT}`);
+
+    // Re-register workers and re-schedule repeating jobs for tenants with running agents (survives PM2 restarts)
+    try {
+      const allTenants = await db.select({ id: tenants.id }).from(tenants);
+
+      const runningAgents: Array<{ id: string; tenantId: string; config: unknown }> = [];
+      for (const tenant of allTenants) {
+        const agents = await withTenant(tenant.id, async (tx) => {
+          return tx.select({ id: masterAgents.id, tenantId: masterAgents.tenantId, config: masterAgents.config })
+            .from(masterAgents)
+            .where(eq(masterAgents.status, 'running'));
+        });
+        runningAgents.push(...agents);
+      }
+
+      const tenantIds = [...new Set(runningAgents.map(a => a.tenantId))];
+      for (const tid of tenantIds) {
+        registerTenantWorkers(tid);
+      }
+
+      for (const agent of runningAgents) {
+        try {
+          const agentConfig = (agent.config as Record<string, unknown>) ?? {};
+          await scheduleAgentJobs(agent.tenantId, agent.id, agentConfig);
+        } catch (err) {
+          logger.error({ err, tenantId: agent.tenantId, agentId: agent.id }, 'Failed to schedule jobs for running agent on startup');
+        }
+      }
+
+      if (runningAgents.length > 0) {
+        logger.info({ tenants: tenantIds.length, agents: runningAgents.length }, 'Re-registered workers and re-scheduled jobs');
+      }
+    } catch (err) {
+      logger.error(err, 'Failed to re-register workers on startup');
+    }
   } catch (err) {
     logger.error(err, 'Failed to start server');
     process.exit(1);

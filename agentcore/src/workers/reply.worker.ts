@@ -9,19 +9,25 @@ export function createReplyWorker(tenantId: string): Worker {
   return new Worker(
     getQueueName(tenantId, 'reply'),
     async (job: Job) => {
-      const task = await createTaskRecord(job, 'reply');
+      let task: { id: string; tenantId: string } | undefined;
+      try {
+        task = await createTaskRecord(job, 'reply');
+      } catch (taskErr) {
+        logger.warn({ err: taskErr, tenantId, jobId: job.id }, 'Failed to create task record for reply — continuing without it');
+      }
+
       const agent = new ReplyAgent({
         tenantId,
-        masterAgentId: (job.data as Record<string, unknown>).masterAgentId as string ?? '',
+        masterAgentId: (job.data as Record<string, unknown>).masterAgentId as string || '',
         agentType: 'reply',
       });
       try {
         const result = await agent.execute(job.data as Record<string, unknown>);
-        await completeTaskRecord(tenantId, task.id, result);
+        if (task) await completeTaskRecord(tenantId, task.id, result);
         return result;
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        await failTaskRecord(tenantId, task.id, message);
+        if (task) await failTaskRecord(tenantId, task.id, message);
         logger.error({ err, tenantId, jobId: job.id }, 'Reply worker failed');
         throw err;
       } finally {

@@ -10,9 +10,13 @@ import { createScoringWorker } from './scoring.worker.js';
 import { createOutreachWorker } from './outreach.worker.js';
 import { createReplyWorker } from './reply.worker.js';
 import { createActionWorker } from './action.worker.js';
+import { createEmailListenerWorker } from './email-listener.worker.js';
+import { createEmailSenderWorker } from './email-sender.worker.js';
+import { createMailboxWorker } from './mailbox.worker.js';
+import logger from '../utils/logger.js';
 
 export function registerAllWorkers(tenantId: string): Worker[] {
-  return [
+  const workers = [
     createDiscoveryWorker(tenantId),
     createDocumentWorker(tenantId),
     createEnrichmentWorker(tenantId),
@@ -20,7 +24,18 @@ export function registerAllWorkers(tenantId: string): Worker[] {
     createOutreachWorker(tenantId),
     createReplyWorker(tenantId),
     createActionWorker(tenantId),
+    createEmailListenerWorker(tenantId),
+    createEmailSenderWorker(tenantId),
+    createMailboxWorker(tenantId),
   ];
+
+  for (const worker of workers) {
+    worker.on('error', (err) => {
+      logger.error({ err, tenantId, workerName: worker.name }, 'Worker error');
+    });
+  }
+
+  return workers;
 }
 
 export async function createTaskRecord(
@@ -33,7 +48,7 @@ export async function createTaskRecord(
   const [task] = await withTenant(tenantId, async (tx) => {
     return tx.insert(agentTasks).values({
       tenantId,
-      masterAgentId: masterAgentId ?? undefined,
+      masterAgentId: masterAgentId || undefined,
       agentType,
       status: 'processing',
       input: job.data as Record<string, unknown>,

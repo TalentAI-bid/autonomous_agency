@@ -5,7 +5,7 @@ export type ContactStatus =
   | 'qualified' | 'interview_scheduled' | 'rejected' | 'archived';
 
 export type ContactSource =
-  | 'linkedin_search' | 'linkedin_profile' | 'cv_upload' | 'manual' | 'web_search';
+  | 'linkedin_search' | 'linkedin_profile' | 'cv_upload' | 'manual' | 'web_search' | 'inbound';
 
 export type AgentType =
   | 'discovery' | 'enrichment' | 'document' | 'scoring' | 'outreach' | 'reply' | 'action';
@@ -16,7 +16,8 @@ export type DocType = 'job_spec' | 'cv' | 'whitepaper' | 'spec' | 'linkedin_prof
 export type DocStatus = 'uploaded' | 'processing' | 'processed' | 'error';
 export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed';
 export type ReplyClassification =
-  | 'interested' | 'objection' | 'not_now' | 'out_of_office' | 'unsubscribe' | 'bounce' | 'other';
+  | 'interested' | 'objection' | 'not_now' | 'out_of_office' | 'unsubscribe' | 'bounce' | 'other'
+  | 'inquiry' | 'application' | 'partnership' | 'support_request' | 'spam' | 'introduction';
 export type InterviewStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show';
 export type UseCase = 'recruitment' | 'sales' | 'custom';
 
@@ -110,6 +111,7 @@ export interface Contact {
 export interface Company {
   id: string;
   tenantId: string;
+  masterAgentId?: string;
   name: string;
   domain?: string;
   industry?: string;
@@ -118,8 +120,58 @@ export interface Company {
   funding?: string;
   linkedinUrl?: string;
   description?: string;
+  rawData?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CompanyDeepData {
+  products?: string[];
+  foundedYear?: string;
+  headquarters?: string;
+  cultureValues?: string[];
+  recentNews?: Array<{ headline: string; date: string }>;
+  openPositions?: Array<{
+    title: string;
+    location: string;
+    requiredSkills?: string[];
+    salary?: string;
+    description?: string;
+    url?: string;
+  }>;
+  keyPeople?: Array<{ name: string; title: string }>;
+  competitors?: string[];
+  masterAgentId?: string;
+  contactEmail?: string;
+  hiringContactEmails?: string[];
+  jobListings?: Array<{
+    title: string;
+    skills: string[];
+    url: string;
+    snippet?: string;
+    discoveryQuery?: string;
+  }>;
+}
+
+export interface ContactDeepData {
+  githubUrl?: string;
+  personalWebsite?: string;
+  summary?: string;
+  skillLevels?: Array<{ skill: string; level: string; evidence: string }>;
+  openSourceContributions?: Array<{ repo: string; description: string }>;
+  certifications?: string[];
+  languages?: string[];
+  totalYearsExperience?: number;
+  seniorityLevel?: string;
+  dataCompleteness?: number;
+  githubStats?: {
+    totalRepos: number;
+    totalStars: number;
+    topLanguages: string[];
+    topRepos: Array<{ name: string; stars: number; language: string; description: string }>;
+    contributionLevel: string;
+  };
+  skipReason?: string;
 }
 
 export interface Document {
@@ -285,6 +337,104 @@ export interface AgentStatus {
   lastActivity?: string;
 }
 
+// ── CRM & Email Types (re-exported) ──────────────────────────────────────────
+
+export type { CrmStage, Deal, DealWithContact, CrmActivity, ActivityType, BoardColumn } from './crm';
+export type { EmailAccount, EmailListenerConfig, QuotaStatus, EmailProvider, ListenerProtocol } from './email';
+
+// ── Mailbox Types ─────────────────────────────────────────────────────────
+
+export interface MailboxEmail {
+  id: string;
+  direction: 'sent' | 'received';
+  fromEmail?: string;
+  toEmail?: string;
+  subject?: string;
+  body?: string;
+  sentAt?: string;
+  createdAt?: string;
+  classification?: ReplyClassification;
+  sentiment?: number;
+  contactName?: string;
+  contactId?: string;
+  threadId?: string;
+  status?: string;
+  isInbound?: boolean;
+  openedAt?: string | null;
+}
+
+export interface MailboxStats {
+  totalSent: number;
+  totalReceived: number;
+  todaySent: number;
+  todayReceived: number;
+  byClassification: Record<string, number>;
+}
+
+export type ThreadStatus = 'active' | 'archived' | 'needs_action' | 'waiting';
+export type ThreadPriority = 'high' | 'medium' | 'low';
+
+export interface MailboxThread {
+  id: string;
+  subject?: string;
+  status: ThreadStatus;
+  priority: ThreadPriority;
+  messageCount: number;
+  lastMessageAt?: string;
+  summary?: string;
+  nextAction?: string;
+  dealId?: string;
+  contactId?: string;
+  contactName?: string;
+  contactEmail?: string;
+  deal?: {
+    id: string;
+    title?: string;
+    value?: string;
+    stage?: {
+      id: string;
+      name?: string;
+      color?: string;
+    };
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MailboxThreadDetail extends MailboxThread {
+  messages: ThreadMessage[];
+}
+
+export interface ThreadMessage {
+  id: string;
+  direction: 'sent' | 'received';
+  fromEmail?: string;
+  toEmail?: string;
+  subject?: string;
+  body?: string;
+  classification?: string;
+  sentiment?: number;
+  status?: string;
+  date: string;
+}
+
+export interface MailboxDigest {
+  needsAction: number;
+  active: number;
+  waiting: number;
+  highPriority: number;
+  totalThreads: number;
+}
+
+export interface ScheduledAction {
+  id: string;
+  type: 'email' | 'task';
+  title: string;
+  scheduledAt: string;
+  status: string;
+  metadata: Record<string, unknown>;
+}
+
 // ── Filter Types ──────────────────────────────────────────────────────────────
 
 export interface ContactFilters {
@@ -294,6 +444,14 @@ export interface ContactFilters {
   masterAgentId?: string;
   minScore?: number;
   maxScore?: number;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface CompanyFilters {
+  search?: string;
+  industry?: string;
+  masterAgentId?: string;
   cursor?: string;
   limit?: number;
 }

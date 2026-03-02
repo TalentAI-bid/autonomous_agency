@@ -42,3 +42,30 @@ export type { Reply, NewReply } from './replies.js';
 
 export { interviews, interviewStatusEnum } from './interviews.js';
 export type { Interview, NewInterview } from './interviews.js';
+
+export { conversations, conversationStatusEnum } from './conversations.js';
+export type { Conversation, NewConversation } from './conversations.js';
+
+export { conversationMessages, messageRoleEnum, messageTypeEnum } from './conversation-messages.js';
+export type { ConversationMessage, NewConversationMessage } from './conversation-messages.js';
+
+export { emailAccounts, emailProviderEnum } from './email-accounts.js';
+export type { EmailAccount, NewEmailAccount } from './email-accounts.js';
+
+export { emailQueue, emailQueueStatusEnum } from './email-queue.js';
+export type { EmailQueueItem, NewEmailQueueItem } from './email-queue.js';
+
+export { emailListenerConfigs, listenerProtocolEnum } from './email-listener-configs.js';
+export type { EmailListenerConfig, NewEmailListenerConfig } from './email-listener-configs.js';
+
+export { crmStages } from './crm-stages.js';
+export type { CrmStage, NewCrmStage } from './crm-stages.js';
+
+export { deals } from './deals.js';
+export type { Deal, NewDeal } from './deals.js';
+
+export { crmActivities, activityTypeEnum } from './crm-activities.js';
+export type { CrmActivity, NewCrmActivity } from './crm-activities.js';
+
+export { emailThreads, threadStatusEnum, threadPriorityEnum } from './email-threads.js';
+export type { EmailThread, NewEmailThread } from './email-threads.js';

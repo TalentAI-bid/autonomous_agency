@@ -2,12 +2,13 @@ import { eq, and } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
+import { logActivity } from '../services/crm-activity.service.js';
 import { buildSystemPrompt, buildUserPrompt, type ScoringResult } from '../prompts/scoring.prompt.js';
 import logger from '../utils/logger.js';
 
 export class ScoringAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const { contactId, masterAgentId } = input as { contactId: string; masterAgentId: string };
+    const { contactId, masterAgentId, dryRun } = input as { contactId: string; masterAgentId: string; dryRun?: boolean };
 
     logger.info({ tenantId: this.tenantId, contactId }, 'ScoringAgent starting');
 
@@ -38,9 +39,20 @@ export class ScoringAgent extends BaseAgent {
     const config = (agent?.config as Record<string, unknown>) ?? {};
     const threshold = (config.scoringThreshold as number) ?? 70;
 
-    // 3. Score with Together AI
+    // 3. Extract rich data from rawData
+    const raw = (contact.rawData as Record<string, unknown>) ?? {};
+    const githubUrl = raw.githubUrl as string | undefined;
+    const seniorityLevel = raw.seniorityLevel as string | undefined;
+    const totalYearsExperience = raw.totalYearsExperience as number | undefined;
+    const skillLevels = raw.skillLevels as Array<{ skill: string; level: string; evidence: string }> | undefined;
+    const openSourceContributions = raw.openSourceContributions as Array<{ repo: string; description: string }> | undefined;
+    const certifications = raw.certifications as string[] | undefined;
+    const dataCompleteness = raw.dataCompleteness as number | undefined;
+
+    // 4. Score with Together AI
+    const useCase = agent?.useCase;
     const scoring = await this.extractJSON<ScoringResult>([
-      { role: 'system', content: buildSystemPrompt() },
+      { role: 'system', content: buildSystemPrompt(useCase) },
       {
         role: 'user',
         content: buildUserPrompt({
@@ -52,6 +64,13 @@ export class ScoringAgent extends BaseAgent {
             education: (contact.education as Array<{ institution: string; degree: string; field: string }>) ?? [],
             location: contact.location ?? '',
             companyName,
+            seniorityLevel,
+            githubUrl,
+            totalYearsExperience,
+            skillLevels,
+            openSourceContributions,
+            certifications,
+            dataCompleteness,
           },
           requirements: {
             requiredSkills: (config.requiredSkills as string[]) ?? [],
@@ -61,6 +80,7 @@ export class ScoringAgent extends BaseAgent {
             experienceLevel: config.experienceLevel as string,
             scoringWeights: config.scoringWeights as Record<string, number>,
           },
+          useCase,
         }),
       },
     ]);
@@ -69,7 +89,7 @@ export class ScoringAgent extends BaseAgent {
     const passed = score >= threshold;
     const newStatus = passed ? 'scored' : 'rejected';
 
-    // 4. Save score to contact
+    // 5. Save score to contact
     await withTenant(this.tenantId, async (tx) => {
       await tx.update(contacts)
         .set({
@@ -81,19 +101,46 @@ export class ScoringAgent extends BaseAgent {
         .where(eq(contacts.id, contactId));
     });
 
-    // 5. Dispatch outreach if above threshold
+    // 6. Dispatch outreach if above threshold
     if (passed) {
       await this.dispatchNext('outreach', {
         contactId,
         masterAgentId,
         stepNumber: 1,
+        dryRun,
       });
     }
 
-    await this.emitEvent('contact:scored', { contactId, score, status: newStatus });
+    // Log CRM activity
+    try {
+      await logActivity({
+        tenantId: this.tenantId,
+        contactId,
+        masterAgentId,
+        type: 'score_updated',
+        title: `Contact scored: ${score}/100 (${newStatus})`,
+        metadata: {
+          score,
+          confidence: scoring.confidence,
+          passed,
+          threshold,
+          breakdown: scoring.breakdown,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err, contactId }, 'Failed to log CRM scoring activity');
+    }
 
-    logger.info({ tenantId: this.tenantId, contactId, score, passed }, 'ScoringAgent completed');
+    await this.emitEvent('contact:scored', {
+      contactId,
+      score,
+      confidence: scoring.confidence,
+      status: newStatus,
+      dataGaps: scoring.dataGaps,
+    });
 
-    return { score, breakdown: scoring.breakdown, status: newStatus };
+    logger.info({ tenantId: this.tenantId, contactId, score, confidence: scoring.confidence, passed }, 'ScoringAgent completed');
+
+    return { score, confidence: scoring.confidence, breakdown: scoring.breakdown, dataGaps: scoring.dataGaps, status: newStatus };
   }
 }

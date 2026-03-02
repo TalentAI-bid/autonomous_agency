@@ -5,17 +5,18 @@ export interface MasterAgentRequirements {
   preferredSkills: string[];
   minExperience: number;
   locations: string[];
-  scoringWeights: {
-    skills: number;
-    experience: number;
-    location: number;
-    education: number;
-    companyBackground: number;
-  };
+  scoringWeights: Record<string, number>;
   scoringThreshold: number;
   emailTone: string;
   valueProposition: string;
   searchCriteria: Record<string, unknown>;
+  // Sales-specific fields
+  targetCompanyAttributes?: string[];
+  idealCustomerProfile?: {
+    industries?: string[];
+    companySizes?: string[];
+    techStack?: string[];
+  };
 }
 
 export function buildSystemPrompt(): string {
@@ -33,6 +34,48 @@ export function buildUserPrompt(data: {
     .map((d) => `[${d.type.toUpperCase()}]\n${d.rawText.slice(0, 3000)}`)
     .join('\n\n---\n\n');
 
+  if (data.useCase === 'sales') {
+    return `Analyze this sales campaign mission and extract structured requirements for finding and reaching decision-makers at target companies.
+
+MISSION: ${data.mission}
+
+DOCUMENTS:
+${docsText || 'No documents provided.'}
+
+Extract and return a JSON object with this exact structure:
+{
+  "useCase": "sales",
+  "targetRoles": ["decision-maker titles to find, e.g. CTO, VP Engineering, Head of Product, Director of IT"],
+  "requiredSkills": ["target company attributes, e.g. SaaS, fintech, 50-200 employees, Series B"],
+  "preferredSkills": ["nice-to-have company/prospect attributes"],
+  "minExperience": 0,
+  "locations": ["target cities or regions, use 'Remote' if applicable"],
+  "targetCompanyAttributes": ["industry descriptors, company size indicators, tech stack signals"],
+  "idealCustomerProfile": {
+    "industries": ["target industries"],
+    "companySizes": ["e.g. 50-200, 200-1000, startup, enterprise"],
+    "techStack": ["technologies the target companies likely use"]
+  },
+  "scoringWeights": {
+    "authority": 30,
+    "companyFit": 25,
+    "relevance": 20,
+    "accessibility": 15,
+    "engagement": 10
+  },
+  "scoringThreshold": 60,
+  "emailTone": "professional|casual|formal|friendly",
+  "valueProposition": "one sentence about what your product solves for these companies",
+  "searchCriteria": {
+    "industries": [],
+    "companySizes": [],
+    "excludeCompanies": [],
+    "keywords": ["product/solution keywords relevant to the sales campaign"]
+  }
+}`;
+  }
+
+  // Default: recruitment
   return `Analyze this recruitment/sales mission and extract structured requirements.
 
 MISSION: ${data.mission}

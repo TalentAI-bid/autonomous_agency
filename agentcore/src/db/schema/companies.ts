@@ -1,10 +1,12 @@
 import { pgTable, uuid, varchar, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants.js';
+import { masterAgents } from './master-agents.js';
 
 export const companies = pgTable('companies', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  masterAgentId: uuid('master_agent_id').references(() => masterAgents.id, { onDelete: 'set null' }),
   name: varchar('name', { length: 255 }).notNull(),
   domain: varchar('domain', { length: 255 }),
   industry: varchar('industry', { length: 255 }),
@@ -18,6 +20,7 @@ export const companies = pgTable('companies', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
   index('companies_tenant_id_idx').on(t.tenantId),
+  index('companies_tenant_master_idx').on(t.tenantId, t.masterAgentId),
   index('companies_tech_stack_gin_idx').using('gin', sql`${t.techStack} jsonb_path_ops`),
 ]);
 

@@ -3,6 +3,7 @@ import { queueRedis } from './setup.js';
 
 export const AGENT_TYPES = [
   'discovery', 'enrichment', 'document', 'scoring', 'outreach', 'reply', 'action',
+  'email-listen', 'email-send', 'mailbox',
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -47,6 +48,18 @@ export const QUEUE_CONFIGS: Record<QueueType, {
     defaultJobOptions: { attempts: 2, backoff: { type: 'fixed', delay: 300000 } },
     concurrency: 3,
   },
+  'email-listen': {
+    defaultJobOptions: { attempts: 2, backoff: { type: 'exponential', delay: 30000 } },
+    concurrency: 2,
+  },
+  'email-send': {
+    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+    concurrency: 5,
+  },
+  mailbox: {
+    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 3000 } },
+    concurrency: 3,
+  },
   'dead-letter': {
     defaultJobOptions: { attempts: 1, backoff: { type: 'fixed', delay: 0 } },
     concurrency: 1,
@@ -57,7 +70,7 @@ export const QUEUE_CONFIGS: Record<QueueType, {
 const queueCache = new Map<string, Queue>();
 
 export function getQueueName(tenantId: string, queueType: QueueType): string {
-  return `queue:${queueType}:${tenantId}`;
+  return `queue.${queueType}.${tenantId}`;
 }
 
 export function getQueue(tenantId: string, queueType: QueueType): Queue {

@@ -140,41 +140,21 @@ CREATE POLICY emails_sent_delete ON emails_sent FOR DELETE
     WHERE cc.id = emails_sent.campaign_contact_id AND c.tenant_id = current_tenant_id()
   ));
 
--- Replies (no direct tenant_id, access via emails_sent -> campaign_contacts -> campaigns)
+-- Replies (has tenant_id directly — use it instead of chaining through email_sent_id which can be NULL)
+DROP POLICY IF EXISTS replies_select ON replies;
+DROP POLICY IF EXISTS replies_insert ON replies;
+DROP POLICY IF EXISTS replies_update ON replies;
+DROP POLICY IF EXISTS replies_delete ON replies;
+
 CREATE POLICY replies_select ON replies FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM emails_sent es
-    JOIN campaign_contacts cc ON cc.id = es.campaign_contact_id
-    JOIN campaigns c ON c.id = cc.campaign_id
-    WHERE es.id = replies.email_sent_id AND c.tenant_id = current_tenant_id()
-  ));
+  USING (tenant_id = current_tenant_id());
 CREATE POLICY replies_insert ON replies FOR INSERT
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM emails_sent es
-    JOIN campaign_contacts cc ON cc.id = es.campaign_contact_id
-    JOIN campaigns c ON c.id = cc.campaign_id
-    WHERE es.id = replies.email_sent_id AND c.tenant_id = current_tenant_id()
-  ));
+  WITH CHECK (tenant_id = current_tenant_id());
 CREATE POLICY replies_update ON replies FOR UPDATE
-  USING (EXISTS (
-    SELECT 1 FROM emails_sent es
-    JOIN campaign_contacts cc ON cc.id = es.campaign_contact_id
-    JOIN campaigns c ON c.id = cc.campaign_id
-    WHERE es.id = replies.email_sent_id AND c.tenant_id = current_tenant_id()
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM emails_sent es
-    JOIN campaign_contacts cc ON cc.id = es.campaign_contact_id
-    JOIN campaigns c ON c.id = cc.campaign_id
-    WHERE es.id = replies.email_sent_id AND c.tenant_id = current_tenant_id()
-  ));
+  USING (tenant_id = current_tenant_id())
+  WITH CHECK (tenant_id = current_tenant_id());
 CREATE POLICY replies_delete ON replies FOR DELETE
-  USING (EXISTS (
-    SELECT 1 FROM emails_sent es
-    JOIN campaign_contacts cc ON cc.id = es.campaign_contact_id
-    JOIN campaigns c ON c.id = cc.campaign_id
-    WHERE es.id = replies.email_sent_id AND c.tenant_id = current_tenant_id()
-  ));
+  USING (tenant_id = current_tenant_id());
 
 -- Interviews
 CREATE POLICY interviews_select ON interviews FOR SELECT USING (tenant_id = current_tenant_id());

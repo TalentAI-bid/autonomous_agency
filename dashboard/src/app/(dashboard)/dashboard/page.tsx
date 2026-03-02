@@ -2,6 +2,7 @@
 
 import { useAgents } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
+import { useDashboardAnalytics } from '@/hooks/use-analytics';
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -33,21 +34,27 @@ function StatCard({ title, value, icon: Icon, trend, color }: { title: string; v
 export default function DashboardPage() {
   const { data: agentsRes, isLoading: agentsLoading } = useAgents();
   const { data: contactsRes, isLoading: contactsLoading } = useContacts({ limit: 5 });
+  const { data: analytics, isLoading: analyticsLoading } = useDashboardAnalytics();
   const events = useRealtimeStore((s) => s.events);
 
   const agents = agentsRes ?? [];
   const contacts = contactsRes?.data ?? [];
 
   const activeAgents = agents.filter((a) => a.status === 'running').length;
-  const totalContacts = contactsRes?.pagination?.total ?? 0;
+  const totalContacts = analytics?.contacts.total ?? contactsRes?.pagination?.total ?? 0;
 
-  // Pipeline funnel stats from contacts
-  const discovered = contacts.filter((c) => c.status === 'discovered').length;
-  const enriched = contacts.filter((c) => c.status === 'enriched').length;
-  const scored = contacts.filter((c) => c.status === 'scored' || (c.score ?? 0) > 0).length;
-  const contacted = contacts.filter((c) => c.status === 'contacted').length;
+  // Pipeline funnel stats from analytics (aggregate across all contacts)
+  const byStatus = analytics?.contacts.byStatus ?? {};
+  const discovered = byStatus.discovered ?? 0;
+  const enriched = byStatus.enriched ?? 0;
+  const scored = byStatus.scored ?? 0;
+  const contacted = byStatus.contacted ?? 0;
+
+  const emailsSent = analytics?.emails.sent ?? 0;
+  const avgScore = analytics?.avgScore;
 
   const recentEvents = events.slice(0, 10);
+  const isLoading = agentsLoading || contactsLoading || analyticsLoading;
 
   return (
     <div className="space-y-6">
@@ -66,14 +73,14 @@ export default function DashboardPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {agentsLoading || contactsLoading ? (
+        {isLoading ? (
           Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[104px]" />)
         ) : (
           <>
             <StatCard title="Active Agents" value={activeAgents} icon={Bot} color="bg-blue-500/10" />
             <StatCard title="Total Contacts" value={totalContacts} icon={Users} color="bg-emerald-500/10" />
-            <StatCard title="Emails Sent" value="—" icon={Mail} color="bg-purple-500/10" />
-            <StatCard title="Avg. Score" value="—" icon={TrendingUp} color="bg-amber-500/10" />
+            <StatCard title="Emails Sent" value={emailsSent} icon={Mail} color="bg-purple-500/10" />
+            <StatCard title="Avg. Score" value={avgScore ?? '—'} icon={TrendingUp} color="bg-amber-500/10" />
           </>
         )}
       </div>
@@ -99,7 +106,7 @@ export default function DashboardPage() {
                 <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                   <div
                     className={`h-full ${stage.color} rounded-full transition-all`}
-                    style={{ width: discovered > 0 ? `${(stage.value / discovered) * 100}%` : '0%' }}
+                    style={{ width: totalContacts > 0 ? `${(stage.value / totalContacts) * 100}%` : '0%' }}
                   />
                 </div>
               </div>

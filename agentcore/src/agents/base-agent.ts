@@ -1,10 +1,10 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ilike } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { createRedisConnection, pubRedis } from '../queues/setup.js';
 import { dispatchJob, type JobOptions } from '../services/queue.service.js';
 import { withTenant } from '../config/database.js';
-import { contacts, agentTasks } from '../db/schema/index.js';
-import type { Contact, NewContact, AgentTask } from '../db/schema/index.js';
+import { contacts, companies, agentTasks } from '../db/schema/index.js';
+import type { Contact, NewContact, Company, NewCompany, AgentTask } from '../db/schema/index.js';
 import type { AgentType } from '../queues/queues.js';
 import { complete as togetherComplete, extractJSON as togetherExtractJSON, type ChatMessage } from '../tools/together-ai.tool.js';
 import { complete as claudeComplete } from '../tools/claude.tool.js';
@@ -52,9 +52,20 @@ export abstract class BaseAgent {
   // ── DB helpers ────────────────────────────────────────────────────────────
 
   protected async saveOrUpdateContact(
-    data: Partial<NewContact> & { linkedinUrl?: string },
+    data: Partial<NewContact> & { linkedinUrl?: string; id?: string },
   ): Promise<Contact> {
     return withTenant(this.tenantId, async (tx) => {
+      // Update by ID if provided (e.g. document agent updating existing contact)
+      if (data.id) {
+        const { id, ...updateData } = data;
+        const [updated] = await tx
+          .update(contacts)
+          .set({ ...updateData, updatedAt: new Date() })
+          .where(and(eq(contacts.id, id), eq(contacts.tenantId, this.tenantId)))
+          .returning();
+        if (updated) return updated;
+      }
+
       if (data.linkedinUrl) {
         const existing = await tx
           .select()
@@ -84,6 +95,86 @@ export abstract class BaseAgent {
           masterAgentId: this.masterAgentId,
           status: 'discovered',
           ...data,
+        })
+        .returning();
+      return created!;
+    });
+  }
+
+  protected async saveOrUpdateCompany(
+    data: Partial<NewCompany> & { name: string; domain?: string },
+  ): Promise<Company> {
+    return withTenant(this.tenantId, async (tx) => {
+      // Try to find by domain first (most reliable match)
+      if (data.domain) {
+        const existing = await tx
+          .select()
+          .from(companies)
+          .where(
+            and(
+              eq(companies.tenantId, this.tenantId),
+              ilike(companies.domain, data.domain),
+            ),
+          )
+          .limit(1);
+
+        if (existing.length > 0) {
+          const [updated] = await tx
+            .update(companies)
+            .set({
+              ...data,
+              masterAgentId: this.masterAgentId,
+              rawData: {
+                ...(existing[0]!.rawData as Record<string, unknown> ?? {}),
+                ...(data.rawData as Record<string, unknown> ?? {}),
+              },
+              updatedAt: new Date(),
+            })
+            .where(eq(companies.id, existing[0]!.id))
+            .returning();
+          return updated!;
+        }
+      }
+
+      // Try to find by name (case-insensitive)
+      const byName = await tx
+        .select()
+        .from(companies)
+        .where(
+          and(
+            eq(companies.tenantId, this.tenantId),
+            ilike(companies.name, data.name),
+          ),
+        )
+        .limit(1);
+
+      if (byName.length > 0) {
+        const [updated] = await tx
+          .update(companies)
+          .set({
+            ...data,
+            masterAgentId: this.masterAgentId,
+            rawData: {
+              ...(byName[0]!.rawData as Record<string, unknown> ?? {}),
+              ...(data.rawData as Record<string, unknown> ?? {}),
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(companies.id, byName[0]!.id))
+          .returning();
+        return updated!;
+      }
+
+      // Create new company
+      const [created] = await tx
+        .insert(companies)
+        .values({
+          tenantId: this.tenantId,
+          masterAgentId: this.masterAgentId,
+          ...data,
+          rawData: {
+            ...(data.rawData as Record<string, unknown> ?? {}),
+          },
         })
         .returning();
       return created!;

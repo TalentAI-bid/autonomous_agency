@@ -62,6 +62,48 @@ export async function scheduleAgentJobs(
     });
   }
 
+  // Schedule reddit-monitor repeatable job (every 4 hours)
+  if (!enabledAgents.length || enabledAgents.includes('reddit-monitor')) {
+    const redditMonitorQueue = getQueue(tenantId, 'reddit-monitor');
+    const existingRedditJobs = await redditMonitorQueue.getRepeatableJobs();
+    const staleRedditJob = existingRedditJobs.find(j => j.id === `reddit-monitor-${tenantId}`);
+    if (staleRedditJob) {
+      await redditMonitorQueue.removeRepeatableByKey(staleRedditJob.key);
+    }
+    await redditMonitorQueue.add('reddit-scan', { tenantId, masterAgentId: agentId }, {
+      repeat: { every: 4 * 60 * 60 * 1000 },
+      jobId: `reddit-monitor-${tenantId}`,
+    });
+  }
+
+  // Schedule strategy repeatable job (daily at 6 AM UTC)
+  if (!enabledAgents.length || enabledAgents.includes('strategy')) {
+    const strategyQueue = getQueue(tenantId, 'strategy');
+    const existingStrategyJobs = await strategyQueue.getRepeatableJobs();
+    const staleStrategyJob = existingStrategyJobs.find(j => j.id === `strategy-${tenantId}-${agentId}`);
+    if (staleStrategyJob) {
+      await strategyQueue.removeRepeatableByKey(staleStrategyJob.key);
+    }
+    await strategyQueue.add('daily-strategy', { tenantId, masterAgentId: agentId }, {
+      repeat: { pattern: '0 6 * * *' },
+      jobId: `strategy-${tenantId}-${agentId}`,
+    });
+  }
+
+  // Schedule master-orchestrate repeatable job (every 60s while running)
+  if (!enabledAgents.length || enabledAgents.includes('discovery')) {
+    const discoveryQueue = getQueue(tenantId, 'discovery');
+    const existingOrchJobs = await discoveryQueue.getRepeatableJobs();
+    const staleOrchJob = existingOrchJobs.find(j => j.id === `master-orchestrate-${tenantId}-${agentId}`);
+    if (staleOrchJob) {
+      await discoveryQueue.removeRepeatableByKey(staleOrchJob.key);
+    }
+    await discoveryQueue.add('master-orchestrate', { tenantId, masterAgentId: agentId, orchestrate: true }, {
+      repeat: { every: 60000 },
+      jobId: `master-orchestrate-${tenantId}-${agentId}`,
+    });
+  }
+
   // Always schedule email listener polling if active configs exist
   const specificConfigId = config.emailListenerConfigId as string | undefined;
 
@@ -117,6 +159,8 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
   (async () => {
     try {
       const allTenants = await db.select({ id: tenants.id }).from(tenants);
+      logger.info({ tenantCount: allTenants.length }, 'Worker startup: found tenants');
+
       const runningAgents: Array<{ id: string; tenantId: string; config: unknown }> = [];
 
       for (const tenant of allTenants) {
@@ -125,7 +169,36 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
             .from(masterAgents)
             .where(eq(masterAgents.status, 'running'));
         });
+
+        if (agents.length > 0) {
+          logger.info({ tenantId: tenant.id, runningCount: agents.length }, 'Worker startup: found running agents for tenant');
+        }
+
         runningAgents.push(...agents);
+      }
+
+      // Diagnostic: if no running agents found, check what statuses actually exist
+      if (runningAgents.length === 0) {
+        logger.warn('Worker startup: 0 running agents found across all tenants — checking all agent statuses');
+        for (const tenant of allTenants) {
+          const allAgents = await withTenant(tenant.id, async (tx) => {
+            return tx.select({
+              id: masterAgents.id,
+              status: masterAgents.status,
+              name: masterAgents.name,
+            }).from(masterAgents);
+          });
+          if (allAgents.length > 0) {
+            const statusCounts: Record<string, number> = {};
+            for (const a of allAgents) {
+              statusCounts[a.status ?? 'null'] = (statusCounts[a.status ?? 'null'] ?? 0) + 1;
+            }
+            logger.warn(
+              { tenantId: tenant.id, totalAgents: allAgents.length, statusCounts },
+              'Worker startup diagnostic: agent statuses for tenant',
+            );
+          }
+        }
       }
 
       const tenantIds = [...new Set(runningAgents.map(a => a.tenantId))];

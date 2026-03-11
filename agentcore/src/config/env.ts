@@ -20,6 +20,11 @@ const envSchema = z.object({
   // External Services
   SEARXNG_URL: z.string().url().default('http://localhost:8888'),
   CRAWL4AI_URL: z.string().url().default('http://localhost:11235'),
+  GITHUB_TOKEN: z.string().optional(),
+  COMPANIES_HOUSE_API_KEY: z.string().optional(),
+  OPENCORPORATES_API_TOKEN: z.string().optional(),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
+  GENERECT_API_KEY: z.string().optional(),
 
   // SMTP
   SMTP_HOST: z.string().optional(),

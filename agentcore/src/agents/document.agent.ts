@@ -36,6 +36,7 @@ export class DocumentAgent extends BaseAgent {
     };
 
     logger.info({ tenantId: this.tenantId, documentId, type, url }, 'DocumentAgent starting');
+    await this.setCurrentAction('document_processing', `Processing ${type} document`);
 
     // 1. Get raw text
     let rawText = '';
@@ -77,7 +78,7 @@ export class DocumentAgent extends BaseAgent {
       logger.warn({ tenantId: this.tenantId, documentId, url, type }, 'DocumentAgent: no raw text extracted, continuing pipeline');
       // Still dispatch enrichment so the pipeline continues even when scraping fails (e.g. LinkedIn blocks)
       if (inputContactId) {
-        await this.dispatchNext('enrichment', { contactId: inputContactId, masterAgentId, dryRun });
+        await this.dispatchNext('enrichment', { contactId: inputContactId, masterAgentId, pipelineContext: this.getPipelineContext(input), dryRun });
       }
       return { extracted: null, contactId: inputContactId, documentStatus: 'skipped' };
     }
@@ -132,7 +133,7 @@ export class DocumentAgent extends BaseAgent {
       await this.emitEvent('contact:discovered', { contactId: contact.id, type, source: url ?? documentId });
 
       // Dispatch enrichment for new contact
-      await this.dispatchNext('enrichment', { contactId: contact.id, masterAgentId, dryRun });
+      await this.dispatchNext('enrichment', { contactId: contact.id, masterAgentId, pipelineContext: this.getPipelineContext(input), dryRun });
     }
 
     // 5. Handle job spec / spec
@@ -152,6 +153,12 @@ export class DocumentAgent extends BaseAgent {
         }
       });
     }
+
+    this.logActivity('document_processed', 'completed', {
+      inputSummary: type,
+      details: { documentId, type, contactId },
+    });
+    await this.clearCurrentAction();
 
     return { extracted, contactId, documentStatus: 'processed' };
   }

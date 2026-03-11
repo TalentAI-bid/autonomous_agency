@@ -73,7 +73,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     targetIndustry: z.string().optional(),
     companySize: z.string().optional(),
     additionalContext: z.string().optional(),
-    scoringThreshold: z.number().min(0).max(100).default(70),
+    scoringThreshold: z.number().min(0).max(100).default(50),
     emailTone: z.string().default('professional'),
     enableOutreach: z.boolean().default(true),
   });
@@ -201,23 +201,34 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
 
     // Run MasterAgent orchestrator — parses mission, generates queries, dispatches discovery jobs
     const masterAgent = new MasterAgent({ tenantId: request.tenantId, masterAgentId: id });
-    const result = await masterAgent.execute({ masterAgentId: id, mission: agent.mission });
-    await masterAgent.close();
+    try {
+      const result = await masterAgent.execute({ masterAgentId: id, mission: agent.mission });
+      await masterAgent.close();
 
-    // Re-fetch config from DB after execute() — it may have updated the config
-    const [freshAgent] = await withTenant(request.tenantId, async (tx) => {
-      return tx.select({ config: masterAgents.config }).from(masterAgents)
-        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
-        .limit(1);
-    });
-    const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
-    logger.info({ tenantId: request.tenantId, agentId: id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from /start');
-    await removeAllEmailListenerJobs(request.tenantId);
-    await removeAllEmailSendJobs(request.tenantId);
-    await scheduleAgentJobs(request.tenantId, id, agentCfg);
-    logger.info({ tenantId: request.tenantId, agentId: id }, 'Agent jobs scheduled from /start');
+      // Re-fetch config from DB after execute() — it may have updated the config
+      const [freshAgent] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
+      logger.info({ tenantId: request.tenantId, agentId: id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from /start');
+      await removeAllEmailListenerJobs(request.tenantId);
+      await removeAllEmailSendJobs(request.tenantId);
+      await scheduleAgentJobs(request.tenantId, id, agentCfg);
+      logger.info({ tenantId: request.tenantId, agentId: id }, 'Agent jobs scheduled from /start');
 
-    return { data: { status: 'running', ...result } };
+      return { data: { status: 'running', ...result } };
+    } catch (err) {
+      await masterAgent.close().catch(() => {});
+      await withTenant(request.tenantId, async (tx) => {
+        return tx.update(masterAgents)
+          .set({ status: 'error', updatedAt: new Date() })
+          .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)));
+      });
+      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'MasterAgent execute failed in /start');
+      throw err;
+    }
   });
 
   // POST /api/master-agents/:id/stop — Stop all running agents

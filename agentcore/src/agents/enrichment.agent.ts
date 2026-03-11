@@ -2,7 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
-import { findEmail } from '../tools/email-finder.tool.js';
+import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import {
   buildSystemPrompt as candidateSystemPrompt,
   buildUserPrompt as candidateUserPrompt,
@@ -17,9 +17,28 @@ import logger from '../utils/logger.js';
 
 export class EnrichmentAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const { contactId, masterAgentId, dryRun } = input as { contactId: string; masterAgentId: string; dryRun?: boolean };
+    const { contactId, companyId: inputCompanyId, masterAgentId, dryRun } = input as {
+      contactId?: string;
+      companyId?: string;
+      masterAgentId: string;
+      dryRun?: boolean;
+    };
+
+    // ── Company-only enrichment path ─────────────────────────────────────────
+    if (inputCompanyId && !contactId) {
+      return this.executeCompanyOnly(inputCompanyId, masterAgentId, input);
+    }
+
+    if (!contactId) throw new Error('Either contactId or companyId must be provided');
 
     logger.info({ tenantId: this.tenantId, contactId }, 'EnrichmentAgent starting');
+    await this.setCurrentAction('enrichment', `Enriching contact ${contactId.slice(0, 8)}`);
+
+    // Check for human instructions
+    const humanInstruction = await this.checkHumanInstructions();
+    if (humanInstruction) {
+      logger.info({ contactId, humanInstruction }, 'EnrichmentAgent received human instruction');
+    }
 
     // 1. Load contact
     const [contact] = await withTenant(this.tenantId, async (tx) => {
@@ -34,17 +53,20 @@ export class EnrichmentAgent extends BaseAgent {
     const contactCompanyName = contact.companyName ?? '';
     const raw = (contact.rawData as Record<string, unknown>) ?? {};
 
-    // Load useCase from master agent
-    let useCase: string | undefined;
-    try {
-      const [agent] = await withTenant(this.tenantId, async (tx) => {
-        return tx.select({ useCase: masterAgents.useCase }).from(masterAgents)
-          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
-          .limit(1);
-      });
-      useCase = agent?.useCase;
-    } catch (err) {
-      logger.warn({ err, masterAgentId }, 'Failed to load useCase from master agent');
+    // Get useCase from PipelineContext or fall back to DB
+    const ctx = this.getPipelineContext(input);
+    let useCase: string | undefined = ctx?.useCase;
+    if (!useCase) {
+      try {
+        const [agent] = await withTenant(this.tenantId, async (tx) => {
+          return tx.select({ useCase: masterAgents.useCase }).from(masterAgents)
+            .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+            .limit(1);
+        });
+        useCase = agent?.useCase;
+      } catch (err) {
+        logger.warn({ err, masterAgentId }, 'Failed to load useCase from master agent');
+      }
     }
 
     // ── Phase 1: Multi-source data collection (6 parallel sources) ─────────
@@ -218,6 +240,11 @@ export class EnrichmentAgent extends BaseAgent {
           },
         ]);
 
+        // Calculate company data completeness
+        const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters];
+        const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
+        const companyDataCompleteness = Math.round((companyFilledFields / companyFields.length) * 100);
+
         // Save company with deep data
         const company = await this.saveOrUpdateCompany({
           name: deepCompany.name || contactCompanyName,
@@ -228,6 +255,7 @@ export class EnrichmentAgent extends BaseAgent {
           funding: deepCompany.funding || undefined,
           description: deepCompany.description || undefined,
           linkedinUrl: deepCompany.linkedinUrl || undefined,
+          dataCompleteness: companyDataCompleteness,
           rawData: {
             products: deepCompany.products,
             foundedYear: deepCompany.foundedYear,
@@ -287,8 +315,8 @@ export class EnrichmentAgent extends BaseAgent {
                   const firstName = nameParts[0] ?? '';
                   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1]! : '';
                   if (firstName && lastName) {
-                    const emailResult = await findEmail(this.tenantId, firstName, lastName, companyDomain);
-                    if (emailResult) {
+                    const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId);
+                    if (emailResult.email) {
                       personEmail = emailResult.email;
                       logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found');
                     }
@@ -381,15 +409,10 @@ export class EnrichmentAgent extends BaseAgent {
         }
 
         if (domain) {
-          const result = await findEmail(
-            this.tenantId,
-            contact.firstName!,
-            contact.lastName!,
-            domain,
-          );
-          if (result) {
+          const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId);
+          if (result.email) {
             emailFound = result.email;
-            emailVerified = result.verified;
+            emailVerified = result.confidence >= 85;
           }
         }
       } catch (err) {
@@ -476,12 +499,60 @@ export class EnrichmentAgent extends BaseAgent {
       };
     }
 
-    // ── Phase 5: Quality gate ──────────────────────────────────────────────
+    // ── Phase 5: Quality gate (70% threshold with retry logic) ────────────
 
     const dataCompleteness = profile?.dataCompleteness ?? 0;
 
-    if (dataCompleteness < 30) {
-      // Insufficient data — archive and skip scoring
+    // Save data completeness to contact record
+    updateData.dataCompleteness = dataCompleteness;
+
+    const qualityDecision = dataCompleteness >= 70 ? 'pass' : (dataCompleteness >= 35 ? 'retry' : 'archive');
+    this.sendMessage(null, 'reasoning', {
+      contactName,
+      dataCompleteness,
+      decision: qualityDecision,
+      emailFound: !!emailFound,
+      companyEnriched,
+    });
+
+    if (dataCompleteness < 70) {
+      const retryCount = (input.retryCount as number) ?? 0;
+
+      if (dataCompleteness >= 35 && retryCount < 2) {
+        // Retry enrichment with deeper search strategies
+        updateData.status = 'discovered'; // keep in pipeline for retry
+
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.update(contacts).set(updateData).where(eq(contacts.id, contactId));
+        });
+
+        await this.dispatchNext('enrichment', {
+          contactId, masterAgentId,
+          retryCount: retryCount + 1,
+          deepMode: true,
+          pipelineContext: ctx,
+        });
+
+        this.logActivity('quality_gate_retry', 'completed', {
+          inputSummary: contactName,
+          details: { contactId, dataCompleteness, retryCount: retryCount + 1 },
+        });
+        await this.clearCurrentAction();
+
+        logger.info({ contactId, dataCompleteness, retryCount: retryCount + 1 }, 'EnrichmentAgent: retrying with deeper search');
+
+        return {
+          email: emailFound,
+          emailVerified,
+          companyEnriched,
+          companyId,
+          dataCompleteness,
+          status: 'retry_enrichment',
+          retryCount: retryCount + 1,
+        };
+      }
+
+      // Archive if < 35% or after 2 retries
       updateData.status = 'archived';
       updateData.rawData = {
         ...(updateData.rawData as Record<string, unknown> ?? raw),
@@ -493,13 +564,19 @@ export class EnrichmentAgent extends BaseAgent {
         await tx.update(contacts).set(updateData).where(eq(contacts.id, contactId));
       });
 
+      this.logActivity('quality_gate_failed', 'completed', {
+        inputSummary: contactName,
+        details: { contactId, dataCompleteness, reason: 'insufficient_data', retryCount },
+      });
+      await this.clearCurrentAction();
+
       await this.emitEvent('contact:archived', {
         contactId,
         reason: 'insufficient_data',
         dataCompleteness,
       });
 
-      logger.info({ contactId, dataCompleteness }, 'EnrichmentAgent: contact archived (insufficient data)');
+      logger.info({ contactId, dataCompleteness, retryCount }, 'EnrichmentAgent: contact archived (insufficient data)');
 
       return {
         email: emailFound,
@@ -519,7 +596,14 @@ export class EnrichmentAgent extends BaseAgent {
       await tx.update(contacts).set(updateData).where(eq(contacts.id, contactId));
     });
 
-    await this.dispatchNext('scoring', { contactId, masterAgentId, dryRun });
+    this.sendMessage('scoring', 'data_handoff', {
+      contactId,
+      contactName,
+      companyName: contactCompanyName,
+      dataCompleteness,
+    });
+
+    await this.dispatchNext('scoring', { contactId, masterAgentId, pipelineContext: ctx, dryRun });
 
     await this.emitEvent('contact:enriched', {
       contactId,
@@ -529,6 +613,12 @@ export class EnrichmentAgent extends BaseAgent {
       companyId,
       dataCompleteness,
     });
+
+    this.logActivity('enrichment_completed', 'completed', {
+      inputSummary: contactName,
+      details: { contactId, emailFound: !!emailFound, emailVerified, companyEnriched, dataCompleteness },
+    });
+    await this.clearCurrentAction();
 
     logger.info({
       tenantId: this.tenantId, contactId, emailFound: !!emailFound, companyEnriched, dataCompleteness,
@@ -542,6 +632,212 @@ export class EnrichmentAgent extends BaseAgent {
       dataCompleteness,
       status: 'enriched',
     };
+  }
+
+  // ── Company-only enrichment ──────────────────────────────────────────────
+
+  private async executeCompanyOnly(
+    companyId: string,
+    masterAgentId: string,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    logger.info({ tenantId: this.tenantId, companyId }, 'EnrichmentAgent starting (company-only)');
+    await this.setCurrentAction('company_enrichment', `Enriching company ${companyId.slice(0, 8)}`);
+
+    // Load company
+    const [company] = await withTenant(this.tenantId, async (tx) => {
+      return tx.select().from(companies)
+        .where(and(eq(companies.id, companyId), eq(companies.tenantId, this.tenantId)))
+        .limit(1);
+    });
+    if (!company) throw new Error(`Company ${companyId} not found`);
+
+    const companyName = company.name;
+    const ctx = this.getPipelineContext(input);
+
+    // ── Phase 2: Deep company enrichment (same as contact path) ─────────
+    let companyDomain = company.domain ?? undefined;
+
+    try {
+      const companySearchResults = await this.searchWeb(
+        `${companyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
+      );
+      const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
+
+      let homepageContent = '';
+      let aboutPageContent = '';
+      let careersPageContent = '';
+      let teamPageContent = '';
+      let linkedinCompanyContent = '';
+      let crunchbaseContent = '';
+      let newsContent = '';
+      let glassdoorContent = '';
+
+      if (companyUrl) {
+        try {
+          companyDomain = companyDomain || new URL(companyUrl).hostname.replace('www.', '');
+        } catch { /* ignore */ }
+        homepageContent = await this.scrapeUrl(companyUrl);
+      }
+
+      const companySourceResults = await Promise.allSettled([
+        (async () => { if (!companyUrl) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
+        (async () => { if (!companyUrl) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
+        (async () => {
+          if (!companyUrl) return;
+          const teamPaths = ['/team', '/about/team', '/people', '/about-us/team', '/leadership'];
+          for (const path of teamPaths) {
+            try {
+              const url = new URL(path, companyUrl).href;
+              const content = await this.scrapeUrl(url);
+              if (content && content.length > 200) { teamPageContent = content; break; }
+            } catch { /* try next path */ }
+          }
+        })(),
+        (async () => {
+          const query = `site:linkedin.com/company/ "${companyName}"`;
+          const results = await this.searchWeb(query, 5);
+          const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
+          if (liUrl) linkedinCompanyContent = await this.scrapeUrl(liUrl);
+        })(),
+        (async () => {
+          const query = `${companyName} crunchbase OR funding OR series`;
+          const results = await this.searchWeb(query, 5);
+          const cbUrl = results.find((r) => r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'))?.url;
+          if (cbUrl) crunchbaseContent = await this.scrapeUrl(cbUrl);
+          else crunchbaseContent = results.slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
+        })(),
+        (async () => {
+          const query = `${companyName} latest news 2026`;
+          const results = await this.searchWeb(query, 5);
+          newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
+        })(),
+        (async () => {
+          const query = `site:glassdoor.com "${companyName}" reviews`;
+          const results = await this.searchWeb(query, 5);
+          const gdUrl = results.find((r) => r.url.includes('glassdoor.com'))?.url;
+          if (gdUrl) glassdoorContent = await this.scrapeUrl(gdUrl);
+        })(),
+      ]);
+
+      companySourceResults.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn', 'Crunchbase', 'News', 'Glassdoor'];
+          logger.warn({ err: result.reason, companyId, source: sourceNames[i] }, 'Company source search failed');
+        }
+      });
+
+      const searchSnippets = companySearchResults.map((r) => `${r.title}: ${r.snippet}`).join('\n');
+
+      const deepCompany = await this.extractJSON<DeepCompanyProfile>([
+        { role: 'system', content: companyDeepSystemPrompt() },
+        {
+          role: 'user',
+          content: companyDeepUserPrompt({
+            companyName,
+            domain: companyDomain,
+            homepageContent,
+            aboutPageContent,
+            careersPageContent,
+            teamPageContent,
+            linkedinCompanyContent,
+            crunchbaseContent,
+            newsContent,
+            glassdoorContent,
+            searchResults: searchSnippets,
+          }),
+        },
+      ]);
+
+      // Calculate company data completeness
+      const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters];
+      const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
+      const companyDataCompleteness = Math.round((companyFilledFields / companyFields.length) * 100);
+
+      // Save enriched company data
+      await this.saveOrUpdateCompany({
+        name: deepCompany.name || companyName,
+        domain: deepCompany.domain || companyDomain || undefined,
+        industry: deepCompany.industry || undefined,
+        size: deepCompany.size || undefined,
+        techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,
+        funding: deepCompany.funding || undefined,
+        description: deepCompany.description || undefined,
+        linkedinUrl: deepCompany.linkedinUrl || undefined,
+        dataCompleteness: companyDataCompleteness,
+        rawData: {
+          ...(company.rawData as Record<string, unknown> ?? {}),
+          products: deepCompany.products,
+          foundedYear: deepCompany.foundedYear,
+          headquarters: deepCompany.headquarters,
+          cultureValues: deepCompany.cultureValues,
+          recentNews: deepCompany.recentNews,
+          openPositions: deepCompany.openPositions,
+          keyPeople: deepCompany.keyPeople,
+          competitors: deepCompany.competitors,
+          contactEmail: deepCompany.contactEmail || undefined,
+          hiringContactEmails: deepCompany.hiringContactEmails?.length ? deepCompany.hiringContactEmails : undefined,
+          glassdoorRating: deepCompany.glassdoorRating || undefined,
+          employeeCount: deepCompany.employeeCount || undefined,
+          recentFunding: deepCompany.recentFunding || undefined,
+          teamPageUrl: deepCompany.teamPageUrl || undefined,
+        },
+      });
+
+      // Quality gate for company
+      const qualityDecision = companyDataCompleteness >= 70 ? 'enriched' : 'incomplete';
+      this.sendMessage(null, 'reasoning', {
+        action: 'company_enrichment_completed',
+        companyName,
+        companyId,
+        dataCompleteness: companyDataCompleteness,
+        decision: qualityDecision,
+      });
+
+      if (companyDataCompleteness < 70) {
+        // Log as incomplete discovery detail in agent room
+        this.sendMessage(null, 'reasoning', {
+          action: 'company_discovered_incomplete',
+          companyName,
+          companyId,
+          dataCompleteness: companyDataCompleteness,
+          reason: 'insufficient_enrichment_data',
+        });
+      }
+
+      this.sendMessage('discovery', 'data_handoff', {
+        action: 'company_enrichment_result',
+        companyId,
+        companyName,
+        domain: companyDomain,
+        dataCompleteness: companyDataCompleteness,
+        enriched: companyDataCompleteness >= 70,
+      });
+
+      this.logActivity('company_enrichment_completed', 'completed', {
+        inputSummary: companyName,
+        details: { companyId, dataCompleteness: companyDataCompleteness, domain: companyDomain },
+      });
+      await this.clearCurrentAction();
+
+      logger.info({ companyId, companyName, dataCompleteness: companyDataCompleteness }, 'EnrichmentAgent company-only completed');
+
+      return {
+        companyId,
+        companyName,
+        dataCompleteness: companyDataCompleteness,
+        domain: companyDomain,
+        status: qualityDecision,
+      };
+    } catch (err) {
+      logger.warn({ err, companyId, companyName }, 'Company-only enrichment failed');
+      this.logActivity('company_enrichment_failed', 'failed', {
+        inputSummary: companyName,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.clearCurrentAction();
+      throw err;
+    }
   }
 
   // ── Source search methods ────────────────────────────────────────────────

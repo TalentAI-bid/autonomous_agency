@@ -6,6 +6,7 @@ import { sendEmail } from '../tools/smtp.tool.js';
 import { selectEmailAccount, incrementQuota, popBatchQueue } from '../tools/email-queue.tool.js';
 import { logActivity } from './crm-activity.service.js';
 import { pubRedis } from '../queues/setup.js';
+import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import logger from '../utils/logger.js';
 
 const BATCH_SIZE = 10;
@@ -108,6 +109,16 @@ async function sendSingleEmail(tenantId: string, item: EmailQueueItem): Promise<
       trackingId: item.trackingId ?? undefined,
     });
   });
+
+  // Record delivery signal for email intelligence
+  try {
+    const domain = item.toEmail.split('@')[1];
+    if (domain) {
+      await emailIntelligenceEngine.recordDeliverySignal(item.toEmail, domain, null, true);
+    }
+  } catch (err) {
+    logger.debug({ err, itemId: item.id }, 'Failed to record delivery signal');
+  }
 
   // Increment quota counter
   if (account) {

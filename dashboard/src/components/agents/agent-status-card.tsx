@@ -13,6 +13,12 @@ const AGENT_COLORS: Record<string, string> = {
   outreach: 'emerald',
   reply: 'cyan',
   action: 'rose',
+  strategy: 'violet',
+  strategist: 'sky',
+  'email-listen': 'teal',
+  'email-send': 'green',
+  mailbox: 'orange',
+  'reddit-monitor': 'red',
 };
 
 const AGENT_ICONS: Record<string, string> = {
@@ -23,14 +29,21 @@ const AGENT_ICONS: Record<string, string> = {
   outreach: '📧',
   reply: '💬',
   action: '⚡',
+  strategy: '🧠',
+  strategist: '🎯',
+  'email-listen': '📥',
+  'email-send': '📤',
+  mailbox: '📬',
+  'reddit-monitor': '📡',
 };
 
 interface AgentStatusCardProps {
   agentType: string;
   status?: AgentStatus;
+  liveAction?: { action: string; description?: string };
 }
 
-export function AgentStatusCard({ agentType, status }: AgentStatusCardProps) {
+export function AgentStatusCard({ agentType, status, liveAction }: AgentStatusCardProps) {
   const color = AGENT_COLORS[agentType] || 'slate';
   const icon = AGENT_ICONS[agentType] || '🤖';
   const isRunning = status?.status === 'running';
@@ -57,7 +70,19 @@ export function AgentStatusCard({ agentType, status }: AgentStatusCardProps) {
           </Badge>
         </div>
 
-        {isRunning && (
+        {liveAction && (
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <span className="text-xs text-muted-foreground truncate">
+              {liveAction.description || liveAction.action}
+            </span>
+          </div>
+        )}
+
+        {isRunning && !liveAction && (
           <div className="mt-3">
             <div className="h-1 bg-muted rounded-full overflow-hidden">
               <div className="h-full bg-blue-500 rounded-full animate-pulse w-2/3" />

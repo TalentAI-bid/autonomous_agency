@@ -21,6 +21,7 @@ interface ParsedEmail {
 export class EmailListenerAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { configId } = input as { configId: string };
+    await this.setCurrentAction('email_polling', 'Checking for new emails');
 
     // Load listener config
     const [config] = await withTenant(this.tenantId, async (tx) => {
@@ -68,6 +69,11 @@ export class EmailListenerAgent extends BaseAgent {
       });
     }
 
+    this.logActivity('email_poll_completed', 'completed', {
+      details: { configId, total: newMessages.length, matched },
+    });
+    await this.clearCurrentAction();
+
     logger.info({ tenantId: this.tenantId, configId, total: newMessages.length, matched }, 'EmailListenerAgent completed');
     return { total: newMessages.length, matched };
   }
@@ -86,7 +92,29 @@ export class EmailListenerAgent extends BaseAgent {
       });
 
       await client.connect();
-      const lock = await client.getMailboxLock(config.mailbox);
+
+      // Try configured mailbox; create it if missing, fallback to INBOX
+      let mailbox = config.mailbox;
+      let lock;
+      try {
+        lock = await client.getMailboxLock(mailbox);
+      } catch (lockErr: unknown) {
+        const imapErr = lockErr as { mailboxMissing?: boolean };
+        if (imapErr.mailboxMissing) {
+          try {
+            await client.mailboxCreate(mailbox);
+            logger.info({ configId: config.id, mailbox }, 'Created missing IMAP mailbox');
+            lock = await client.getMailboxLock(mailbox);
+          } catch (createErr) {
+            logger.warn({ err: createErr, configId: config.id, mailbox }, 'Failed to create IMAP mailbox, falling back to INBOX');
+            mailbox = 'INBOX';
+            lock = await client.getMailboxLock(mailbox);
+          }
+        } else {
+          throw lockErr;
+        }
+      }
+
       const messages: ParsedEmail[] = [];
 
       try {

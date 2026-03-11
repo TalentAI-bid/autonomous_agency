@@ -113,7 +113,7 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
     "skills": ["skill1", "skill2"],
     "experience": "...",
     "locations": ["location1"],
-    "scoringThreshold": 70,
+    "scoringThreshold": 50,
     "emailTone": "professional",
     "enableOutreach": true,
     "emailListenerConfigId": "uuid-of-selected-listener (if email-listen is in pipeline)",
@@ -155,7 +155,7 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
 ## Sensible Defaults
 
 When the user does not specify a value, use these defaults:
-- **Scoring threshold:** 70
+- **Scoring threshold:** 50
 - **Email tone:** "professional"
 - **Experience level:** "mid-level+"
 - **Locations:** ["Remote"]

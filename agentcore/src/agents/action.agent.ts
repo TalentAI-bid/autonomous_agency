@@ -28,6 +28,7 @@ export class ActionAgent extends BaseAgent {
     };
 
     logger.info({ tenantId: this.tenantId, contactId, action }, 'ActionAgent starting');
+    await this.setCurrentAction('action_execution', `Executing ${action} for ${contactId.slice(0, 8)}`);
 
     // 1. Load contact + masterAgent + tenant owner
     const [contact] = await withTenant(this.tenantId, async (tx) => {
@@ -167,6 +168,12 @@ export class ActionAgent extends BaseAgent {
       interviewId,
       status: 'interview_scheduled',
     });
+
+    this.logActivity('action_completed', 'completed', {
+      inputSummary: `${action} for ${contactId.slice(0, 8)}`,
+      details: { contactId, action, interviewId, reportSent },
+    });
+    await this.clearCurrentAction();
 
     logger.info({ tenantId: this.tenantId, contactId, interviewId, reportSent }, 'ActionAgent completed');
 

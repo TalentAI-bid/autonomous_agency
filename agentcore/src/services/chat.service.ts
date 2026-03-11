@@ -7,7 +7,7 @@ import { parseDOCX } from '../tools/docx-parser.tool.js';
 import { buildChatSystemPrompt } from '../prompts/chat-agent.prompt.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js';
 import type { ChatMessage } from '../tools/together-ai.tool.js';
 import logger from '../utils/logger.js';
 
@@ -194,7 +194,7 @@ export async function sendMessage(
   }
 
   // Call LLM
-  const response = await complete(tenantId, llmMessages, { max_tokens: 4096 });
+  const response = await complete(tenantId, llmMessages, { max_tokens: 16384 });
 
   // Check for pipeline proposal
   const proposalMatch = response.match(/<pipeline_proposal>\s*([\s\S]*?)\s*<\/pipeline_proposal>/);
@@ -392,7 +392,7 @@ export async function* sendMessageStream(
 
   // Stream LLM response
   let fullResponse = '';
-  const stream = completeStream(tenantId, llmMessages, { max_tokens: 4096 });
+  const stream = completeStream(tenantId, llmMessages, { max_tokens: 16384 });
   for await (const chunk of stream) {
     fullResponse += chunk;
     yield `event: token\ndata: ${JSON.stringify({ text: chunk })}\n\n`;
@@ -468,6 +468,9 @@ export async function approveProposal(tenantId: string, conversationId: string, 
       .limit(1);
   });
   if (!conversation) throw new NotFoundError('Conversation', conversationId);
+  if (conversation.status === 'completed') {
+    throw new ConflictError('This conversation has already been approved.');
+  }
 
   // Find latest pipeline proposal message
   const [proposalMsg] = await withTenant(tenantId, async (tx) => {
@@ -579,20 +582,33 @@ export async function approveProposal(tenantId: string, conversationId: string, 
 
   registerTenantWorkers(tenantId);
 
-  const masterAgent = new MasterAgent({ tenantId, masterAgentId: agent.id });
-  await masterAgent.execute({ masterAgentId: agent.id, mission: agent.mission });
-  await masterAgent.close();
+  // Fire-and-forget: run execute + schedule jobs in background
+  void (async () => {
+    const masterAgent = new MasterAgent({ tenantId, masterAgentId: agent.id });
+    try {
+      await masterAgent.execute({ masterAgentId: agent.id, mission: agent.mission });
+      await masterAgent.close();
 
-  // Re-fetch config from DB after execute() — it may have updated the config
-  const [freshAgent] = await withTenant(tenantId, async (tx) => {
-    return tx.select({ config: masterAgents.config }).from(masterAgents)
-      .where(and(eq(masterAgents.id, agent.id), eq(masterAgents.tenantId, tenantId)))
-      .limit(1);
-  });
-  const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
-  logger.info({ tenantId, agentId: agent.id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from approveProposal');
-  await scheduleAgentJobs(tenantId, agent.id, agentCfg);
-  logger.info({ tenantId, agentId: agent.id }, 'Agent jobs scheduled from approveProposal');
+      // Re-fetch config from DB after execute() — it may have updated the config
+      const [freshAgent] = await withTenant(tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, agent.id), eq(masterAgents.tenantId, tenantId)))
+          .limit(1);
+      });
+      const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
+      logger.info({ tenantId, agentId: agent.id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from approveProposal');
+      await scheduleAgentJobs(tenantId, agent.id, agentCfg);
+      logger.info({ tenantId, agentId: agent.id }, 'Agent jobs scheduled from approveProposal');
+    } catch (err) {
+      await masterAgent.close().catch(() => {});
+      await withTenant(tenantId, async (tx) => {
+        return tx.update(masterAgents)
+          .set({ status: 'error', updatedAt: new Date() })
+          .where(eq(masterAgents.id, agent.id));
+      });
+      logger.error({ err, tenantId, agentId: agent.id }, 'MasterAgent execute failed in approveProposal');
+    }
+  })();
 
   return { masterAgentId: agent.id };
 }

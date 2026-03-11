@@ -11,6 +11,7 @@ import {
   type InboundEmailAnalysis,
 } from '../prompts/inbound-email.prompt.js';
 import { buildSystemPrompt as outreachSystemPrompt } from '../prompts/outreach.prompt.js';
+import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import logger from '../utils/logger.js';
 
 export class ReplyAgent extends BaseAgent {
@@ -89,6 +90,7 @@ export class ReplyAgent extends BaseAgent {
     const { replyId, masterAgentId } = input as { replyId: string; masterAgentId: string };
 
     logger.info({ tenantId: this.tenantId, replyId }, 'ReplyAgent starting');
+    await this.setCurrentAction('reply_processing', `Processing reply ${replyId.slice(0, 8)}`);
 
     // 1. Load reply with joined data
     const [reply] = await withTenant(this.tenantId, async (tx) => {
@@ -287,6 +289,7 @@ export class ReplyAgent extends BaseAgent {
       }
 
       case 'bounce': {
+        const bouncedEmail = contact?.email;
         if (contactId) {
           await withTenant(this.tenantId, async (tx) => {
             await tx.update(contacts)
@@ -302,6 +305,19 @@ export class ReplyAgent extends BaseAgent {
           const enabled = ((masterAgent?.config as Record<string, unknown>)?.enabledAgents as string[]) ?? null;
           if (!enabled || enabled.includes('enrichment')) {
             await this.dispatchNext('enrichment', { contactId, masterAgentId });
+          }
+        }
+        if (bouncedEmail) {
+          try {
+            const domain = bouncedEmail.split('@')[1];
+            if (domain) {
+              await emailIntelligenceEngine.recordDeliverySignal(
+                bouncedEmail, domain, null, false, 'hard',
+                reply?.body?.substring(0, 500),
+              );
+            }
+          } catch (err) {
+            logger.debug({ err, contactId }, 'Failed to record bounce signal');
           }
         }
         break;
@@ -369,6 +385,12 @@ export class ReplyAgent extends BaseAgent {
       classification: analysis.classification,
       sentiment: analysis.sentiment,
     });
+
+    this.logActivity('reply_classified', 'completed', {
+      inputSummary: `Reply ${replyId.slice(0, 8)}`,
+      details: { replyId, classification: analysis.classification, sentiment: analysis.sentiment, actionTaken },
+    });
+    await this.clearCurrentAction();
 
     logger.info({ tenantId: this.tenantId, replyId, classification: analysis.classification }, 'ReplyAgent completed');
 
@@ -548,6 +570,12 @@ export class ReplyAgent extends BaseAgent {
       sentiment: analysis.sentiment,
       priority: analysis.priority,
     });
+
+    this.logActivity('inbound_classified', 'completed', {
+      inputSummary: reply.fromEmail ?? replyId,
+      details: { replyId, classification: analysis.classification, sentiment: analysis.sentiment, actionTaken },
+    });
+    await this.clearCurrentAction();
 
     logger.info({ tenantId: this.tenantId, replyId, classification: analysis.classification }, 'General inbound email classified');
 

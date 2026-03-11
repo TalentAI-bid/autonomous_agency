@@ -17,7 +17,9 @@ import logger from '../utils/logger.js';
 export class MailboxAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const action = input.action as string;
+    await this.setCurrentAction('mailbox_action', action);
 
+    try {
     switch (action) {
       case 'thread_email':
         return this.threadEmail(
@@ -36,6 +38,9 @@ export class MailboxAgent extends BaseAgent {
       default:
         logger.warn({ action }, 'MailboxAgent: unknown action');
         return { error: `Unknown action: ${action}` };
+    }
+    } finally {
+      await this.clearCurrentAction();
     }
   }
 

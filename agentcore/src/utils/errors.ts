@@ -1,4 +1,5 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
+import { env } from '../config/env.js';
 
 export class AppError extends Error {
   public readonly statusCode: number;
@@ -82,6 +83,13 @@ export function errorHandler(
 
   if (statusCode >= 500) {
     request.log.error({ err: error }, 'Internal server error');
+  }
+
+  // Ensure CORS headers are present on error responses
+  const origin = request.headers.origin;
+  if (origin && origin === env.CORS_ORIGIN) {
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Credentials', 'true');
   }
 
   reply.status(statusCode).send({

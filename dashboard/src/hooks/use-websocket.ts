@@ -9,7 +9,7 @@ import type { AgentEvent } from '@/types';
 
 export function useWebSocket() {
   const token = useAuthStore((s) => s.token);
-  const { addEvent, updateAgentStatus, incrementContactCount, setConnected } = useRealtimeStore();
+  const { addEvent, updateAgentStatus, incrementContactCount, setConnected, updateAgentLiveAction, addAgentMessage } = useRealtimeStore();
   const queryClient = useQueryClient();
   const initialized = useRef(false);
 
@@ -67,11 +67,65 @@ export function useWebSocket() {
       queryClient.invalidateQueries({ queryKey: ['mailbox'] });
     });
 
+    // Activity feed updates
+    wsManager.subscribe('agent:activity', () => {
+      queryClient.invalidateQueries({ queryKey: ['activity'] });
+    });
+
+    // Live agent status changes
+    wsManager.subscribe('agent:status_change', (event: AgentEvent) => {
+      const { agentType, action, description, status } = event.data as {
+        agentType?: string;
+        action?: string;
+        description?: string;
+        status?: string;
+      };
+      if (agentType) {
+        if (status === 'idle') {
+          updateAgentLiveAction(agentType);
+        } else {
+          updateAgentLiveAction(agentType, action, description);
+        }
+      }
+    });
+
+    // Agent room messages
+    wsManager.subscribe('agent:message', (event: AgentEvent) => {
+      const data = event.data as Record<string, unknown>;
+      addAgentMessage({
+        id: (data.id as string) ?? crypto.randomUUID(),
+        masterAgentId: (data.masterAgentId as string) ?? '',
+        fromAgent: (data.fromAgent as string) ?? '',
+        toAgent: data.toAgent as string | undefined,
+        messageType: (data.messageType as string) ?? '',
+        content: (data.content as Record<string, unknown>) ?? {},
+        metadata: data.metadata as Record<string, unknown> | undefined,
+        createdAt: event.timestamp,
+      });
+      queryClient.invalidateQueries({ queryKey: ['agent-room'] });
+    });
+
+    // Strategy completed
+    wsManager.subscribe('strategy:completed', () => {
+      queryClient.invalidateQueries({ queryKey: ['strategy'] });
+    });
+
+    // Opportunity events
+    wsManager.subscribe('opportunity:discovered', () => {
+      queryClient.invalidateQueries({ queryKey: ['opportunities'] });
+    });
+    wsManager.subscribe('opportunity:qualified', () => {
+      queryClient.invalidateQueries({ queryKey: ['opportunities'] });
+    });
+    wsManager.subscribe('opportunity:contacted', () => {
+      queryClient.invalidateQueries({ queryKey: ['opportunities'] });
+    });
+
     return () => {
       wsManager.disconnect();
       initialized.current = false;
     };
-  }, [token, addEvent, updateAgentStatus, incrementContactCount, setConnected, queryClient]);
+  }, [token, addEvent, updateAgentStatus, incrementContactCount, setConnected, updateAgentLiveAction, addAgentMessage, queryClient]);
 
   const connected = useRealtimeStore((s) => s.connected);
   return { connected };

@@ -13,6 +13,9 @@ import { createActionWorker } from './action.worker.js';
 import { createEmailListenerWorker } from './email-listener.worker.js';
 import { createEmailSenderWorker } from './email-sender.worker.js';
 import { createMailboxWorker } from './mailbox.worker.js';
+import { createRedditMonitorWorker } from './reddit-monitor.worker.js';
+import { createStrategyWorker } from './strategy.worker.js';
+import { createStrategistWorker } from './strategist.worker.js';
 import logger from '../utils/logger.js';
 
 export function registerAllWorkers(tenantId: string): Worker[] {
@@ -27,6 +30,9 @@ export function registerAllWorkers(tenantId: string): Worker[] {
     createEmailListenerWorker(tenantId),
     createEmailSenderWorker(tenantId),
     createMailboxWorker(tenantId),
+    createRedditMonitorWorker(tenantId),
+    createStrategyWorker(tenantId),
+    createStrategistWorker(tenantId),
   ];
 
   for (const worker of workers) {

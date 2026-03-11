@@ -8,7 +8,8 @@ export type ContactSource =
   | 'linkedin_search' | 'linkedin_profile' | 'cv_upload' | 'manual' | 'web_search' | 'inbound';
 
 export type AgentType =
-  | 'discovery' | 'enrichment' | 'document' | 'scoring' | 'outreach' | 'reply' | 'action';
+  | 'discovery' | 'enrichment' | 'document' | 'scoring' | 'outreach' | 'reply' | 'action'
+  | 'email-listen' | 'email-send' | 'mailbox' | 'reddit-monitor' | 'strategy' | 'strategist';
 
 export type MasterAgentStatus = 'idle' | 'running' | 'paused' | 'error';
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -434,6 +435,115 @@ export interface ScheduledAction {
   status: string;
   metadata: Record<string, unknown>;
 }
+
+// ── Activity & Strategy Types ─────────────────────────────────────────────────
+
+export interface ActivityLogEntry {
+  id: string;
+  tenantId: string;
+  masterAgentId?: string;
+  agentType: AgentType;
+  action: string;
+  status: 'started' | 'completed' | 'failed' | 'skipped';
+  inputSummary?: string;
+  outputSummary?: string;
+  details?: Record<string, unknown>;
+  durationMs?: number;
+  error?: string;
+  createdAt: string;
+}
+
+export interface ActivityStats {
+  byAgentType: Array<{
+    agentType: string;
+    total: number;
+    failed: number;
+    avgDuration: number;
+  }>;
+  totalActions: number;
+  recentErrors: ActivityLogEntry[];
+}
+
+export type StrategyExecutionStatus = 'pending' | 'analyzing' | 'executing' | 'completed' | 'failed';
+
+export interface DailyStrategy {
+  id: string;
+  tenantId: string;
+  masterAgentId: string;
+  strategyDate: string;
+  performanceAnalysis?: Record<string, unknown>;
+  strategyDecisions?: Record<string, unknown>;
+  actionPlan?: Record<string, unknown>;
+  executionStatus: StrategyExecutionStatus;
+  executedAt?: string;
+  error?: string;
+  createdAt: string;
+}
+
+// ── Opportunity Types ─────────────────────────────────────────────────────────
+
+export type OpportunityType =
+  | 'hiring_signal' | 'direct_request' | 'recommendation_ask' | 'project_announcement'
+  | 'funding_signal' | 'technology_adoption' | 'tender_rfp' | 'conference_signal'
+  | 'pain_point_expressed' | 'partnership_signal';
+
+export type OpportunityUrgency = 'immediate' | 'soon' | 'exploring' | 'none';
+
+export type OpportunityStatus = 'new' | 'researching' | 'qualified' | 'contacted' | 'converted' | 'skipped';
+
+export interface Opportunity {
+  id: string;
+  tenantId: string;
+  masterAgentId: string;
+  title: string;
+  description?: string;
+  opportunityType: OpportunityType;
+  source?: string;
+  sourceUrl?: string;
+  sourcePlatform?: string;
+  companyName?: string;
+  companyDomain?: string;
+  personName?: string;
+  personTitle?: string;
+  technologies?: string[];
+  budget?: string;
+  timeline?: string;
+  location?: string;
+  rawContent?: string;
+  buyingIntentScore: number;
+  urgency: OpportunityUrgency;
+  status: OpportunityStatus;
+  companyId?: string;
+  contactId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpportunityStats {
+  byType: Array<{ type: OpportunityType; total: number }>;
+  byStatus: Array<{ status: OpportunityStatus; total: number }>;
+  byUrgency: Array<{ urgency: OpportunityUrgency; total: number }>;
+  total: number;
+  avgBuyingIntentScore: number;
+}
+
+// ── Agent Message Types ───────────────────────────────────────────────────────
+
+export interface AgentMessage {
+  id: string;
+  tenantId: string;
+  masterAgentId: string;
+  fromAgent: string;
+  toAgent?: string;
+  messageType: string;
+  content: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export type AgentMessageType =
+  | 'task_assignment' | 'data_handoff' | 'reasoning' | 'status_update'
+  | 'human_message' | 'agent_response';
 
 // ── Filter Types ──────────────────────────────────────────────────────────────
 

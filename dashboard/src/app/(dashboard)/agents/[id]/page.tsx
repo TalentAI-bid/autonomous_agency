@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
 import { useRealtimeStore } from '@/stores/realtime.store';
@@ -11,10 +12,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, getStatusColor } from '@/lib/utils';
-import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText } from 'lucide-react';
+import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { ActivityFeed } from '@/components/agents/activity-feed';
+import { StrategyPanel } from '@/components/agents/strategy-panel';
+import OpportunitiesPage from './opportunities/page';
+import { AgentRoom } from '@/components/agents/agent-room';
 
-type Tab = 'overview' | 'contacts' | 'companies' | 'documents' | 'emails';
+type Tab = 'overview' | 'contacts' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room';
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -92,9 +97,13 @@ export default function AgentDetailPage() {
   const tabs: { key: Tab; label: string; icon: React.ElementType; count?: number }[] = [
     { key: 'overview', label: 'Overview', icon: BarChart3 },
     { key: 'contacts', label: 'Contacts', icon: Users, count: totalContacts },
+    { key: 'opportunities', label: 'Opportunities', icon: Zap },
     { key: 'companies', label: 'Companies', icon: Building2, count: agentCompanies.length },
     { key: 'documents', label: 'Documents', icon: FileText, count: agentDocuments.length },
     { key: 'emails', label: 'Emails', icon: Mail, count: emails?.length ?? 0 },
+    { key: 'activity', label: 'Activity', icon: Activity },
+    { key: 'strategy', label: 'Strategy', icon: Brain },
+    { key: 'room', label: 'Agent Room', icon: MessageSquare },
   ];
 
   return (
@@ -307,26 +316,32 @@ export default function AgentDetailPage() {
               </p>
             ) : (
               contacts.map((contact) => (
-                <div key={contact.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{[contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || 'Unknown'}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {contact.title} {contact.companyName ? `at ${contact.companyName}` : ''}
-                    </p>
+                <Link key={contact.id} href={`/contacts/${contact.id}`} className="block cursor-pointer">
+                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{[contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || 'Unknown'}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {contact.title} {contact.companyName ? `at ${contact.companyName}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2 shrink-0">
+                      {(contact.score ?? 0) > 0 && (
+                        <Badge variant="outline" className="text-xs">
+                          {contact.score}
+                        </Badge>
+                      )}
+                      <Badge variant="secondary" className="text-xs">{contact.status}</Badge>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 ml-2 shrink-0">
-                    {(contact.score ?? 0) > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {contact.score}
-                      </Badge>
-                    )}
-                    <Badge variant="secondary" className="text-xs">{contact.status}</Badge>
-                  </div>
-                </div>
+                </Link>
               ))
             )}
           </CardContent>
         </Card>
+      )}
+
+      {activeTab === 'opportunities' && (
+        <OpportunitiesPage />
       )}
 
       {activeTab === 'companies' && (
@@ -344,22 +359,24 @@ export default function AgentDetailPage() {
               </p>
             ) : (
               agentCompanies.map((company) => (
-                <div key={company.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{company.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {[company.industry, company.size, company.domain].filter(Boolean).join(' · ')}
-                    </p>
+                <Link key={company.id} href={`/companies/${company.id}`} className="block cursor-pointer">
+                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{company.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {[company.industry, company.size, company.domain].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2 shrink-0">
+                      {company.funding && (
+                        <Badge variant="outline" className="text-xs">{company.funding}</Badge>
+                      )}
+                      {company.techStack && company.techStack.length > 0 && (
+                        <Badge variant="secondary" className="text-xs">{company.techStack.length} tech</Badge>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 ml-2 shrink-0">
-                    {company.funding && (
-                      <Badge variant="outline" className="text-xs">{company.funding}</Badge>
-                    )}
-                    {company.techStack && company.techStack.length > 0 && (
-                      <Badge variant="secondary" className="text-xs">{company.techStack.length} tech</Badge>
-                    )}
-                  </div>
-                </div>
+                </Link>
               ))
             )}
           </CardContent>
@@ -428,6 +445,18 @@ export default function AgentDetailPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {activeTab === 'activity' && (
+        <ActivityFeed masterAgentId={id} />
+      )}
+
+      {activeTab === 'strategy' && (
+        <StrategyPanel masterAgentId={id} />
+      )}
+
+      {activeTab === 'room' && (
+        <AgentRoom masterAgentId={id} />
       )}
     </div>
   );

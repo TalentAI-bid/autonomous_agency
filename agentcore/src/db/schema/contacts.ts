@@ -5,7 +5,7 @@ import { masterAgents } from './master-agents.js';
 import { companies } from './companies.js';
 
 export const contactSourceEnum = pgEnum('contact_source', [
-  'linkedin_search', 'linkedin_profile', 'cv_upload', 'manual', 'web_search', 'inbound',
+  'linkedin_search', 'linkedin_profile', 'cv_upload', 'manual', 'web_search', 'inbound', 'reddit',
 ]);
 
 export const contactStatusEnum = pgEnum('contact_status', [
@@ -34,6 +34,7 @@ export const contacts = pgTable('contacts', {
   source: contactSourceEnum('source'),
   status: contactStatusEnum('status').default('discovered').notNull(),
   rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+  dataCompleteness: integer('data_completeness').default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
@@ -42,6 +43,7 @@ export const contacts = pgTable('contacts', {
   index('contacts_tenant_master_idx').on(t.tenantId, t.masterAgentId),
   index('contacts_email_gin_idx').using('gin', sql`${t.email} gin_trgm_ops`),
   index('contacts_skills_gin_idx').using('gin', sql`${t.skills} jsonb_path_ops`),
+  index('contacts_completeness_idx').on(t.tenantId, t.dataCompleteness),
 ]);
 
 export type Contact = typeof contacts.$inferSelect;

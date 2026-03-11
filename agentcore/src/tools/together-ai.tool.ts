@@ -15,7 +15,7 @@ interface TogetherResponse {
 
 const redis: Redis = createRedisConnection();
 
-const MODEL = 'deepseek-ai/DeepSeek-V3';
+const MODEL = 'deepseek-ai/DeepSeek-R1';
 const BACKOFF_MS = [1000, 2000, 4000];
 
 async function callAPI(messages: ChatMessage[], opts?: { temperature?: number; max_tokens?: number; model?: string }): Promise<TogetherResponse> {
@@ -34,7 +34,7 @@ async function callAPI(messages: ChatMessage[], opts?: { temperature?: number; m
           model: opts?.model ?? MODEL,
           messages,
           temperature: opts?.temperature ?? 0.7,
-          max_tokens: opts?.max_tokens ?? 4096,
+          max_tokens: opts?.max_tokens ?? 16384,
         }),
       });
 
@@ -63,7 +63,9 @@ export async function complete(
   opts?: { temperature?: number; max_tokens?: number; model?: string },
 ): Promise<string> {
   const data = await callAPI(messages, opts);
-  const text = data.choices?.[0]?.message?.content ?? '';
+  const rawText = data.choices?.[0]?.message?.content ?? '';
+  // Strip DeepSeek R1 <think> blocks before returning
+  const text = rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
   // Track token usage
   const tokens = (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
@@ -92,7 +94,7 @@ export async function* completeStream(
       model: opts?.model ?? MODEL,
       messages,
       temperature: opts?.temperature ?? 0.7,
-      max_tokens: opts?.max_tokens ?? 4096,
+      max_tokens: opts?.max_tokens ?? 16384,
       stream: true,
     }),
   });
@@ -107,6 +109,9 @@ export async function* completeStream(
   const decoder = new TextDecoder();
   let accumulated = '';
   let buffer = '';
+  // Track <think> blocks in streaming to suppress them
+  let insideThink = false;
+  let thinkBuffer = '';
 
   const reader = body.getReader();
   try {
@@ -131,8 +136,42 @@ export async function* completeStream(
           };
           const content = json.choices?.[0]?.delta?.content;
           if (content) {
-            accumulated += content;
-            yield content;
+            // Suppress <think>...</think> blocks from streaming output
+            if (insideThink) {
+              thinkBuffer += content;
+              if (thinkBuffer.includes('</think>')) {
+                // End of think block — emit anything after </think>
+                const afterThink = thinkBuffer.split('</think>').slice(1).join('</think>');
+                insideThink = false;
+                thinkBuffer = '';
+                if (afterThink) {
+                  accumulated += afterThink;
+                  yield afterThink;
+                }
+              }
+            } else if (content.includes('<think>')) {
+              // Start of think block
+              const beforeThink = content.split('<think>')[0] ?? '';
+              if (beforeThink) {
+                accumulated += beforeThink;
+                yield beforeThink;
+              }
+              insideThink = true;
+              thinkBuffer = content.slice(content.indexOf('<think>') + 7);
+              // Check if think block ends in the same chunk
+              if (thinkBuffer.includes('</think>')) {
+                const afterThink = thinkBuffer.split('</think>').slice(1).join('</think>');
+                insideThink = false;
+                thinkBuffer = '';
+                if (afterThink) {
+                  accumulated += afterThink;
+                  yield afterThink;
+                }
+              }
+            } else {
+              accumulated += content;
+              yield content;
+            }
           }
           // Track usage from the final chunk if available
           if (json.usage) {
@@ -160,17 +199,16 @@ export async function extractJSON<T>(
   messages: ChatMessage[],
   maxRetries = 3,
 ): Promise<T> {
+  const { extractJSONFromText } = await import('../utils/json-extract.js');
   const msgs = [...messages];
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const text = await complete(tenantId, msgs);
 
     try {
-      // Strip markdown code fences if present
-      const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      return JSON.parse(cleaned) as T;
+      return extractJSONFromText<T>(text);
     } catch (err) {
-      logger.warn({ attempt, tenantId }, 'Together AI JSON parse failed, retrying');
+      logger.warn({ attempt, tenantId, errMsg: err instanceof Error ? err.message : String(err) }, 'Together AI JSON parse failed, retrying');
       if (attempt < maxRetries - 1) {
         msgs.push({ role: 'assistant', content: text });
         msgs.push({ role: 'user', content: 'Output must be valid JSON only. No markdown, no explanation, just the raw JSON object.' });

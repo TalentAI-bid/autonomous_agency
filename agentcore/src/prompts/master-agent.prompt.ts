@@ -17,6 +17,17 @@ export interface MasterAgentRequirements {
     companySizes?: string[];
     techStack?: string[];
   };
+  // Sender business context
+  senderCompanyName?: string;
+  senderCompanyDescription?: string;
+  services?: string[];
+  caseStudies?: Array<{ title: string; result: string }>;
+  differentiators?: string[];
+  callToAction?: string;
+  calendlyUrl?: string;
+  senderWebsite?: string;
+  senderFirstName?: string;
+  senderTitle?: string;
 }
 
 export function buildSystemPrompt(): string {
@@ -71,7 +82,17 @@ Extract and return a JSON object with this exact structure:
     "companySizes": [],
     "excludeCompanies": [],
     "keywords": ["product/solution keywords relevant to the sales campaign"]
-  }
+  },
+  "senderCompanyName": "name of your company (extract from mission/docs)",
+  "senderCompanyDescription": "1-2 sentence description of what your company does",
+  "services": ["specific services/products you offer"],
+  "caseStudies": [{"title": "brief case study title", "result": "quantified outcome"}],
+  "differentiators": ["what makes you different from competitors"],
+  "callToAction": "desired action (e.g., 'Book a 15-min discovery call')",
+  "calendlyUrl": "scheduling link if mentioned",
+  "senderWebsite": "company website if mentioned",
+  "senderFirstName": "first name of the email sender",
+  "senderTitle": "sender's job title"
 }`;
   }
 
@@ -98,7 +119,7 @@ Extract and return a JSON object with this exact structure:
     "education": 10,
     "companyBackground": 10
   },
-  "scoringThreshold": 70,
+  "scoringThreshold": 50,
   "emailTone": "professional|casual|formal|friendly",
   "valueProposition": "one sentence about what makes this opportunity compelling",
   "searchCriteria": {
@@ -106,6 +127,15 @@ Extract and return a JSON object with this exact structure:
     "companySizes": [],
     "excludeCompanies": [],
     "keywords": []
-  }
+  },
+  "senderCompanyName": "name of the hiring company (extract from mission/docs)",
+  "senderCompanyDescription": "1-2 sentence description of the hiring company",
+  "services": ["what the company builds/offers"],
+  "differentiators": ["what makes this company a great place to work"],
+  "callToAction": "desired action (e.g., 'Would you be open to a quick chat?')",
+  "calendlyUrl": "scheduling link if mentioned",
+  "senderWebsite": "company careers page or website if mentioned",
+  "senderFirstName": "first name of the recruiter/sender",
+  "senderTitle": "sender's job title"
 }`;
 }

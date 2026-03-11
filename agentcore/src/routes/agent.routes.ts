@@ -5,6 +5,7 @@ import { agentTasks } from '../db/schema/index.js';
 import { getQueueStatus, getAllQueuesStatus } from '../services/queue.service.js';
 import { AGENT_TYPES, type AgentType } from '../queues/queues.js';
 import { ValidationError } from '../utils/errors.js';
+import { createRedisConnection } from '../queues/setup.js';
 
 export default async function agentRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
@@ -23,6 +24,32 @@ export default async function agentRoutes(fastify: FastifyInstance) {
     }
     const status = await getQueueStatus(request.tenantId, type as AgentType);
     return { data: status };
+  });
+
+  // GET /api/agents/live-status — Get live action status for all agents
+  fastify.get<{
+    Querystring: { masterAgentId?: string };
+  }>('/live-status', async (request) => {
+    const { masterAgentId } = request.query;
+    if (!masterAgentId) return { data: {} };
+
+    const redis = createRedisConnection();
+    try {
+      const keys = await redis.keys(`agent-status:${masterAgentId}:*`);
+      if (keys.length === 0) return { data: {} };
+
+      const values = await redis.mget(...keys);
+      const result: Record<string, unknown> = {};
+      keys.forEach((key, i) => {
+        const agentType = key.split(':').pop()!;
+        try {
+          result[agentType] = JSON.parse(values[i]!);
+        } catch { /* ignore */ }
+      });
+      return { data: result };
+    } finally {
+      await redis.quit();
+    }
   });
 
   // GET /api/agents/:type/tasks — Paginated task history

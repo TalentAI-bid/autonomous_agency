@@ -45,7 +45,12 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     const results = await withTenant(request.tenantId, async (tx) => {
       const conditions = [eq(contacts.tenantId, request.tenantId)];
 
-      if (status) conditions.push(eq(contacts.status, status as any));
+      if (status) {
+        conditions.push(eq(contacts.status, status as any));
+      } else {
+        // Default: exclude discovered and archived contacts (show only enriched+ contacts)
+        conditions.push(sql`${contacts.status} NOT IN ('discovered', 'archived')`);
+      }
       if (source) conditions.push(eq(contacts.source, source as any));
       if (masterAgentId) conditions.push(eq(contacts.masterAgentId, masterAgentId));
       if (minScore) conditions.push(sql`${contacts.score} >= ${parseInt(minScore, 10)}`);

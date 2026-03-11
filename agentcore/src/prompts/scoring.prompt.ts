@@ -10,14 +10,16 @@ export interface ScoringResult {
 
 export function buildSystemPrompt(useCase?: string): string {
   if (useCase === 'sales') {
-    return `You are a B2B sales lead qualification specialist. Score prospects based on their potential as a sales target — considering authority, company fit, and accessibility.
+    return `You are a B2B sales lead qualification specialist. Score prospects based on their potential as a sales target — considering authority, company fit, accessibility, and buying signals.
 
 Scoring dimensions (all 0-100):
 - authority: title-based decision power. C-suite = 90+, VP = 80, Director = 70, Manager = 55, IC = 30
 - companyFit: industry match, company size, tech stack alignment with the product being sold
 - accessibility: email found = 90, LinkedIn found = 70, company page only = 40
 - relevance: how well the person/company matches the product being sold
-- engagement: LinkedIn activity, recent content, job changes as signals of openness
+- opportunity_strength: linked buying signals. Active opportunity with buyingIntentScore>=70 = 90+, score 50-69 = 70-89, ICP match only = 50-69, no signal = 40-55
+
+When data is sparse, lean toward a moderate score (45-60) rather than a low one. Only reject with confidence — missing data should not be heavily penalized.
 
 Confidence (0-100): how confident you are in the score based on data quality.
 - High data completeness + rich profile data → 80-100 confidence
@@ -69,12 +71,28 @@ export function buildUserPrompt(data: {
   requirements: {
     requiredSkills: string[];
     preferredSkills?: string[];
+    targetRoles?: string[];
     minExperience: number;
     locations: string[];
     experienceLevel?: string;
     scoringWeights?: Record<string, number>;
   };
   useCase?: string;
+  opportunity?: {
+    type?: string;
+    title?: string;
+    buyingIntentScore?: number;
+    technologies?: string[];
+    description?: string;
+  };
+  companyEnrichment?: {
+    techStack?: string[];
+    funding?: string;
+    size?: string;
+    recentNews?: string[];
+    products?: string[];
+    description?: string;
+  };
 }): string {
   const yearsExp = data.contact.totalYearsExperience ?? data.contact.experience.reduce((total, exp) => {
     const start = new Date(exp.startDate + '-01');
@@ -91,7 +109,7 @@ export function buildUserPrompt(data: {
     .join('; ');
 
   if (data.useCase === 'sales') {
-    const defaultWeights = { authority: 30, companyFit: 25, relevance: 20, accessibility: 15, engagement: 10 };
+    const defaultWeights = { authority: 25, companyFit: 20, relevance: 15, accessibility: 15, opportunity_strength: 25 };
 
     return `Score this prospect for sales outreach potential.
 
@@ -108,9 +126,24 @@ PROSPECT:
 - Experience: ~${Math.round(yearsExp)} years
 - Experience history: ${data.contact.experience.map((e) => `${e.title} at ${e.company}`).join('; ')}
 - Data Completeness: ${data.contact.dataCompleteness ?? 'Unknown'}%
+${data.companyEnrichment ? `
+COMPANY ENRICHMENT:
+- Tech Stack: ${data.companyEnrichment.techStack?.join(', ') ?? 'Unknown'}
+- Funding: ${data.companyEnrichment.funding ?? 'Unknown'}
+- Size: ${data.companyEnrichment.size ?? 'Unknown'}
+- Products: ${data.companyEnrichment.products?.join(', ') ?? 'Unknown'}
+- Description: ${data.companyEnrichment.description?.slice(0, 200) ?? 'N/A'}
+- Recent News: ${data.companyEnrichment.recentNews?.slice(0, 3).join('; ') ?? 'N/A'}` : ''}
+${data.opportunity ? `
+LINKED OPPORTUNITY:
+- Type: ${data.opportunity.type ?? 'None'}
+- Title: ${data.opportunity.title ?? 'N/A'}
+- Buying Intent Score: ${data.opportunity.buyingIntentScore ?? 'N/A'}
+- Technologies: ${data.opportunity.technologies?.join(', ') ?? 'N/A'}
+- Description: ${data.opportunity.description?.slice(0, 200) ?? 'N/A'}` : ''}
 
 TARGET REQUIREMENTS:
-- Target Decision-Maker Roles: ${data.requirements.requiredSkills.join(', ')}
+- Target Decision-Maker Roles: ${(data.requirements.targetRoles ?? data.requirements.requiredSkills).join(', ')}
 - Target Industries/Company Attributes: ${(data.requirements.preferredSkills ?? []).join(', ') || 'Not specified'}
 - Target Locations: ${data.requirements.locations.join(', ')}
 - Scoring Weights: ${JSON.stringify(data.requirements.scoringWeights ?? defaultWeights)}
@@ -124,7 +157,7 @@ Return JSON:
     "companyFit": 70,
     "relevance": 75,
     "accessibility": 90,
-    "engagement": 60
+    "opportunity_strength": 60
   },
   "reasoning": "One paragraph explaining the overall score",
   "strengths": ["VP-level authority", "Company in target industry"],

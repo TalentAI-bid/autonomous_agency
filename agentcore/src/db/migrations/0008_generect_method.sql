@@ -1,0 +1,1 @@
+ALTER TYPE "public"."email_discovery_method" ADD VALUE 'generect' BEFORE 'searxng';

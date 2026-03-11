@@ -3,13 +3,14 @@ import { Redis } from 'ioredis';
 import { createRedisConnection, pubRedis } from '../queues/setup.js';
 import { dispatchJob, type JobOptions } from '../services/queue.service.js';
 import { withTenant } from '../config/database.js';
-import { contacts, companies, agentTasks } from '../db/schema/index.js';
+import { contacts, companies, agentTasks, agentActivityLog, masterAgents, agentMessages } from '../db/schema/index.js';
 import type { Contact, NewContact, Company, NewCompany, AgentTask } from '../db/schema/index.js';
 import type { AgentType } from '../queues/queues.js';
 import { complete as togetherComplete, extractJSON as togetherExtractJSON, type ChatMessage } from '../tools/together-ai.tool.js';
 import { complete as claudeComplete } from '../tools/claude.tool.js';
 import { search as searxSearch, type SearchResult } from '../tools/searxng.tool.js';
 import { scrape as crawlScrape } from '../tools/crawl4ai.tool.js';
+import type { PipelineContext } from '../types/pipeline-context.js';
 import logger from '../utils/logger.js';
 
 export abstract class BaseAgent {
@@ -17,6 +18,7 @@ export abstract class BaseAgent {
   protected masterAgentId: string;
   protected agentType: AgentType;
   protected redis: Redis;
+  private _masterAgentIdValid: boolean | undefined;
 
   constructor(opts: { tenantId: string; masterAgentId: string; agentType: AgentType }) {
     this.tenantId = opts.tenantId;
@@ -101,9 +103,53 @@ export abstract class BaseAgent {
     });
   }
 
+  private async getValidMasterAgentId(): Promise<string | undefined> {
+    if (!this.masterAgentId) return undefined;
+    if (this._masterAgentIdValid === true) return this.masterAgentId;
+    if (this._masterAgentIdValid === false) return undefined;
+
+    try {
+      const [row] = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ id: masterAgents.id }).from(masterAgents)
+          .where(and(eq(masterAgents.id, this.masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+          .limit(1);
+      });
+      this._masterAgentIdValid = !!row;
+    } catch {
+      this._masterAgentIdValid = false;
+    }
+    return this._masterAgentIdValid ? this.masterAgentId : undefined;
+  }
+
+  private isValidCompanyName(name: string): boolean {
+    if (!name || name.length < 2 || name.length > 80) return false;
+    if (name === 'Unknown') return false;
+    // Reject question-like strings (StackOverflow titles, etc.)
+    if (/\?\s*(\[.*\])?\s*$/.test(name)) return false;
+    // Reject strings with too many special chars (URLs, code snippets)
+    const specialRatio = (name.match(/[^a-zA-Z0-9\s.,&'"-]/g) || []).length / name.length;
+    if (specialRatio > 0.3) return false;
+    // Reject obvious non-company patterns
+    if (/^(how|what|why|when|where|which|can|does|should|is)\s/i.test(name)) return false;
+    // Reject article titles / news headlines containing ellipsis
+    if (name.includes('…') || name.includes('...')) return false;
+    // Reject sentence-like strings (> 8 words = not a company name)
+    if (name.split(/\s+/).length > 8) return false;
+    // Reject strings starting with a quote
+    if (/^["'"']/.test(name)) return false;
+    // Reject strings that look like headlines (contain common headline verbs)
+    if (/\b(named|establishes|announces|launches|raises|hits|embracing|transforming|advancing)\b/i.test(name)) return false;
+    return true;
+  }
+
   protected async saveOrUpdateCompany(
     data: Partial<NewCompany> & { name: string; domain?: string },
   ): Promise<Company> {
+    // Reject garbage company names
+    if (!this.isValidCompanyName(data.name)) {
+      throw new Error(`Invalid company name rejected: "${data.name.slice(0, 80)}"`);
+    }
+    const validMasterAgentId = await this.getValidMasterAgentId();
     return withTenant(this.tenantId, async (tx) => {
       // Try to find by domain first (most reliable match)
       if (data.domain) {
@@ -123,7 +169,7 @@ export abstract class BaseAgent {
             .update(companies)
             .set({
               ...data,
-              masterAgentId: this.masterAgentId,
+              masterAgentId: validMasterAgentId,
               rawData: {
                 ...(existing[0]!.rawData as Record<string, unknown> ?? {}),
                 ...(data.rawData as Record<string, unknown> ?? {}),
@@ -153,7 +199,7 @@ export abstract class BaseAgent {
           .update(companies)
           .set({
             ...data,
-            masterAgentId: this.masterAgentId,
+            masterAgentId: validMasterAgentId,
             rawData: {
               ...(byName[0]!.rawData as Record<string, unknown> ?? {}),
               ...(data.rawData as Record<string, unknown> ?? {}),
@@ -170,7 +216,7 @@ export abstract class BaseAgent {
         .insert(companies)
         .values({
           tenantId: this.tenantId,
-          masterAgentId: this.masterAgentId,
+          masterAgentId: validMasterAgentId,
           ...data,
           rawData: {
             ...(data.rawData as Record<string, unknown> ?? {}),
@@ -198,6 +244,60 @@ export abstract class BaseAgent {
         })
         .where(and(eq(agentTasks.id, taskId), eq(agentTasks.tenantId, this.tenantId)));
     });
+  }
+
+  // ── Agent Messaging ─────────────────────────────────────────────────────
+
+  protected sendMessage(
+    toAgent: string | null,
+    messageType: string,
+    content: Record<string, unknown>,
+    metadata?: Record<string, unknown>,
+  ): void {
+    // Fire-and-forget — never blocks the agent
+    withTenant(this.tenantId, async (tx) => {
+      const [msg] = await tx.insert(agentMessages).values({
+        tenantId: this.tenantId,
+        masterAgentId: this.masterAgentId || undefined,
+        fromAgent: this.agentType,
+        toAgent: toAgent ?? undefined,
+        messageType,
+        content,
+        metadata,
+      }).returning();
+      return msg;
+    }).then((msg) => {
+      this.emitEvent('agent:message', {
+        id: msg?.id,
+        masterAgentId: this.masterAgentId,
+        fromAgent: this.agentType,
+        toAgent: toAgent ?? undefined,
+        messageType,
+        content,
+        metadata,
+      }).catch(() => {});
+    }).catch((err) => {
+      logger.debug({ err, messageType }, 'Failed to save agent message (non-blocking)');
+    });
+  }
+
+  protected async checkHumanInstructions(): Promise<string | null> {
+    try {
+      const key = `tenant:${this.tenantId}:human-instruction:${this.masterAgentId}:${this.agentType}`;
+      const instruction = await this.redis.get(key);
+      if (instruction) {
+        await this.redis.del(key);
+        this.sendMessage(null, 'agent_response', {
+          respondingTo: 'human_instruction',
+          instruction,
+          action: 'acknowledged',
+        });
+      }
+      return instruction;
+    } catch (err) {
+      logger.debug({ err }, 'Failed to check human instructions (non-blocking)');
+      return null;
+    }
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
@@ -238,6 +338,106 @@ export abstract class BaseAgent {
     opts?: JobOptions,
   ): Promise<string> {
     return dispatchJob(this.tenantId, type, { ...data, masterAgentId: this.masterAgentId }, opts);
+  }
+
+  // ── PipelineContext ──────────────────────────────────────────────────────
+
+  protected getPipelineContext(input: Record<string, unknown>): PipelineContext | undefined {
+    return input.pipelineContext as PipelineContext | undefined;
+  }
+
+  // ── Activity Logging ─────────────────────────────────────────────────────
+
+  protected logActivity(
+    action: string,
+    status: 'started' | 'completed' | 'failed' | 'skipped',
+    options?: { inputSummary?: string; outputSummary?: string; details?: Record<string, unknown>; durationMs?: number; error?: string },
+  ): void {
+    // Fire-and-forget — never blocks the agent
+    withTenant(this.tenantId, async (tx) => {
+      await tx.insert(agentActivityLog).values({
+        tenantId: this.tenantId,
+        masterAgentId: this.masterAgentId || undefined,
+        agentType: this.agentType,
+        action,
+        status,
+        inputSummary: options?.inputSummary ?? undefined,
+        outputSummary: options?.outputSummary ?? undefined,
+        details: options?.details ?? undefined,
+        durationMs: options?.durationMs ?? undefined,
+        error: options?.error ?? undefined,
+      });
+    }).then(() => {
+      this.emitEvent('agent:activity', {
+        agentType: this.agentType,
+        action,
+        status,
+        masterAgentId: this.masterAgentId,
+        ...(options?.durationMs != null ? { durationMs: options.durationMs } : {}),
+        ...(options?.error ? { error: options.error } : {}),
+      }).catch(() => {});
+    }).catch((err) => {
+      logger.debug({ err, action, status }, 'Failed to log activity (non-blocking)');
+    });
+  }
+
+  protected async trackAction<T>(
+    action: string,
+    inputSummary: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const start = Date.now();
+    this.logActivity(action, 'started', { inputSummary });
+    try {
+      const result = await fn();
+      const durationMs = Date.now() - start;
+      const outputSummary = typeof result === 'object' && result !== null
+        ? JSON.stringify(result).slice(0, 200)
+        : String(result).slice(0, 200);
+      this.logActivity(action, 'completed', { inputSummary, outputSummary, durationMs });
+      return result;
+    } catch (err) {
+      const durationMs = Date.now() - start;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.logActivity(action, 'failed', { inputSummary, durationMs, error: errorMsg });
+      throw err;
+    }
+  }
+
+  protected async setCurrentAction(action: string, description?: string): Promise<void> {
+    try {
+      const key = `agent-status:${this.masterAgentId}:${this.agentType}`;
+      const value = JSON.stringify({
+        action,
+        description,
+        startedAt: new Date().toISOString(),
+        masterAgentId: this.masterAgentId,
+      });
+      await this.redis.setex(key, 300, value);
+      await this.emitEvent('agent:status_change', {
+        agentType: this.agentType,
+        masterAgentId: this.masterAgentId,
+        action,
+        description,
+        status: 'active',
+      });
+    } catch (err) {
+      logger.debug({ err }, 'Failed to set current action (non-blocking)');
+    }
+  }
+
+  protected async clearCurrentAction(): Promise<void> {
+    try {
+      const key = `agent-status:${this.masterAgentId}:${this.agentType}`;
+      await this.redis.del(key);
+      await this.emitEvent('agent:status_change', {
+        agentType: this.agentType,
+        masterAgentId: this.masterAgentId,
+        status: 'idle',
+      });
+    } catch (err) {
+      logger.debug({ err }, 'Failed to clear current action (non-blocking)');
+    }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

@@ -48,7 +48,7 @@ export function getStatusColor(status: ContactStatus | string): string {
 }
 
 export function getAgentIcon(agentType: AgentType): string {
-  const map: Record<AgentType, string> = {
+  const map: Partial<Record<AgentType, string>> = {
     discovery: 'Search',
     document: 'FileText',
     enrichment: 'Database',
@@ -56,12 +56,18 @@ export function getAgentIcon(agentType: AgentType): string {
     outreach: 'Mail',
     reply: 'MessageSquare',
     action: 'Calendar',
+    strategy: 'Brain',
+    strategist: 'Target',
+    'email-listen': 'Inbox',
+    'email-send': 'Send',
+    mailbox: 'Mail',
+    'reddit-monitor': 'Radio',
   };
   return map[agentType] ?? 'Bot';
 }
 
 export function getAgentLabel(agentType: AgentType): string {
-  const map: Record<AgentType, string> = {
+  const map: Partial<Record<AgentType, string>> = {
     discovery: 'Discovery',
     document: 'Document Parser',
     enrichment: 'Enrichment',
@@ -69,12 +75,18 @@ export function getAgentLabel(agentType: AgentType): string {
     outreach: 'Outreach',
     reply: 'Reply Handler',
     action: 'Action Taker',
+    strategy: 'Strategy',
+    strategist: 'Strategist',
+    'email-listen': 'Email Listener',
+    'email-send': 'Email Sender',
+    mailbox: 'Mailbox',
+    'reddit-monitor': 'Reddit Monitor',
   };
   return map[agentType] ?? agentType;
 }
 
 export function getAgentDescription(agentType: AgentType): string {
-  const map: Record<AgentType, string> = {
+  const map: Partial<Record<AgentType, string>> = {
     discovery: 'Searches LinkedIn and web for matching profiles',
     document: 'Parses CVs and extracts structured data',
     enrichment: 'Finds emails, enriches company data',
@@ -82,6 +94,12 @@ export function getAgentDescription(agentType: AgentType): string {
     outreach: 'Sends personalized emails via Claude AI',
     reply: 'Classifies replies and handles responses',
     action: 'Schedules interviews and creates reports',
+    strategy: 'Analyzes performance and adapts daily strategy',
+    strategist: 'Creates initial sales strategy and optimizes pipeline',
+    'email-listen': 'Monitors inbound email',
+    'email-send': 'Sends queued emails',
+    mailbox: 'Manages email threads',
+    'reddit-monitor': 'Monitors Reddit for opportunities',
   };
   return map[agentType] ?? '';
 }

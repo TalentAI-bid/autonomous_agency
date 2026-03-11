@@ -69,3 +69,21 @@ export type { CrmActivity, NewCrmActivity } from './crm-activities.js';
 
 export { emailThreads, threadStatusEnum, threadPriorityEnum } from './email-threads.js';
 export type { EmailThread, NewEmailThread } from './email-threads.js';
+
+export { emailIntelligence, domainPatterns, deliverySignals, emailDiscoveryMethodEnum, deliverySignalTypeEnum } from './email-intelligence.js';
+export type { EmailIntelligenceRecord, NewEmailIntelligenceRecord, DomainPattern, NewDomainPattern, DeliverySignal, NewDeliverySignal } from './email-intelligence.js';
+
+export { redditOpportunities, redditOpportunityStatusEnum } from './reddit-opportunities.js';
+export type { RedditOpportunity, NewRedditOpportunity } from './reddit-opportunities.js';
+
+export { agentActivityLog } from './agent-activity-log.js';
+export type { AgentActivityLog, NewAgentActivityLog } from './agent-activity-log.js';
+
+export { agentDailyStrategy, strategyStatusEnum } from './agent-daily-strategy.js';
+export type { AgentDailyStrategy, NewAgentDailyStrategy } from './agent-daily-strategy.js';
+
+export { opportunities, opportunityTypeEnum, opportunityUrgencyEnum, opportunityStatusEnum } from './opportunities.js';
+export type { Opportunity, NewOpportunity } from './opportunities.js';
+
+export { agentMessages } from './agent-messages.js';
+export type { AgentMessage, NewAgentMessage } from './agent-messages.js';

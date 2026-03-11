@@ -39,7 +39,10 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    // CORS-blocked 401s appear as network errors with no response
+    const is401 = error.response?.status === 401;
+    const isCorsBlocked = !error.response && error.code === 'ERR_NETWORK';
+    if ((is401 || isCorsBlocked) && !original._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           refreshQueue.push((token) => {

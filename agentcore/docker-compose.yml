@@ -1,4 +1,48 @@
 services:
+  # ── Search & Scraping Services ─────────────────────────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: agentcore-searxng
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    ports:
+      - "8888:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/search?q=test&format=json || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - agentcore-net
+
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: agentcore-crawl4ai
+    ports:
+      - "11235:11235"
+    environment:
+      MAX_CONCURRENT_TASKS: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11235/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - agentcore-net
+
+  # ── Data Services ──────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: agentcore-postgres
@@ -69,15 +113,19 @@ services:
     networks:
       - agentcore-net
 
+  # ── Application Services ────────────────────────────────────────────────────
   agentcore-api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: agentcore-api
     command: node dist/index.js
+    env_file: .env
     environment:
       DATABASE_URL: postgresql://agentcore:agentcore@pgbouncer:6432/agentcore
       REDIS_URL: redis://redis:6379
+      SEARXNG_URL: http://searxng:8080
+      CRAWL4AI_URL: http://crawl4ai:11235
       NODE_ENV: production
       PORT: 4000
     ports:
@@ -88,6 +136,10 @@ services:
       redis:
         condition: service_healthy
       pgbouncer:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+      crawl4ai:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
@@ -103,9 +155,12 @@ services:
       dockerfile: Dockerfile
     container_name: agentcore-workers
     command: node dist/queues/workers.js
+    env_file: .env
     environment:
       DATABASE_URL: postgresql://agentcore:agentcore@pgbouncer:6432/agentcore
       REDIS_URL: redis://redis:6379
+      SEARXNG_URL: http://searxng:8080
+      CRAWL4AI_URL: http://crawl4ai:11235
       NODE_ENV: production
     depends_on:
       postgres:
@@ -113,6 +168,10 @@ services:
       redis:
         condition: service_healthy
       pgbouncer:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+      crawl4ai:
         condition: service_healthy
     networks:
       - agentcore-net

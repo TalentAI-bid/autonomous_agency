@@ -7,6 +7,8 @@ import { registerAllWorkers } from '../workers/index.js';
 import { db, withTenant } from '../config/database.js';
 import { emailListenerConfigs, masterAgents, tenants } from '../db/schema/index.js';
 import { scheduleEmailListenerJob, removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
+import { checkSearxngHealth } from '../tools/searxng.tool.js';
+import { checkCrawl4aiHealth } from '../tools/crawl4ai.tool.js';
 import logger from '../utils/logger.js';
 
 /** Active workers registry */
@@ -158,6 +160,29 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
 
   (async () => {
     try {
+      // ── Startup dependency check ──────────────────────────────────────────
+      const [searxng, crawl4ai] = await Promise.all([checkSearxngHealth(), checkCrawl4aiHealth()]);
+
+      if (!searxng.ok) {
+        logger.warn(
+          { url: searxng.url, error: searxng.error },
+          '*** SearXNG NOT REACHABLE at %s — discovery and enrichment agents will return empty results. Start it with: pm2 start ecosystem.config.cjs (searxng service) ***',
+          searxng.url,
+        );
+      } else {
+        logger.info({ url: searxng.url }, 'SearXNG is reachable');
+      }
+
+      if (!crawl4ai.ok) {
+        logger.warn(
+          { url: crawl4ai.url, error: crawl4ai.error },
+          '*** Crawl4AI NOT REACHABLE at %s — enrichment page scraping will return empty. Start it with: pm2 start ecosystem.config.cjs (crawl4ai service) ***',
+          crawl4ai.url,
+        );
+      } else {
+        logger.info({ url: crawl4ai.url }, 'Crawl4AI is reachable');
+      }
+
       const allTenants = await db.select({ id: tenants.id }).from(tenants);
       logger.info({ tenantCount: allTenants.length }, 'Worker startup: found tenants');
 

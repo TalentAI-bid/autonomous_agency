@@ -12,8 +12,10 @@ import { closeAllQueues } from './queues/queues.js';
 import { closeAllWorkers, registerTenantWorkers, scheduleAgentJobs } from './queues/workers.js';
 import { closeRedisConnections } from './queues/setup.js';
 import { errorHandler } from './utils/errors.js';
+import { checkSearxngHealth } from './tools/searxng.tool.js';
+import { checkCrawl4aiHealth } from './tools/crawl4ai.tool.js';
 import logger from './utils/logger.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { masterAgents, tenants } from './db/schema/index.js';
 import { withTenant } from './config/database.js';
 
@@ -83,6 +85,58 @@ async function buildApp() {
     timestamp: new Date().toISOString(),
     version: '1.0.0',
   }));
+
+  // Detailed health/services check (unauthenticated — for diagnostics)
+  fastify.get('/api/health/services', async () => {
+    const [searxng, crawl4ai, redis, postgres] = await Promise.all([
+      checkSearxngHealth(),
+      checkCrawl4aiHealth(),
+      (async () => {
+        try {
+          const { createRedisConnection } = await import('./queues/setup.js');
+          const r = createRedisConnection();
+          const pong = await r.ping();
+          await r.quit();
+          return { ok: pong === 'PONG', url: env.REDIS_URL };
+        } catch (err) {
+          return { ok: false, url: env.REDIS_URL, error: err instanceof Error ? err.message : String(err) };
+        }
+      })(),
+      (async () => {
+        try {
+          await db.execute(sql`SELECT 1`);
+          return { ok: true, url: env.DATABASE_URL.replace(/\/\/[^:]+:[^@]+@/, '//***:***@') };
+        } catch (err) {
+          return { ok: false, url: env.DATABASE_URL.replace(/\/\/[^:]+:[^@]+@/, '//***:***@'), error: err instanceof Error ? err.message : String(err) };
+        }
+      })(),
+    ]);
+
+    const togetherAi = {
+      ok: !!env.TOGETHER_API_KEY,
+      configured: !!env.TOGETHER_API_KEY,
+    };
+
+    const claudeAi = {
+      ok: !!env.CLAUDE_API_KEY,
+      configured: !!env.CLAUDE_API_KEY,
+    };
+
+    const allOk = searxng.ok && crawl4ai.ok && redis.ok && postgres.ok && togetherAi.ok;
+
+    return {
+      status: allOk ? 'healthy' : 'degraded',
+      timestamp: new Date().toISOString(),
+      services: {
+        searxng: { ...searxng, description: 'Meta-search engine (required for discovery + enrichment)' },
+        crawl4ai: { ...crawl4ai, description: 'Web scraper (required for enrichment page scraping)' },
+        redis: { ...redis, description: 'Cache, queues, sessions' },
+        postgres: { ...postgres, description: 'Primary database' },
+        togetherAi: { ...togetherAi, description: 'LLM for classification, extraction, scoring' },
+        claudeAi: { ...claudeAi, description: 'LLM for outreach email generation' },
+      },
+    };
+  });
 
   // API routes
   await fastify.register(authRoutes, { prefix: '/api/auth' });

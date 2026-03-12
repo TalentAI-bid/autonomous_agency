@@ -17,6 +17,24 @@ const DISCOVERY_RATE_LIMIT_MAX = 500;
 const RATE_LIMIT_WINDOW_SEC = 3600; // 1 hour
 const CACHE_TTL_SEC = 86400; // 24 hours
 
+/** Track whether we've already warned about SearXNG being unreachable */
+let searxngDownWarned = false;
+
+/**
+ * Check if SearXNG is reachable. Used by health checks and startup diagnostics.
+ */
+export async function checkSearxngHealth(): Promise<{ ok: boolean; url: string; error?: string }> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`${env.SEARXNG_URL}/search?q=test&format=json`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return { ok: res.ok, url: env.SEARXNG_URL };
+  } catch (err) {
+    return { ok: false, url: env.SEARXNG_URL, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function search(
   tenantId: string,
   query: string,
@@ -70,7 +88,16 @@ export async function search(
     await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
     return results;
   } catch (err) {
-    logger.error({ err, query, tenantId }, 'SearXNG search error');
+    if (!searxngDownWarned) {
+      searxngDownWarned = true;
+      logger.error(
+        { err, searxngUrl: env.SEARXNG_URL, tenantId },
+        'SearXNG is UNREACHABLE — all web search will return empty results. Ensure SearXNG is running at %s (pm2 start ecosystem.config.cjs or docker run searxng/searxng:latest -p 8888:8080)',
+        env.SEARXNG_URL,
+      );
+    } else {
+      logger.debug({ err, query, tenantId }, 'SearXNG search error (already warned)');
+    }
     return [];
   }
 }
@@ -132,7 +159,16 @@ export async function searchDiscovery(
     await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
     return results;
   } catch (err) {
-    logger.error({ err, query, tenantId }, 'SearXNG discovery search error');
+    if (!searxngDownWarned) {
+      searxngDownWarned = true;
+      logger.error(
+        { err, searxngUrl: env.SEARXNG_URL, tenantId },
+        'SearXNG is UNREACHABLE — all web search will return empty results. Ensure SearXNG is running at %s (pm2 start ecosystem.config.cjs or docker run searxng/searxng:latest -p 8888:8080)',
+        env.SEARXNG_URL,
+      );
+    } else {
+      logger.debug({ err, query, tenantId }, 'SearXNG discovery search error (already warned)');
+    }
     return [];
   }
 }

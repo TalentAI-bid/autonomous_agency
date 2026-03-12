@@ -10,6 +10,24 @@ const CACHE_TTL_SEC = 604800; // 7 days
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 15; // 30s total
 
+/** Track whether we've already warned about Crawl4AI being unreachable */
+let crawl4aiDownWarned = false;
+
+/**
+ * Check if Crawl4AI is reachable. Used by health checks and startup diagnostics.
+ */
+export async function checkCrawl4aiHealth(): Promise<{ ok: boolean; url: string; error?: string }> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(`${env.CRAWL4AI_URL}/health`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return { ok: res.ok, url: env.CRAWL4AI_URL };
+  } catch (err) {
+    return { ok: false, url: env.CRAWL4AI_URL, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 interface CrawlResult {
   status?: string;
   task_id?: string;
@@ -87,7 +105,16 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
 
     return '';
   } catch (err) {
-    logger.error({ err, url, tenantId }, 'Crawl4AI scrape error');
+    if (!crawl4aiDownWarned) {
+      crawl4aiDownWarned = true;
+      logger.error(
+        { err, crawl4aiUrl: env.CRAWL4AI_URL, tenantId },
+        'Crawl4AI is UNREACHABLE — all page scraping will return empty. Ensure Crawl4AI is running at %s (pm2 start ecosystem.config.cjs or docker run unclecode/crawl4ai:latest -p 11235:11235)',
+        env.CRAWL4AI_URL,
+      );
+    } else {
+      logger.debug({ err, url, tenantId }, 'Crawl4AI scrape error (already warned)');
+    }
     return '';
   }
 }

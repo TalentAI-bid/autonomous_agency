@@ -1,7 +1,7 @@
 import { eq, and, inArray, sql, count, lt, isNotNull } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies } from '../db/schema/index.js';
+import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks } from '../db/schema/index.js';
 import { AGENT_TYPES } from '../queues/queues.js';
 import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserPrompt } from '../prompts/master-agent.prompt.js';
 import { buildSystemPrompt as discoverySystemPrompt, buildUserPrompt as discoveryUserPrompt } from '../prompts/discovery.prompt.js';
@@ -280,11 +280,18 @@ export class MasterAgent extends BaseAgent {
       }
     });
 
-    // 7. Dispatch discovery jobs, staggered (only if discovery is enabled)
+    // 7. Dispatch discovery jobs in staggered batches of 5 (5-min gaps between batches)
     if (hasDiscovery) {
-      let delayCounter = 0;
+      let jobIndex = 0;
 
-      // 7a. For sales: dispatch opportunity-focused queries FIRST (lower delay)
+      // Helper: batch delay = batchIndex * 5 min + withinBatch * 2s
+      const getBatchDelay = (i: number) => {
+        const batchIndex = Math.floor(i / 5);
+        const withinBatch = i % 5;
+        return batchIndex * 300000 + withinBatch * 2000;
+      };
+
+      // 7a. For sales: dispatch opportunity-focused queries FIRST
       const strategyQueries = pipelineContext?.sales?.salesStrategy?.opportunitySearchQueries;
       if (pipelineContext?.useCase === 'sales' && strategyQueries && strategyQueries.length > 0) {
         for (const sq of strategyQueries) {
@@ -300,15 +307,15 @@ export class MasterAgent extends BaseAgent {
               pipelineContext,
               dryRun: dryRun || undefined,
             },
-            { delay: delayCounter * 2000 },
+            { delay: getBatchDelay(jobIndex) },
           );
           dispatchedJobIds.push(jobId);
-          delayCounter++;
+          jobIndex++;
         }
         logger.info({ masterAgentId, strategyQueryCount: strategyQueries.length }, 'Dispatched opportunity-focused discovery jobs (Phase 1)');
       }
 
-      // 7b. Dispatch standard discovery queries (Phase 2 for sales, Phase 1 for recruitment)
+      // 7b. Dispatch standard discovery queries in batches of 5
       for (const q of queries) {
         const jobId = await this.dispatchNext(
           'discovery',
@@ -319,13 +326,13 @@ export class MasterAgent extends BaseAgent {
             pipelineContext,
             dryRun: dryRun || undefined,
           },
-          { delay: delayCounter * 2000 },
+          { delay: getBatchDelay(jobIndex) },
         );
         dispatchedJobIds.push(jobId);
-        delayCounter++;
+        jobIndex++;
       }
 
-      // 7c. Dispatch one deep discovery job with full structured params
+      // 7c. Dispatch deep discovery job 15 minutes after start
       const deepJobId = await this.dispatchNext(
         'discovery',
         {
@@ -343,7 +350,7 @@ export class MasterAgent extends BaseAgent {
           pipelineContext,
           dryRun: dryRun || undefined,
         },
-        { delay: delayCounter * 2000 + 1000 },
+        { delay: 900000 }, // 15 minutes
       );
       dispatchedJobIds.push(deepJobId);
     }
@@ -478,6 +485,67 @@ export class MasterAgent extends BaseAgent {
       } catch (err) {
         logger.warn({ err, masterAgentId }, 'Failed to query unenriched companies for orchestration');
       }
+    }
+
+    // Service outage detection: check last 10 enrichment tasks
+    try {
+      const recentEnrichments = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ output: agentTasks.output })
+          .from(agentTasks)
+          .where(and(
+            eq(agentTasks.tenantId, this.tenantId),
+            eq(agentTasks.masterAgentId, masterAgentId),
+            eq(agentTasks.agentType, 'enrichment' as any),
+            eq(agentTasks.status, 'completed'),
+          ))
+          .orderBy(sql`created_at DESC`)
+          .limit(10);
+      });
+
+      if (recentEnrichments.length >= 10) {
+        const allBelow20 = recentEnrichments.every(e => {
+          const output = e.output as Record<string, unknown> | null;
+          return (output?.dataCompleteness as number ?? 0) < 20;
+        });
+        if (allBelow20) {
+          decisions.push('POSSIBLE SERVICE OUTAGE: last 10 enrichments all below 20% completeness');
+          await this.emitEvent('pipeline:service_outage_suspected', { masterAgentId });
+          logger.error({ masterAgentId }, 'Possible service outage — last 10 enrichments all below 20% completeness');
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'Failed to check for service outage in orchestrator');
+    }
+
+    // Re-enrichment: dispatch enrichment for shallow contacts (status=enriched, low completeness, not retried too many times)
+    try {
+      const shallowContacts = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ id: contacts.id })
+          .from(contacts)
+          .where(and(
+            eq(contacts.tenantId, this.tenantId),
+            eq(contacts.masterAgentId, masterAgentId),
+            eq(contacts.status, 'enriched'),
+            lt(contacts.dataCompleteness, 50),
+            lt(contacts.enrichmentRetryCount, 3),
+            sql`${contacts.updatedAt} < NOW() - INTERVAL '6 hours'`,
+          ))
+          .limit(5);
+      });
+
+      for (const c of shallowContacts) {
+        await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId, deepMode: true });
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.update(contacts)
+            .set({ enrichmentRetryCount: sql`enrichment_retry_count + 1` })
+            .where(eq(contacts.id, c.id));
+        });
+      }
+      if (shallowContacts.length > 0) {
+        actions.push(`Re-enrichment dispatched for ${shallowContacts.length} shallow contacts`);
+      }
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'Failed to dispatch re-enrichment from orchestrator');
     }
 
     if (metrics.scored > 20 && metrics.contacted < 5) {

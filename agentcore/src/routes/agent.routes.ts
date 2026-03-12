@@ -104,4 +104,78 @@ export default async function agentRoutes(fastify: FastifyInstance) {
       return { data, pagination: { hasMore, nextCursor } };
     },
   );
+
+  // DELETE /api/agents/cache/flush — Flush cached data by type
+  fastify.delete<{
+    Querystring: { type?: string };
+  }>('/cache/flush', async (request) => {
+    const flushType = request.query.type ?? 'all';
+    const validTypes = ['discovery', 'search', 'pages', 'domain', 'all'];
+    if (!validTypes.includes(flushType)) {
+      throw new ValidationError(`Invalid flush type: ${flushType}. Must be one of: ${validTypes.join(', ')}`);
+    }
+
+    const redis = createRedisConnection();
+    try {
+      const patterns: string[] = [];
+      if (flushType === 'discovery' || flushType === 'all') {
+        patterns.push('discovery:plan:*', 'discovery:company:*');
+      }
+      if (flushType === 'search' || flushType === 'all') {
+        patterns.push(`tenant:${request.tenantId}:cache:search:*`);
+      }
+      if (flushType === 'pages' || flushType === 'all') {
+        patterns.push(`tenant:${request.tenantId}:cache:page:*`);
+      }
+      if (flushType === 'domain' || flushType === 'all') {
+        patterns.push('domain-resolve:*');
+      }
+
+      let totalDeleted = 0;
+      for (const pattern of patterns) {
+        let cursor = '0';
+        do {
+          const [nextCursor, keys] = await redis.scan(parseInt(cursor, 10), 'MATCH', pattern, 'COUNT', 100);
+          cursor = String(nextCursor);
+          if (keys.length > 0) {
+            await redis.del(...keys);
+            totalDeleted += keys.length;
+          }
+        } while (cursor !== '0');
+      }
+
+      return { deleted: totalDeleted, type: flushType };
+    } finally {
+      await redis.quit();
+    }
+  });
+
+  // GET /api/agents/:masterAgentId/rate-limits — View current rate limit usage
+  fastify.get<{
+    Params: { masterAgentId: string };
+  }>('/:masterAgentId/rate-limits', async (request) => {
+    const redis = createRedisConnection();
+    try {
+      const buckets = ['search', 'discovery', 'reddit'];
+      const limits: Record<string, number> = { search: 500, discovery: 500, reddit: 200 };
+      const result: Record<string, { used: number; limit: number; resetsIn: number }> = {};
+
+      for (const bucket of buckets) {
+        const key = `tenant:${request.tenantId}:ratelimit:${bucket}`;
+        const [usedStr, ttl] = await Promise.all([
+          redis.get(key),
+          redis.ttl(key),
+        ]);
+        result[bucket] = {
+          used: usedStr ? parseInt(usedStr, 10) : 0,
+          limit: limits[bucket]!,
+          resetsIn: ttl > 0 ? ttl : 0,
+        };
+      }
+
+      return { data: result };
+    } finally {
+      await redis.quit();
+    }
+  });
 }

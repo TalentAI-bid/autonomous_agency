@@ -21,7 +21,7 @@ export const QUEUE_CONFIGS: Record<QueueType, {
   concurrency: number;
 }> = {
   discovery: {
-    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+    defaultJobOptions: { attempts: 10, backoff: { type: 'exponential', delay: 10000 } },
     concurrency: 5,
   },
   enrichment: {

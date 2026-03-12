@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
-import { createRedisConnection } from '../queues/setup.js';
+import { createRedisConnection, pubRedis } from '../queues/setup.js';
 import logger from '../utils/logger.js';
 
 export interface SearchResult {
@@ -15,10 +15,43 @@ const redis: Redis = createRedisConnection();
 const RATE_LIMIT_MAX = 500;
 const DISCOVERY_RATE_LIMIT_MAX = 500;
 const RATE_LIMIT_WINDOW_SEC = 3600; // 1 hour
-const CACHE_TTL_SEC = 86400; // 24 hours
+const CACHE_TTL_SEC = 43200; // 12 hours
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+const CIRCUIT_BREAKER_TTL = 300; // 5 minutes
 
 /** Track whether we've already warned about SearXNG being unreachable */
 let searxngDownWarned = false;
+
+/** Circuit breaker: check if SearXNG circuit is open */
+async function isCircuitOpen(): Promise<boolean> {
+  try {
+    return (await redis.get('circuit:searxng:open')) === 'true';
+  } catch { return false; }
+}
+
+/** Circuit breaker: record a failure and potentially open the circuit */
+async function recordCircuitFailure(tenantId: string): Promise<void> {
+  try {
+    const failKey = 'circuit:searxng:failures';
+    const failures = await redis.incr(failKey);
+    await redis.expire(failKey, CIRCUIT_BREAKER_TTL);
+    if (failures >= CIRCUIT_BREAKER_THRESHOLD) {
+      await redis.setex('circuit:searxng:open', CIRCUIT_BREAKER_TTL, 'true');
+      logger.error({ tenantId, failures }, 'Circuit breaker OPEN for SearXNG — skipping all searches for 5 minutes');
+      pubRedis.publish(
+        `agent-events:${tenantId}`,
+        JSON.stringify({ event: 'pipeline:service_down', data: { service: 'searxng' }, timestamp: new Date().toISOString() }),
+      ).catch(() => {});
+    }
+  } catch { /* non-critical */ }
+}
+
+/** Circuit breaker: record a success and reset failure counter */
+async function recordCircuitSuccess(): Promise<void> {
+  try {
+    await redis.del('circuit:searxng:failures');
+  } catch { /* non-critical */ }
+}
 
 /**
  * Check if SearXNG is reachable. Used by health checks and startup diagnostics.
@@ -40,6 +73,9 @@ export async function search(
   query: string,
   maxResults = 10,
 ): Promise<SearchResult[]> {
+  // Circuit breaker check
+  if (await isCircuitOpen()) return [];
+
   // Rate limit check
   const rateLimitKey = `tenant:${tenantId}:ratelimit:search`;
   const currentCount = await redis.get(rateLimitKey);
@@ -53,7 +89,21 @@ export async function search(
   }
   if (count > RATE_LIMIT_MAX) {
     logger.warn({ tenantId, count }, 'SearXNG rate limit exceeded');
+    pubRedis.publish(`agent-events:${tenantId}`, JSON.stringify({
+      event: 'pipeline:rate_limit_hit', data: { bucket: 'search', used: count, limit: RATE_LIMIT_MAX }, timestamp: new Date().toISOString(),
+    })).catch(() => {});
     return [];
+  }
+  // Conservation mode at 90%: general search returns empty, only enrichment (via searchDiscovery) gets through
+  if (count > RATE_LIMIT_MAX * 0.9) {
+    logger.warn({ tenantId, count }, 'SearXNG search conservation mode — returning empty to preserve budget for enrichment');
+    return [];
+  }
+  // Warning at 80%
+  if (count === Math.floor(RATE_LIMIT_MAX * 0.8)) {
+    pubRedis.publish(`agent-events:${tenantId}`, JSON.stringify({
+      event: 'pipeline:rate_limit_warning', data: { bucket: 'search', used: count, limit: RATE_LIMIT_MAX }, timestamp: new Date().toISOString(),
+    })).catch(() => {});
   }
 
   // Cache check
@@ -85,9 +135,13 @@ export async function search(
         snippet: r.content ?? '',
       }));
 
-    await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
+    if (results.length > 0) {
+      await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
+    }
+    await recordCircuitSuccess();
     return results;
   } catch (err) {
+    await recordCircuitFailure(tenantId);
     if (!searxngDownWarned) {
       searxngDownWarned = true;
       logger.error(
@@ -111,6 +165,9 @@ export async function searchDiscovery(
   query: string,
   maxResults = 10,
 ): Promise<SearchResult[]> {
+  // Circuit breaker check
+  if (await isCircuitOpen()) return [];
+
   // Rate limit check — separate bucket for discovery
   const rateLimitKey = `tenant:${tenantId}:ratelimit:discovery`;
   const currentCount = await redis.get(rateLimitKey);
@@ -156,9 +213,13 @@ export async function searchDiscovery(
         snippet: r.content ?? '',
       }));
 
-    await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
+    if (results.length > 0) {
+      await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
+    }
+    await recordCircuitSuccess();
     return results;
   } catch (err) {
+    await recordCircuitFailure(tenantId);
     if (!searxngDownWarned) {
       searxngDownWarned = true;
       logger.error(

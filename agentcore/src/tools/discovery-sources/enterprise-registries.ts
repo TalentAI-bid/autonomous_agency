@@ -9,7 +9,7 @@ import type { DiscoveryParams, PeopleDiscoveryParams, RawCompanyResult, RawPerso
 const redis: Redis = createRedisConnection();
 const apiLimit = pLimit(2);
 const API_DELAY_MS = 1000;
-const CACHE_TTL_90D = 90 * 24 * 3600;
+const CACHE_TTL_90D = 14 * 24 * 3600; // 14 days
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

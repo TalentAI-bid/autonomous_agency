@@ -13,6 +13,9 @@ import { scrape as crawlScrape } from '../tools/crawl4ai.tool.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
 import logger from '../utils/logger.js';
 
+/** Shared Redis connection for all agent instances (avoids per-instance connection leak) */
+const sharedAgentRedis: Redis = createRedisConnection();
+
 export abstract class BaseAgent {
   protected tenantId: string;
   protected masterAgentId: string;
@@ -24,7 +27,7 @@ export abstract class BaseAgent {
     this.tenantId = opts.tenantId;
     this.masterAgentId = opts.masterAgentId;
     this.agentType = opts.agentType;
-    this.redis = createRedisConnection();
+    this.redis = sharedAgentRedis;
   }
 
   // ── LLM ──────────────────────────────────────────────────────────────────
@@ -443,7 +446,7 @@ export abstract class BaseAgent {
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   async close(): Promise<void> {
-    await this.redis.quit();
+    // No-op: Redis connection is shared across all agent instances
   }
 
   abstract execute(input: Record<string, unknown>): Promise<Record<string, unknown>>;

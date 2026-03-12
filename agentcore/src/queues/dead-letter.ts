@@ -1,41 +1,73 @@
 import { Worker, type Job } from 'bullmq';
-import { createRedisConnection } from './setup.js';
+import { eq } from 'drizzle-orm';
+import { queueRedis, pubRedis } from './setup.js';
 import { getQueueName } from './queues.js';
+import { withTenant } from '../config/database.js';
+import { agentTasks } from '../db/schema/index.js';
 import logger from '../utils/logger.js';
 
 /**
  * Dead letter queue worker.
  * Handles jobs that have exhausted all retries.
- * Logs the failure details for debugging and monitoring.
+ * Updates task status and emits WebSocket notification.
  */
 export function createDeadLetterWorker(tenantId: string): Worker {
   const queueName = getQueueName(tenantId, 'dead-letter');
-  const connection = createRedisConnection();
 
   const worker = new Worker(
     queueName,
     async (job: Job) => {
+      const data = job.data as Record<string, unknown>;
+      const jobTenantId = (data.tenantId as string) ?? tenantId;
+      const originalAgentType = data.agentType as string | undefined;
+      const failedReason = data.failedReason as string | undefined;
+      const originalJobId = data.originalJobId as string | undefined;
+
       logger.error(
         {
           deadLetterJobId: job.id,
-          tenantId: (job.data as Record<string, unknown>).tenantId,
-          originalAgentType: (job.data as Record<string, unknown>).agentType,
-          failedReason: (job.data as Record<string, unknown>).failedReason,
-          originalJobId: (job.data as Record<string, unknown>).originalJobId,
-          data: job.data,
+          tenantId: jobTenantId,
+          originalAgentType,
+          failedReason,
+          originalJobId,
+          data,
         },
         'Dead letter: job permanently failed',
       );
 
-      // In Prompt 2, this will also:
-      // 1. Update agent_tasks table with status='failed'
-      // 2. Send notification via WebSocket
-      // 3. Optionally alert via email/webhook
+      // Update agent_tasks with failed status
+      if (jobTenantId && originalJobId) {
+        try {
+          await withTenant(jobTenantId, async (tx) => {
+            await tx.update(agentTasks)
+              .set({
+                status: 'failed',
+                error: `Dead letter: ${failedReason ?? 'unknown'}`,
+                completedAt: new Date(),
+              })
+              .where(eq(agentTasks.id, originalJobId));
+          });
+        } catch (err) {
+          logger.warn({ err, originalJobId }, 'Failed to update task record from dead letter');
+        }
+      }
+
+      // Emit WebSocket notification
+      try {
+        await pubRedis.publish(
+          `agent-events:${jobTenantId}`,
+          JSON.stringify({
+            event: 'task:dead_letter',
+            data: { agentType: originalAgentType, failedReason },
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      } catch { /* non-critical */ }
 
       return { recorded: true };
     },
     {
-      connection: connection as any,
+      connection: queueRedis as any,
       concurrency: 1,
     },
   );

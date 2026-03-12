@@ -324,7 +324,7 @@ export class DiscoveryAgent extends BaseAgent {
               !hostname.includes('indeed.com') && !hostname.includes('crunchbase.com') &&
               !hostname.includes('wikipedia.org') && !hostname.includes('twitter.com') &&
               !hostname.includes('facebook.com')) {
-            await this.redis.setex(cacheKey, 30 * 86400, hostname);
+            await this.redis.setex(cacheKey, 14 * 86400, hostname);
             return hostname;
           }
         } catch { /* skip bad URL */ }
@@ -339,7 +339,7 @@ export class DiscoveryAgent extends BaseAgent {
           const websiteMatch = pageContent.match(/(?:Website|External link|Company website)[\s:]*(?:<[^>]+>)*(https?:\/\/[^\s<"]+)/i);
           if (websiteMatch?.[1]) {
             const domain = new URL(websiteMatch[1]).hostname.replace('www.', '');
-            await this.redis.setex(cacheKey, 30 * 86400, domain);
+            await this.redis.setex(cacheKey, 14 * 86400, domain);
             return domain;
           }
         } catch { /* ignore */ }
@@ -348,7 +348,7 @@ export class DiscoveryAgent extends BaseAgent {
       logger.debug({ err, companyName }, 'Domain resolution failed');
     }
 
-    await this.redis.setex(cacheKey, 7 * 86400, 'NOT_FOUND').catch(() => {});
+    await this.redis.setex(cacheKey, 86400, 'NOT_FOUND').catch(() => {}); // 1 day
     return undefined;
   }
 

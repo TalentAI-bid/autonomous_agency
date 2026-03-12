@@ -21,8 +21,8 @@ import type {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const OVERALL_TIMEOUT_MS = 120_000;
-const PLAN_CACHE_TTL = 12 * 3600; // 12 hours
-const COMPANY_CACHE_TTL = 30 * 24 * 3600; // 30 days
+const PLAN_CACHE_TTL = 4 * 3600; // 4 hours
+const COMPANY_CACHE_TTL = 7 * 24 * 3600; // 7 days
 
 // ── Source definitions ──────────────────────────────────────────────────────
 

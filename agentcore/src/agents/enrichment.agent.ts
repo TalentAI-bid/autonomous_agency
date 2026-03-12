@@ -37,6 +37,23 @@ export class EnrichmentAgent extends BaseAgent {
     if (!contactId) throw new Error('Either contactId or companyId must be provided');
 
     logger.info({ tenantId: this.tenantId, contactId }, 'EnrichmentAgent starting');
+
+    // Check SearXNG budget before starting — defer if nearly exhausted
+    try {
+      const searchCount = await this.redis.get(`tenant:${this.tenantId}:ratelimit:search`);
+      const remaining = 500 - (searchCount ? parseInt(searchCount, 10) : 0);
+      if (remaining < 20) {
+        const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
+        if (ttl > 300) { // > 5 min until reset
+          logger.warn({ tenantId: this.tenantId, contactId, remaining, ttl }, 'SearXNG budget nearly exhausted — deferring enrichment');
+          throw new Error(`SearXNG budget exhausted (${remaining} remaining, resets in ${ttl}s) — will retry after backoff`);
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('SearXNG budget exhausted')) throw err;
+      // Redis check failure is non-critical, continue
+    }
+
     await this.setCurrentAction('enrichment', `Enriching contact ${contactId.slice(0, 8)}`);
 
     // Check for human instructions
@@ -166,11 +183,10 @@ export class EnrichmentAgent extends BaseAgent {
             careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href);
           })(),
 
-          // Source 2: Team/Leadership page — try multiple paths
+          // Source 2: Team/Leadership page — try 2 paths (reduced from 5)
           (async () => {
             if (!companyUrl) return;
-            const teamPaths = ['/team', '/about/team', '/people', '/about-us/team', '/leadership'];
-            for (const path of teamPaths) {
+            for (const path of ['/team', '/about']) {
               try {
                 const url = new URL(path, companyUrl).href;
                 const content = await this.scrapeUrl(url);
@@ -183,26 +199,17 @@ export class EnrichmentAgent extends BaseAgent {
             }
           })(),
 
-          // Source 3: LinkedIn company page (using smart queries)
+          // Source 3: LinkedIn + Crunchbase combined (1 SearXNG call instead of 2)
           (async () => {
-            const queries = smartQueries.linkedinCompanyQueries.length > 0
-              ? smartQueries.linkedinCompanyQueries
-              : [`site:linkedin.com/company/ "${contactCompanyName}"`];
-            for (const query of queries) {
-              const results = await this.searchWeb(query, 5);
-              const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
-              if (liUrl) {
-                linkedinCompanyContent = await this.scrapeUrl(liUrl);
-                logger.info({ contactId, liUrl }, 'LinkedIn company page scraped');
-                break;
-              }
+            const query = `"${contactCompanyName}" LinkedIn OR Crunchbase OR funding`;
+            const results = await this.searchWeb(query, 10);
+            // Extract LinkedIn company URL
+            const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
+            if (liUrl) {
+              linkedinCompanyContent = await this.scrapeUrl(liUrl);
+              logger.info({ contactId, liUrl }, 'LinkedIn company page scraped');
             }
-          })(),
-
-          // Source 4: Crunchbase / Funding
-          (async () => {
-            const query = `${contactCompanyName} crunchbase OR funding OR series`;
-            const results = await this.searchWeb(query, 5);
+            // Extract Crunchbase/funding URL
             const cbUrl = results.find((r) =>
               r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'),
             )?.url;
@@ -210,36 +217,23 @@ export class EnrichmentAgent extends BaseAgent {
               crunchbaseContent = await this.scrapeUrl(cbUrl);
               logger.info({ contactId, cbUrl }, 'Crunchbase/funding content scraped');
             } else {
-              // Use search snippets as fallback
-              crunchbaseContent = results.slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
+              crunchbaseContent = results.filter(r => !r.url.includes('linkedin.com')).slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
             }
           })(),
 
-          // Source 5: Company news
+          // Source 4: Company news (1 SearXNG call)
           (async () => {
             const query = `${contactCompanyName} latest news 2026`;
             const results = await this.searchWeb(query, 5);
-            // Use snippets from top news results
             newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
             logger.info({ contactId, resultsCount: results.length }, 'Company news gathered');
-          })(),
-
-          // Source 6: Glassdoor
-          (async () => {
-            const query = `site:glassdoor.com "${contactCompanyName}" reviews`;
-            const results = await this.searchWeb(query, 5);
-            const gdUrl = results.find((r) => r.url.includes('glassdoor.com'))?.url;
-            if (gdUrl) {
-              glassdoorContent = await this.scrapeUrl(gdUrl);
-              logger.info({ contactId, gdUrl }, 'Glassdoor content scraped');
-            }
           })(),
         ]);
 
         // Log company source failures
         companySourceResults.forEach((result, i) => {
           if (result.status === 'rejected') {
-            const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn', 'Crunchbase', 'News', 'Glassdoor'];
+            const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn+Crunchbase', 'News'];
             logger.warn({ err: result.reason, contactId, source: sourceNames[i] }, 'Company source search failed');
           }
         });
@@ -268,7 +262,7 @@ export class EnrichmentAgent extends BaseAgent {
         ]);
 
         // Calculate company data completeness
-        const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters];
+        const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters, deepCompany.techStack?.length ? 'yes' : '', deepCompany.keyPeople?.length ? 'yes' : '', deepCompany.recentNews?.length ? 'yes' : '', deepCompany.products?.length ? 'yes' : '', deepCompany.competitors?.length ? 'yes' : ''];
         const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
         const companyDataCompleteness = Math.round((companyFilledFields / companyFields.length) * 100);
 
@@ -313,7 +307,7 @@ export class EnrichmentAgent extends BaseAgent {
 
         // ── Phase 2b: Key person deep research ──────────────────────────────
         if (deepCompany.keyPeople?.length && companyDomain) {
-          const keyPeopleToResearch = deepCompany.keyPeople.slice(0, 5);
+          const keyPeopleToResearch = deepCompany.keyPeople.slice(0, 3);
           const keyPeopleResults = await Promise.allSettled(
             keyPeopleToResearch.map(async (person) => {
               if (!person.name) return person;
@@ -533,7 +527,7 @@ export class EnrichmentAgent extends BaseAgent {
     // Save data completeness to contact record
     updateData.dataCompleteness = dataCompleteness;
 
-    const qualityDecision = dataCompleteness >= 50 ? 'pass' : (dataCompleteness >= 30 ? 'retry' : 'archive');
+    const qualityDecision = dataCompleteness >= 50 ? 'pass' : (dataCompleteness >= 35 ? 'retry' : 'archive');
     this.sendMessage(null, 'reasoning', {
       contactName,
       dataCompleteness,
@@ -545,7 +539,7 @@ export class EnrichmentAgent extends BaseAgent {
     if (dataCompleteness < 50) {
       const retryCount = (input.retryCount as number) ?? 0;
 
-      if (dataCompleteness >= 30 && retryCount < 2) {
+      if (dataCompleteness >= 35 && retryCount < 2) {
         // Retry enrichment with deeper search strategies
         updateData.status = 'discovered'; // keep in pipeline for retry
 
@@ -580,7 +574,7 @@ export class EnrichmentAgent extends BaseAgent {
       }
 
       // Retries exhausted but >= 30% — mark as enriched (partial) and still dispatch to scoring
-      if (dataCompleteness >= 30) {
+      if (dataCompleteness >= 35) {
         updateData.status = 'enriched';
         await withTenant(this.tenantId, async (tx) => {
           await tx.update(contacts).set(updateData).where(eq(contacts.id, contactId));
@@ -773,10 +767,10 @@ export class EnrichmentAgent extends BaseAgent {
       const companySourceResults = await Promise.allSettled([
         (async () => { if (!companyUrl) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
         (async () => { if (!companyUrl) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
+        // Team page — try 2 paths (reduced from 5)
         (async () => {
           if (!companyUrl) return;
-          const teamPaths = ['/team', '/about/team', '/people', '/about-us/team', '/leadership'];
-          for (const path of teamPaths) {
+          for (const path of ['/team', '/about']) {
             try {
               const url = new URL(path, companyUrl).href;
               const content = await this.scrapeUrl(url);
@@ -784,42 +778,27 @@ export class EnrichmentAgent extends BaseAgent {
             } catch { /* try next path */ }
           }
         })(),
+        // LinkedIn + Crunchbase combined (1 SearXNG call instead of 2)
         (async () => {
-          const queries = smartQueries.linkedinCompanyQueries.length > 0
-            ? smartQueries.linkedinCompanyQueries
-            : [`site:linkedin.com/company/ "${companyName}"`];
-          for (const query of queries) {
-            const results = await this.searchWeb(query, 5);
-            const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
-            if (liUrl) {
-              linkedinCompanyContent = await this.scrapeUrl(liUrl);
-              break;
-            }
-          }
-        })(),
-        (async () => {
-          const query = `${companyName} crunchbase OR funding OR series`;
-          const results = await this.searchWeb(query, 5);
+          const query = `"${companyName}" LinkedIn OR Crunchbase OR funding`;
+          const results = await this.searchWeb(query, 10);
+          const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
+          if (liUrl) linkedinCompanyContent = await this.scrapeUrl(liUrl);
           const cbUrl = results.find((r) => r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'))?.url;
           if (cbUrl) crunchbaseContent = await this.scrapeUrl(cbUrl);
-          else crunchbaseContent = results.slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
+          else crunchbaseContent = results.filter(r => !r.url.includes('linkedin.com')).slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
         })(),
+        // Company news (1 SearXNG call)
         (async () => {
           const query = `${companyName} latest news 2026`;
           const results = await this.searchWeb(query, 5);
           newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
         })(),
-        (async () => {
-          const query = `site:glassdoor.com "${companyName}" reviews`;
-          const results = await this.searchWeb(query, 5);
-          const gdUrl = results.find((r) => r.url.includes('glassdoor.com'))?.url;
-          if (gdUrl) glassdoorContent = await this.scrapeUrl(gdUrl);
-        })(),
       ]);
 
       companySourceResults.forEach((result, i) => {
         if (result.status === 'rejected') {
-          const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn', 'Crunchbase', 'News', 'Glassdoor'];
+          const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn+Crunchbase', 'News'];
           logger.warn({ err: result.reason, companyId, source: sourceNames[i] }, 'Company source search failed');
         }
       });
@@ -847,7 +826,7 @@ export class EnrichmentAgent extends BaseAgent {
       ]);
 
       // Calculate company data completeness
-      const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters];
+      const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters, deepCompany.techStack?.length ? 'yes' : '', deepCompany.keyPeople?.length ? 'yes' : '', deepCompany.recentNews?.length ? 'yes' : '', deepCompany.products?.length ? 'yes' : '', deepCompany.competitors?.length ? 'yes' : ''];
       const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
       const companyDataCompleteness = Math.round((companyFilledFields / companyFields.length) * 100);
 
@@ -1178,57 +1157,9 @@ export class EnrichmentAgent extends BaseAgent {
         if (!contactCompanyName) return;
         const query = `"${contactCompanyName}" funding OR partnership OR announcement`;
         const results = await this.searchWeb(query, 5);
-        // Store snippets as searchable content
         const newsSnippets = results.slice(0, 5).map((r) => `${r.title}: ${r.snippet}`).join('\n');
         if (newsSnippets) {
           logger.info({ contactId, resultsCount: results.length }, 'Company news gathered (sales)');
-        }
-      })(),
-
-      // Source 4: Industry publications
-      (async () => {
-        if (!contactName || !contactCompanyName) return;
-        const query = `"${contactName}" "${contactCompanyName}" interview OR conference OR speaking`;
-        const results = await this.searchWeb(query, 5);
-        if (results.length > 0) {
-          logger.info({ contactId, resultsCount: results.length }, 'Industry publications found (sales)');
-        }
-      })(),
-
-      // Source 5: Twitter/X (using smart queries)
-      (async () => {
-        if (!contactName) return;
-        const queries = smartQueries.contactSocialQueries.length > 0
-          ? smartQueries.contactSocialQueries
-          : [`site:twitter.com OR site:x.com "${contactName}" ${contactTitle}`.trim()];
-        for (const query of queries) {
-          const results = await this.searchWeb(query, 5);
-          const twitterUrl = results.find((r) =>
-            (r.url.includes('twitter.com/') || r.url.includes('x.com/')) &&
-            !r.url.includes('/status/') &&
-            !r.url.includes('/search'),
-          )?.url;
-          if (twitterUrl) {
-            setTwitterContent(await this.scrapeUrl(twitterUrl));
-            logger.info({ contactId, twitterUrl }, 'Twitter/X profile scraped (sales)');
-            break;
-          }
-        }
-      })(),
-
-      // Source 6: Company LinkedIn page (using smart queries)
-      (async () => {
-        if (!contactCompanyName) return;
-        const queries = smartQueries.linkedinCompanyQueries.length > 0
-          ? smartQueries.linkedinCompanyQueries
-          : [`site:linkedin.com/company/ "${contactCompanyName}"`];
-        for (const query of queries) {
-          const results = await this.searchWeb(query, 5);
-          const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
-          if (liUrl) {
-            logger.info({ contactId, liUrl }, 'LinkedIn company page found (sales)');
-            break;
-          }
         }
       })(),
     ]);

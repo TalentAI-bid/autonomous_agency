@@ -80,9 +80,6 @@ export class DiscoveryAgent extends BaseAgent {
     let opportunitiesCreated = 0;
     let enrichmentDispatched = 0;
 
-    // Pool of discovered company IDs to batch-dispatch to enrichment
-    const companyPool: { companyId: string; companyName: string; domain?: string }[] = [];
-
     // Build ICP exclusion context for classification
     const icpExclusion = this.buildICPExclusion();
 
@@ -140,38 +137,37 @@ export class DiscoveryAgent extends BaseAgent {
           }
         } else if (item.classification === 'company_page') {
           const companyResult = await this.handleCompany(result, item, query, useCase);
-          if (companyResult) companyPool.push(companyResult);
+          if (companyResult) {
+            enrichmentDispatched += await this.dispatchCompanyEnrichment(companyResult, masterAgentId);
+          }
           companiesFound++;
         } else if (item.classification === 'team_page') {
           await this.handleTeamPage(result, item, query, masterAgentId, dryRun);
           teamPagesProcessed++;
         } else if (item.classification === 'content_with_companies') {
           const contentCompanies = await this.handleContentWithCompanies(result, item, query, useCase, masterAgentId);
-          companyPool.push(...contentCompanies);
+          for (const company of contentCompanies) {
+            enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
+          }
           companiesFound += (item.extractedCompanies?.length ?? 0);
         } else if (item.classification === 'directory_page') {
           const dirCompanies = await this.handleDirectoryPage(result, item, query, useCase);
-          companyPool.push(...dirCompanies);
+          for (const company of dirCompanies) {
+            enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
+          }
           directoryPagesProcessed++;
         } else if (item.classification === 'job_listing') {
           const { opportunityCreated, company: jobCompany } = await this.handleJobListing(result, item, query, useCase, masterAgentId, opportunityFocused);
           if (opportunityCreated) opportunitiesCreated++;
-          if (jobCompany) companyPool.push(jobCompany);
+          if (jobCompany) {
+            enrichmentDispatched += await this.dispatchCompanyEnrichment(jobCompany, masterAgentId);
+          }
           jobListingsProcessed++;
         } else {
           irrelevantFiltered++;
         }
       }
 
-      // Flush company pool when it reaches 10
-      if (companyPool.length >= 10) {
-        enrichmentDispatched += await this.flushCompanyPool(companyPool, masterAgentId);
-      }
-    }
-
-    // Final flush of remaining companies in pool
-    if (companyPool.length > 0) {
-      enrichmentDispatched += await this.flushCompanyPool(companyPool, masterAgentId);
     }
 
     // Log incomplete companies (no domain) as agent room discovery details
@@ -845,41 +841,31 @@ Return valid JSON.`,
     return discoveredCompanies;
   }
 
-  // ── Batch dispatch companies to enrichment ──────────────────────────────────
+  // ── Immediate company enrichment dispatch ───────────────────────────────────
 
-  private async flushCompanyPool(
-    pool: { companyId: string; companyName: string; domain?: string }[],
+  private async dispatchCompanyEnrichment(
+    entry: { companyId: string; companyName: string; domain?: string },
     masterAgentId: string,
   ): Promise<number> {
-    let dispatched = 0;
-    const toDispatch = pool.splice(0, pool.length); // drain the pool
-
-    for (const entry of toDispatch) {
-      // Only dispatch enrichment for companies that have a domain
-      if (!entry.domain) continue;
-
-      try {
-        await this.dispatchNext('enrichment', {
-          companyId: entry.companyId,
-          masterAgentId,
-          pipelineContext: this._ctx,
-        });
-        dispatched++;
-      } catch (err) {
-        logger.warn({ err, companyId: entry.companyId, companyName: entry.companyName }, 'Failed to dispatch company enrichment');
-      }
-    }
-
-    if (dispatched > 0) {
-      this.sendMessage('enrichment', 'data_handoff', {
-        action: 'batch_company_enrichment',
-        companyCount: dispatched,
-        companies: toDispatch.filter(e => e.domain).map(e => ({ companyId: e.companyId, companyName: e.companyName, domain: e.domain })),
+    try {
+      await this.dispatchNext('enrichment', {
+        companyId: entry.companyId,
+        masterAgentId,
+        pipelineContext: this._ctx,
       });
-      logger.info({ masterAgentId, dispatched }, 'Flushed company pool to enrichment');
-    }
 
-    return dispatched;
+      this.sendMessage('enrichment', 'data_handoff', {
+        action: 'company_enrichment_dispatch',
+        companyId: entry.companyId,
+        companyName: entry.companyName,
+        domain: entry.domain,
+      });
+
+      return 1;
+    } catch (err) {
+      logger.warn({ err, companyId: entry.companyId, companyName: entry.companyName }, 'Failed to dispatch company enrichment');
+      return 0;
+    }
   }
 
   // ── ICP exclusion context builder ──────────────────────────────────────────

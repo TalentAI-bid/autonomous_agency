@@ -352,32 +352,96 @@ export default function AgentDetailPage() {
               Companies ({agentCompanies.length})
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent>
             {agentCompanies.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
                 No companies discovered yet.
               </p>
             ) : (
-              agentCompanies.map((company) => (
-                <Link key={company.id} href={`/companies/${company.id}`} className="block cursor-pointer">
-                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{company.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {[company.industry, company.size, company.domain].filter(Boolean).join(' · ')}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 ml-2 shrink-0">
-                      {company.funding && (
-                        <Badge variant="outline" className="text-xs">{company.funding}</Badge>
-                      )}
-                      {company.techStack && company.techStack.length > 0 && (
-                        <Badge variant="secondary" className="text-xs">{company.techStack.length} tech</Badge>
-                      )}
-                    </div>
-                  </div>
-                </Link>
-              ))
+              <div className="grid gap-3">
+                {agentCompanies.map((company) => {
+                  const raw = (company.rawData ?? {}) as Record<string, unknown>;
+                  const keyPeople = (raw.keyPeople as Array<{ name: string; title: string }>) ?? [];
+                  const completeness = company.dataCompleteness ?? 0;
+
+                  return (
+                    <Link key={company.id} href={`/companies/${company.id}`} className="block">
+                      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors space-y-3">
+                        {/* Header: name + domain + badges */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium truncate">{company.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[company.domain, company.industry, company.size].filter(Boolean).join(' · ')}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {company.funding && (
+                              <Badge variant="outline" className="text-xs">{company.funding}</Badge>
+                            )}
+                            <Badge
+                              variant={completeness >= 50 ? 'default' : completeness >= 30 ? 'secondary' : 'outline'}
+                              className="text-xs"
+                            >
+                              {completeness > 0 ? `${completeness}%` : 'New'}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        {/* Description */}
+                        {company.description && (
+                          <p className="text-xs text-muted-foreground line-clamp-2">{company.description}</p>
+                        )}
+
+                        {/* Key People */}
+                        {keyPeople.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {keyPeople.slice(0, 3).map((person, i) => (
+                              <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded-full">
+                                <span className="font-medium">{person.name}</span>
+                                {person.title && <span className="text-muted-foreground">· {person.title}</span>}
+                              </span>
+                            ))}
+                            {keyPeople.length > 3 && (
+                              <span className="text-xs text-muted-foreground px-2 py-0.5">
+                                +{keyPeople.length - 3} more
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Tech stack chips */}
+                        {company.techStack && company.techStack.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {company.techStack.slice(0, 5).map((tech, i) => (
+                              <span key={i} className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded">
+                                {tech}
+                              </span>
+                            ))}
+                            {company.techStack.length > 5 && (
+                              <span className="text-[10px] text-muted-foreground px-1.5 py-0.5">
+                                +{company.techStack.length - 5}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Progress bar */}
+                        {completeness > 0 && (
+                          <div className="w-full bg-muted rounded-full h-1">
+                            <div
+                              className={`h-1 rounded-full transition-all ${
+                                completeness >= 50 ? 'bg-green-500' : completeness >= 30 ? 'bg-yellow-500' : 'bg-red-500'
+                              }`}
+                              style={{ width: `${Math.min(completeness, 100)}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
             )}
           </CardContent>
         </Card>

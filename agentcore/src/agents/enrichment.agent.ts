@@ -696,7 +696,20 @@ export class EnrichmentAgent extends BaseAgent {
     });
     if (!company) throw new Error(`Company ${companyId} not found`);
 
+    // Skip enrichment for companies with garbage/generic names
     const companyName = company.name;
+    if (!companyName || companyName.length < 2 || companyName === 'Unknown' ||
+        /^(meet\s+the|top\s+\d+|best\s+\d+)\s/i.test(companyName) ||
+        companyName.split(/\s+/).length > 8) {
+      logger.warn({ companyId, companyName }, 'Skipping enrichment for invalid company name');
+      this.logActivity('company_enrichment_skipped', 'skipped', {
+        inputSummary: companyName || 'invalid',
+        details: { companyId, reason: 'invalid_company_name' },
+      });
+      await this.clearCurrentAction();
+      return { companyId, companyName, status: 'skipped', reason: 'invalid_company_name' };
+    }
+
     const ctx = this.getPipelineContext(input);
 
     // ── Phase 0: LLM brain — generate smart search queries ─────────────

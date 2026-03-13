@@ -33,6 +33,21 @@ function isPlatformDomain(domain: string): boolean {
   return PLATFORM_DOMAINS.has(d) || [...PLATFORM_DOMAINS].some(p => d.endsWith(`.${p}`));
 }
 
+/** Domains that are content/news sites — the title is an article, not a company */
+const CONTENT_SITE_DOMAINS = new Set([
+  'investopedia.com', 'hbr.org', 'store.hbr.org', 'forbes.com',
+  'medium.com', 'dev.to', 'techcrunch.com', 'wired.com', 'theverge.com',
+  'bloomberg.com', 'reuters.com', 'bbc.com', 'nytimes.com', 'wsj.com',
+  'wikipedia.org', 'en.wikipedia.org', 'reddit.com', 'quora.com',
+  'youtube.com', 'stackoverflow.com', 'ficoforums.myfico.com',
+  'amazon.com', 'goodreads.com',
+]);
+
+function isContentSite(domain: string): boolean {
+  const d = domain.toLowerCase().replace('www.', '');
+  return CONTENT_SITE_DOMAINS.has(d) || [...CONTENT_SITE_DOMAINS].some(p => d.endsWith(`.${p}`));
+}
+
 export class DiscoveryAgent extends BaseAgent {
   private _ctx: PipelineContext | undefined;
 
@@ -404,8 +419,12 @@ export class DiscoveryAgent extends BaseAgent {
     query: string,
     useCase?: string,
   ): Promise<{ companyId: string; companyName: string; domain?: string } | null> {
-    // Extract company name from title (before first separator)
-    const companyName = result.title?.split(/[|–—-]/)[0]?.trim();
+    // Extract company name from title — take first segment before separator
+    let companyName = result.title?.split(/[|–—]/)[0]?.trim();
+    // If first segment contains " - " (with spaces), split again — avoids grabbing article titles
+    if (companyName && companyName.includes(' - ')) {
+      companyName = companyName.split(' - ')[0]?.trim();
+    }
     if (!companyName || companyName.length < 2) return null;
 
     // Validate company name
@@ -424,6 +443,9 @@ export class DiscoveryAgent extends BaseAgent {
       if (isPlatformDomain(urlDomain)) {
         // Platform URL (LinkedIn, Crunchbase, etc.) — resolve real company domain
         domain = await this.resolveCompanyDomain(companyName);
+      } else if (isContentSite(urlDomain)) {
+        // Content/news site — title is an article, not a company
+        return null;
       } else {
         domain = urlDomain;
       }

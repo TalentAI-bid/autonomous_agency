@@ -121,6 +121,7 @@ export interface Company {
   funding?: string;
   linkedinUrl?: string;
   description?: string;
+  dataCompleteness?: number;
   rawData?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

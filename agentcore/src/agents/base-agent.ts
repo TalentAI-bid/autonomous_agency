@@ -146,6 +146,17 @@ export abstract class BaseAgent {
     if (/^["'"']/.test(name)) return false;
     // Reject strings that look like headlines (contain common headline verbs)
     if (/\b(named|establishes|announces|launches|raises|hits|embracing|transforming|advancing)\b/i.test(name)) return false;
+    // Reject single generic words (not a company name)
+    if (name.split(/\s+/).length === 1 && /^[a-z]/i.test(name) && name.length < 15) {
+      const genericWords = new Set(['leadership', 'management', 'technology', 'solutions', 'services', 'software', 'design', 'marketing', 'consulting', 'analytics', 'resources', 'development', 'engineering', 'security', 'compliance', 'performance', 'innovation', 'integration', 'automation', 'intelligence', 'payments', 'careers', 'jobs', 'hiring', 'team', 'people', 'about', 'blog', 'news', 'home']);
+      if (genericWords.has(name.toLowerCase())) return false;
+    }
+    // Reject article-like prefixes
+    if (/^(meet\s+(the|our)|top\s+\d+|best\s+\d+|the\s+top|a\s+guide|how\s+to|list\s+of|review\s+of|guide\s+to)\s/i.test(name)) return false;
+    // Reject "X for Y" patterns (product descriptions, not company names)
+    if (/^\w+\s+for\s+\w+/i.test(name) && name.split(/\s+/).length >= 4) return false;
+    // Reject strings starting with common article words
+    if (/^(stealth|new|breaking|exclusive|updated|introducing)\s/i.test(name) && name.split(/\s+/).length >= 3) return false;
     return true;
   }
 

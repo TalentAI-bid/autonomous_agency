@@ -21,32 +21,44 @@ function isMegaCorp(domain: string): boolean {
   return MEGA_CORP_DOMAINS.has(d);
 }
 
-/** Domains that are platforms/aggregators — not the company itself */
-const PLATFORM_DOMAINS = new Set([
-  'linkedin.com', 'crunchbase.com', 'glassdoor.com', 'indeed.com',
-  'ziprecruiter.com', 'monster.com', 'angel.co', 'lever.co',
-  'greenhouse.io', 'workable.com', 'github.com',
+/** Low-value domains — never scrape, skip entirely */
+const SKIP_DOMAINS = new Set([
+  'youtube.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+  'tiktok.com', 'pinterest.com', 'reddit.com', 'quora.com',
+  'wikipedia.org', 'en.wikipedia.org', 'britannica.com', 'worldhistory.org',
+  'goodreads.com', 'amazon.com', 'ebay.com',
+  'stackoverflow.com', 'stackexchange.com',
+  'investopedia.com', 'hbr.org', 'store.hbr.org',
+  'nytimes.com', 'wsj.com', 'bbc.com', 'cnn.com',
+  'eventbrite.com', 'meetup.com', 'gisgeography.com',
+  'ficoforums.myfico.com',
 ]);
 
-function isPlatformDomain(domain: string): boolean {
+function shouldSkipDomain(domain: string): boolean {
   const d = domain.toLowerCase().replace('www.', '');
-  return PLATFORM_DOMAINS.has(d) || [...PLATFORM_DOMAINS].some(p => d.endsWith(`.${p}`));
+  return SKIP_DOMAINS.has(d) || [...SKIP_DOMAINS].some(p => d.endsWith(`.${p}`));
 }
 
-/** Domains that are content/news sites — the title is an article, not a company */
-const CONTENT_SITE_DOMAINS = new Set([
-  'investopedia.com', 'hbr.org', 'store.hbr.org', 'forbes.com',
-  'medium.com', 'dev.to', 'techcrunch.com', 'wired.com', 'theverge.com',
-  'bloomberg.com', 'reuters.com', 'bbc.com', 'nytimes.com', 'wsj.com',
-  'wikipedia.org', 'en.wikipedia.org', 'reddit.com', 'quora.com',
-  'youtube.com', 'stackoverflow.com', 'ficoforums.myfico.com',
-  'amazon.com', 'goodreads.com',
-]);
-
-function isContentSite(domain: string): boolean {
-  const d = domain.toLowerCase().replace('www.', '');
-  return CONTENT_SITE_DOMAINS.has(d) || [...CONTENT_SITE_DOMAINS].some(p => d.endsWith(`.${p}`));
+/** LLM extraction result from a scraped page */
+interface PageExtraction {
+  type: 'company_page' | 'directory' | 'team_page' | 'job_listing' | 'person_profile' | 'irrelevant';
+  companies: Array<{
+    name: string;
+    domain?: string;
+    industry?: string;
+    description?: string;
+    size?: string;
+    location?: string;
+    funding?: string;
+  }>;
+  people: Array<{
+    name: string;
+    title?: string;
+    company?: string;
+  }>;
 }
+
+const FAST_MODEL = 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
 
 export class DiscoveryAgent extends BaseAgent {
   private _ctx: PipelineContext | undefined;
@@ -74,7 +86,7 @@ export class DiscoveryAgent extends BaseAgent {
       logger.info({ masterAgentId, humanInstruction }, 'DiscoveryAgent received human instruction');
     }
 
-    // Get useCase from PipelineContext or fall back to DB
+    // Get useCase
     let useCase: string | undefined = this._ctx?.useCase;
     if (!useCase) {
       try {
@@ -89,48 +101,127 @@ export class DiscoveryAgent extends BaseAgent {
       }
     }
 
-    let candidatesFound = 0;
     let companiesFound = 0;
-    let teamPagesProcessed = 0;
+    let candidatesFound = 0;
+    let pagesScraped = 0;
     let skipped = 0;
-    let megaCorpFiltered = 0;
     let enrichmentDispatched = 0;
 
     for (const query of searchQueries) {
       const results = await this.trackAction('search_executed', query, () => this.searchWeb(query, maxResults as number));
-
       if (results.length === 0) continue;
 
-      // Direct URL-pattern routing — no LLM classification
-      for (const result of results) {
+      // Process top 5 most promising results per query (scraping budget)
+      const prioritized = this.prioritizeResults(results);
+
+      for (const result of prioritized) {
         if (!result.url) continue;
-        const url = result.url.toLowerCase();
 
         try {
+          const url = result.url.toLowerCase();
+
+          // ── LinkedIn profiles go to document agent (no scrape needed here) ──
           if (url.includes('linkedin.com/in/')) {
-            // LinkedIn profile → save contact → dispatch document agent
             await this.handleLinkedInProfile(result, query, masterAgentId, dryRun);
             candidatesFound++;
-          } else if (url.includes('linkedin.com/company/')) {
-            // LinkedIn company page → save company → dispatch enrichment
-            const company = await this.handleCompanyUrl(result, query, useCase);
-            if (company) {
-              enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
+            continue;
+          }
+
+          // ── Skip low-value domains entirely ──
+          let hostname = '';
+          try { hostname = new URL(result.url).hostname.replace('www.', ''); } catch { /* skip */ }
+          if (hostname && shouldSkipDomain(hostname)) {
+            skipped++;
+            continue;
+          }
+
+          // ── Skip mega-corps in sales mode ──
+          if (useCase === 'sales' && hostname && isMegaCorp(hostname)) {
+            skipped++;
+            continue;
+          }
+
+          // ── Core: Scrape the page, then LLM classify + extract ──
+          let pageContent = '';
+          try {
+            pageContent = await this.scrapeUrl(result.url);
+            pagesScraped++;
+          } catch (err) {
+            logger.debug({ err, url: result.url }, 'Failed to scrape URL');
+            skipped++;
+            continue;
+          }
+
+          if (!pageContent || pageContent.length < 100) {
+            skipped++;
+            continue;
+          }
+
+          // Combined classify + extract in one LLM call
+          const extraction = await this.classifyAndExtract(
+            result.title, result.url, result.snippet, pageContent,
+          );
+
+          if (!extraction || extraction.type === 'irrelevant') {
+            skipped++;
+            continue;
+          }
+
+          // ── Save extracted companies ──
+          for (const co of extraction.companies) {
+            if (!co.name || co.name.length < 2) continue;
+            if (useCase === 'sales' && co.domain && isMegaCorp(co.domain)) continue;
+
+            try {
+              const saved = await this.saveOrUpdateCompany({
+                name: co.name,
+                domain: co.domain || (hostname && !shouldSkipDomain(hostname) ? hostname : undefined),
+                industry: co.industry || undefined,
+                size: co.size || undefined,
+                description: co.description || undefined,
+                funding: co.funding || undefined,
+                rawData: {
+                  discoveryUrl: result.url,
+                  discoveryQuery: query,
+                  extractedFrom: extraction.type,
+                  location: co.location || undefined,
+                },
+              });
+
+              enrichmentDispatched += await this.dispatchCompanyEnrichment(
+                { companyId: saved.id, companyName: co.name, domain: co.domain },
+                masterAgentId,
+              );
               companiesFound++;
+            } catch (err) {
+              logger.debug({ err, name: co.name }, 'Failed to save extracted company');
             }
-          } else if (/\/(team|about|leadership|people|our-team|about-us)\b/i.test(result.url)) {
-            // Team/about page → scrape for team members
-            const companyName = result.title?.split(/[|–—-]/)[0]?.trim() || 'Unknown';
-            await this.handleTeamPage(result, companyName, query, masterAgentId, dryRun);
-            teamPagesProcessed++;
-          } else {
-            // Any other URL → extract company from title/domain → dispatch enrichment
-            const company = await this.handleCompanyUrl(result, query, useCase);
-            if (company) {
-              enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
-              companiesFound++;
-            } else {
-              skipped++;
+          }
+
+          // ── Save extracted people ──
+          for (const person of extraction.people.slice(0, 10)) {
+            if (!person.name) continue;
+            const nameParts = person.name.trim().split(/\s+/);
+            try {
+              const contact = await this.saveOrUpdateContact({
+                firstName: nameParts[0] || undefined,
+                lastName: nameParts.slice(1).join(' ') || undefined,
+                title: person.title || undefined,
+                companyName: person.company || undefined,
+                source: 'web_search',
+                status: 'discovered',
+                rawData: { url: result.url, query, pageType: extraction.type },
+              });
+
+              await this.dispatchNext('enrichment', {
+                contactId: contact.id,
+                masterAgentId,
+                pipelineContext: this._ctx,
+                dryRun,
+              });
+              candidatesFound++;
+            } catch (err) {
+              logger.debug({ err, name: person.name }, 'Failed to save extracted person');
             }
           }
         } catch (err) {
@@ -139,34 +230,228 @@ export class DiscoveryAgent extends BaseAgent {
         }
       }
 
-      // Diagnostic logging
+      // Diagnostic logging per query
       logger.info({
         query,
         resultCount: results.length,
-        processed: { candidates: candidatesFound, companies: companiesFound, teamPages: teamPagesProcessed, skipped },
-        sampleUrls: results.slice(0, 3).map(r => r.url),
+        processed: { companies: companiesFound, candidates: candidatesFound, pagesScraped, skipped },
       }, 'Discovery query processed');
     }
 
     this.sendMessage(null, 'reasoning', {
       action: 'discovery_completed',
-      classified: { candidates: candidatesFound, companies: companiesFound, teamPages: teamPagesProcessed, megaCorpFiltered },
+      classified: { companies: companiesFound, candidates: candidatesFound, pagesScraped },
       enrichmentDispatched,
       queryCount: searchQueries.length,
     });
 
     this.logActivity('discovery_completed', 'completed', {
-      details: { candidatesFound, companiesFound, teamPagesProcessed, enrichmentDispatched, megaCorpFiltered, skipped },
+      details: { companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped },
     });
     await this.clearCurrentAction();
 
     logger.info(
-      { tenantId: this.tenantId, candidatesFound, companiesFound, teamPagesProcessed, enrichmentDispatched, megaCorpFiltered, skipped },
+      { tenantId: this.tenantId, companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped },
       'DiscoveryAgent completed',
     );
 
-    return { candidatesFound, companiesFound, teamPagesProcessed, enrichmentDispatched, megaCorpFiltered, skipped };
+    return { companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped };
   }
+
+  // ── Prioritize which results to scrape (budget: top 5 per query) ──────────
+
+  private prioritizeResults(
+    results: Array<{ url: string; title: string; snippet: string }>,
+  ): Array<{ url: string; title: string; snippet: string }> {
+    const scored = results.map(r => {
+      let score = 0;
+      const url = r.url.toLowerCase();
+      const title = (r.title || '').toLowerCase();
+
+      // High value: LinkedIn profiles and company pages
+      if (url.includes('linkedin.com/in/')) score += 10;
+      if (url.includes('linkedin.com/company/')) score += 8;
+
+      // High value: Company homepages (short paths)
+      try {
+        const pathname = new URL(r.url).pathname;
+        if (pathname === '/' || pathname === '') score += 7;
+        if (/^\/(about|team|leadership|our-team|people)\/?$/i.test(pathname)) score += 9;
+        if (/^\/(careers|jobs)\/?$/i.test(pathname)) score += 5;
+      } catch { /* skip */ }
+
+      // Medium: Crunchbase, Wellfound, directory sites
+      if (url.includes('crunchbase.com/organization/')) score += 6;
+      if (url.includes('wellfound.com/company/')) score += 6;
+
+      // Medium: Title signals company list/directory
+      if (/\b(companies|startups|firms|agencies)\b/i.test(title)) score += 4;
+      if (/\b(top|best|leading|fastest)\b/i.test(title)) score += 3;
+
+      // Low: News articles (scrape only if nothing better)
+      if (/\b(news|article|blog|opinion|review)\b/i.test(title)) score -= 2;
+
+      // Skip: Known bad domains
+      try {
+        const hostname = new URL(r.url).hostname.replace('www.', '');
+        if (shouldSkipDomain(hostname)) score -= 100;
+      } catch { /* skip */ }
+
+      return { ...r, score };
+    });
+
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  }
+
+  // ── Combined classify + extract in one LLM call ──────────────────────────
+
+  private async classifyAndExtract(
+    title: string,
+    url: string,
+    snippet: string,
+    pageContent: string,
+  ): Promise<PageExtraction | null> {
+    try {
+      const extraction = await this.extractJSON<PageExtraction>([
+        {
+          role: 'system',
+          content: `You analyze web page content and extract business data.
+
+Given a page's content, URL, and title, you must:
+1. Classify the page type
+2. Extract ALL companies and/or people mentioned
+
+Page types:
+- "company_page" = a single company's own website/profile
+- "directory" = a list/article mentioning multiple companies
+- "team_page" = a company page showing team members
+- "job_listing" = a job posting (the hiring company is valuable data)
+- "person_profile" = an individual's profile page
+- "irrelevant" = login pages, generic content, error pages, encyclopedia, event registration, geographic info
+
+For EACH company found, extract: name, domain (if visible), industry, description (1 sentence), size, location, funding.
+For EACH person found, extract: name, title, company they work at.
+
+Return ONLY valid JSON. If the page is irrelevant, return { "type": "irrelevant", "companies": [], "people": [] }.
+Do NOT invent data — only extract what is clearly stated on the page.`,
+        },
+        {
+          role: 'user',
+          content: `Title: "${title}"
+URL: ${url}
+Snippet: ${snippet || 'N/A'}
+
+PAGE CONTENT (first 4000 chars):
+${pageContent.slice(0, 4000)}`,
+        },
+      ], undefined, { model: FAST_MODEL, temperature: 0 });
+
+      return extraction;
+    } catch (err) {
+      logger.warn({ err, url }, 'classifyAndExtract LLM call failed');
+      return null;
+    }
+  }
+
+  // ── LinkedIn profile handler (unchanged — profiles go to document agent) ──
+
+  private async handleLinkedInProfile(
+    result: { url: string; title: string; snippet: string },
+    query: string,
+    masterAgentId: string,
+    dryRun?: boolean,
+  ): Promise<void> {
+    const titleText = (result.title || '').replace(/\s*\|\s*LinkedIn\s*$/i, '').trim();
+
+    let firstName: string | undefined;
+    let lastName: string | undefined;
+    let title: string | undefined;
+    let companyName: string | undefined;
+
+    const match = titleText.match(/^(.+?)\s*[-–—]\s*(.+?)(?:\s+at\s+|\s+@\s+)(.+)$/i);
+    if (match) {
+      const nameParts = match[1]!.trim().split(/\s+/);
+      firstName = nameParts[0] || undefined;
+      lastName = nameParts.slice(1).join(' ') || undefined;
+      title = match[2]!.trim() || undefined;
+      companyName = match[3]!.trim() || undefined;
+    } else {
+      const nameParts = titleText.split(/[-–—|]/)[0]?.trim().split(/\s+/) ?? [];
+      firstName = nameParts[0] || undefined;
+      lastName = nameParts.slice(1).join(' ') || undefined;
+    }
+
+    let companyId: string | undefined;
+    if (companyName) {
+      try {
+        const company = await this.saveOrUpdateCompany({
+          name: companyName,
+          rawData: { discoveredVia: 'linkedin_profile', discoveryQuery: query },
+        });
+        companyId = company.id;
+      } catch (err) {
+        logger.debug({ err, companyName }, 'Failed to create company for LinkedIn profile');
+      }
+    }
+
+    const contact = await this.saveOrUpdateContact({
+      linkedinUrl: result.url,
+      firstName,
+      lastName,
+      title,
+      companyName,
+      companyId,
+      source: 'linkedin_search',
+      status: 'discovered',
+      rawData: { url: result.url, title: result.title, snippet: result.snippet, query },
+    });
+
+    await this.dispatchNext('document', {
+      url: result.url,
+      type: 'linkedin_profile',
+      contactId: contact.id,
+      masterAgentId,
+      pipelineContext: this._ctx,
+      dryRun,
+    });
+
+    await this.emitEvent('contact:discovered', {
+      contactId: contact.id,
+      source: 'linkedin_search',
+      url: result.url,
+    });
+  }
+
+  // ── Company enrichment dispatch ───────────────────────────────────────────
+
+  private async dispatchCompanyEnrichment(
+    entry: { companyId: string; companyName: string; domain?: string },
+    masterAgentId: string,
+  ): Promise<number> {
+    try {
+      await this.dispatchNext('enrichment', {
+        companyId: entry.companyId,
+        masterAgentId,
+        pipelineContext: this._ctx,
+      });
+
+      this.sendMessage('enrichment', 'data_handoff', {
+        action: 'company_enrichment_dispatch',
+        companyId: entry.companyId,
+        companyName: entry.companyName,
+        domain: entry.domain,
+      });
+
+      return 1;
+    } catch (err) {
+      logger.warn({ err, companyId: entry.companyId, companyName: entry.companyName }, 'Failed to dispatch company enrichment');
+      return 0;
+    }
+  }
+
+  // ── Deep discovery (unchanged) ────────────────────────────────────────────
 
   private async executeDeepDiscovery(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { masterAgentId, discoveryParams, dryRun } = input as {
@@ -191,7 +476,6 @@ export class DiscoveryAgent extends BaseAgent {
 
     for (const company of discoveryResult.companies) {
       try {
-        // Skip mega-corps in sales mode
         if (this._ctx?.useCase === 'sales' && company.domain && isMegaCorp(company.domain)) continue;
 
         const savedCompany = await this.saveOrUpdateCompany({
@@ -269,343 +553,10 @@ export class DiscoveryAgent extends BaseAgent {
     await this.clearCurrentAction();
 
     logger.info(
-      {
-        tenantId: this.tenantId,
-        companiesFound,
-        peopleFound,
-        metadata: discoveryResult.metadata,
-      },
+      { tenantId: this.tenantId, companiesFound, peopleFound, metadata: discoveryResult.metadata },
       'Deep discovery completed',
     );
 
     return { companiesFound, peopleFound, metadata: discoveryResult.metadata };
-  }
-
-  // ── Domain resolution ──────────────────────────────────────────────────────
-
-  private async resolveCompanyDomain(companyName: string): Promise<string | undefined> {
-    const cacheKey = `domain-resolve:${companyName.toLowerCase()}`;
-    try {
-      const cached = await this.redis.get(cacheKey);
-      if (cached) return cached === 'NOT_FOUND' ? undefined : cached;
-    } catch { /* continue */ }
-
-    try {
-      const results = await this.searchWeb(`"${companyName}" official website`, 5);
-      for (const r of results) {
-        try {
-          const hostname = new URL(r.url).hostname.replace('www.', '');
-          if (!hostname.includes('linkedin.com') && !hostname.includes('glassdoor.com') &&
-              !hostname.includes('indeed.com') && !hostname.includes('crunchbase.com') &&
-              !hostname.includes('wikipedia.org') && !hostname.includes('twitter.com') &&
-              !hostname.includes('facebook.com')) {
-            await this.redis.setex(cacheKey, 14 * 86400, hostname);
-            return hostname;
-          }
-        } catch { /* skip bad URL */ }
-      }
-
-      // Fallback: LinkedIn company page
-      const liResults = await this.searchWeb(`"${companyName}" site:linkedin.com/company`, 3);
-      const liUrl = liResults.find(r => r.url.includes('linkedin.com/company/'))?.url;
-      if (liUrl) {
-        try {
-          const pageContent = await this.scrapeUrl(liUrl);
-          const websiteMatch = pageContent.match(/(?:Website|External link|Company website)[\s:]*(?:<[^>]+>)*(https?:\/\/[^\s<"]+)/i);
-          if (websiteMatch?.[1]) {
-            const domain = new URL(websiteMatch[1]).hostname.replace('www.', '');
-            await this.redis.setex(cacheKey, 14 * 86400, domain);
-            return domain;
-          }
-        } catch { /* ignore */ }
-      }
-    } catch (err) {
-      logger.debug({ err, companyName }, 'Domain resolution failed');
-    }
-
-    await this.redis.setex(cacheKey, 86400, 'NOT_FOUND').catch(() => {}); // 1 day
-    return undefined;
-  }
-
-  // ── Handler methods ────────────────────────────────────────────────────────
-
-  /**
-   * Handle a LinkedIn profile URL — extract name/title/company from title,
-   * save contact, dispatch to document agent for scraping.
-   */
-  private async handleLinkedInProfile(
-    result: { url: string; title: string; snippet: string },
-    query: string,
-    masterAgentId: string,
-    dryRun?: boolean,
-  ): Promise<void> {
-    // Parse LinkedIn title format: "John Smith - CTO at TechCo | LinkedIn"
-    const titleText = (result.title || '').replace(/\s*\|\s*LinkedIn\s*$/i, '').trim();
-
-    let firstName: string | undefined;
-    let lastName: string | undefined;
-    let title: string | undefined;
-    let companyName: string | undefined;
-
-    // Pattern: "Name - Title at Company"
-    const match = titleText.match(/^(.+?)\s*[-–—]\s*(.+?)(?:\s+at\s+|\s+@\s+)(.+)$/i);
-    if (match) {
-      const nameParts = match[1]!.trim().split(/\s+/);
-      firstName = nameParts[0] || undefined;
-      lastName = nameParts.slice(1).join(' ') || undefined;
-      title = match[2]!.trim() || undefined;
-      companyName = match[3]!.trim() || undefined;
-    } else {
-      // Fallback: just extract name from before first separator
-      const nameParts = titleText.split(/[-–—|]/)[0]?.trim().split(/\s+/) ?? [];
-      firstName = nameParts[0] || undefined;
-      lastName = nameParts.slice(1).join(' ') || undefined;
-    }
-
-    // Save company if extracted
-    let companyId: string | undefined;
-    if (companyName) {
-      try {
-        const company = await this.saveOrUpdateCompany({
-          name: companyName,
-          rawData: { discoveredVia: 'linkedin_profile', discoveryQuery: query },
-        });
-        companyId = company.id;
-      } catch (err) {
-        logger.debug({ err, companyName }, 'Failed to create company for LinkedIn profile');
-      }
-    }
-
-    const contact = await this.saveOrUpdateContact({
-      linkedinUrl: result.url,
-      firstName,
-      lastName,
-      title,
-      companyName,
-      companyId,
-      source: 'linkedin_search',
-      status: 'discovered',
-      rawData: {
-        url: result.url,
-        title: result.title,
-        snippet: result.snippet,
-        query,
-      },
-    });
-
-    // LinkedIn profiles go through document agent for full scrape first
-    await this.dispatchNext('document', {
-      url: result.url,
-      type: 'linkedin_profile',
-      contactId: contact.id,
-      masterAgentId,
-      pipelineContext: this._ctx,
-      dryRun,
-    });
-
-    await this.emitEvent('contact:discovered', {
-      contactId: contact.id,
-      source: 'linkedin_search',
-      url: result.url,
-    });
-  }
-
-  /**
-   * Handle any URL as a potential company source — extract company name
-   * from title, resolve domain, save company.
-   */
-  private async handleCompanyUrl(
-    result: { url: string; title: string; snippet: string },
-    query: string,
-    useCase?: string,
-  ): Promise<{ companyId: string; companyName: string; domain?: string } | null> {
-    // Extract company name from title — take first segment before separator
-    let companyName = result.title?.split(/[|–—]/)[0]?.trim();
-    // If first segment contains " - " (with spaces), split again — avoids grabbing article titles
-    if (companyName && companyName.includes(' - ')) {
-      companyName = companyName.split(' - ')[0]?.trim();
-    }
-    if (!companyName || companyName.length < 2) return null;
-
-    // Validate company name
-    try {
-      // Use the base-agent's validation via saveOrUpdateCompany — it will throw if invalid
-      // But first check basic patterns to avoid unnecessary work
-      if (companyName.length > 80 || companyName.split(/\s+/).length > 8) return null;
-      if (/^(how|what|why|when|where|which|can|does|should|is)\s/i.test(companyName)) return null;
-      if (/\?\s*$/.test(companyName)) return null;
-    } catch { return null; }
-
-    // Extract domain from URL
-    let domain: string | undefined;
-    try {
-      const urlDomain = new URL(result.url).hostname.replace('www.', '');
-      if (isPlatformDomain(urlDomain)) {
-        // Platform URL (LinkedIn, Crunchbase, etc.) — resolve real company domain
-        domain = await this.resolveCompanyDomain(companyName);
-      } else if (isContentSite(urlDomain)) {
-        // Content/news site — title is an article, not a company
-        return null;
-      } else {
-        domain = urlDomain;
-      }
-    } catch { /* ignore */ }
-
-    // Skip mega-corps in sales mode
-    if (useCase === 'sales' && domain && isMegaCorp(domain)) return null;
-
-    try {
-      const company = await this.saveOrUpdateCompany({
-        name: companyName,
-        domain,
-        linkedinUrl: result.url.includes('linkedin.com/company/') ? result.url : undefined,
-        rawData: {
-          ...(domain ? {} : { domainStatus: 'unresolved' }),
-          discoveryUrl: result.url,
-          discoveryTitle: result.title,
-          discoverySnippet: result.snippet,
-          discoveryQuery: query,
-        },
-      });
-
-      if (!domain) {
-        await this.emitEvent('company:domain_unresolved', { companyId: company.id, companyName });
-      }
-
-      await this.emitEvent('company:discovered', {
-        companyId: company.id,
-        name: companyName,
-        domain,
-        url: result.url,
-      });
-
-      return { companyId: company.id, companyName, domain };
-    } catch (err) {
-      logger.debug({ err, companyName, url: result.url }, 'Failed to save company from URL');
-      return null;
-    }
-  }
-
-  /**
-   * Handle a team/about page — scrape for team members and dispatch enrichment.
-   */
-  private async handleTeamPage(
-    result: { url: string; title: string; snippet: string },
-    companyName: string,
-    query: string,
-    masterAgentId: string,
-    dryRun?: boolean,
-  ): Promise<void> {
-    // Save the company
-    let domain: string | undefined;
-    try {
-      domain = new URL(result.url).hostname.replace('www.', '');
-    } catch { /* ignore */ }
-
-    const savedCompany = await this.saveOrUpdateCompany({
-      name: companyName,
-      domain,
-      rawData: {
-        teamPageUrl: result.url,
-        discoveryQuery: query,
-      },
-    });
-
-    // Scrape the team page to extract people
-    let pageContent = '';
-    try {
-      pageContent = await this.scrapeUrl(result.url);
-    } catch (err) {
-      logger.warn({ err, url: result.url }, 'Failed to scrape team page');
-      return;
-    }
-
-    if (!pageContent || pageContent.length < 100) return;
-
-    // Use LLM to extract people from the team page
-    interface TeamMember { name: string; title: string; }
-    let members: TeamMember[] = [];
-    try {
-      const extraction = await this.extractJSON<{ members: TeamMember[] }>([
-        {
-          role: 'system',
-          content: `You are an expert at extracting team member information from company pages. Extract all people listed on the page with their name and title. Focus on leadership and decision-maker roles (C-suite, VP, Director, Head of, Manager). Return valid JSON.`,
-        },
-        {
-          role: 'user',
-          content: `Extract team members from this page content. Return JSON: { "members": [{ "name": "Full Name", "title": "Job Title" }] }\n\nPAGE CONTENT:\n${pageContent.slice(0, 5000)}`,
-        },
-      ]);
-      members = extraction.members ?? [];
-    } catch (err) {
-      logger.warn({ err, url: result.url }, 'Failed to extract team members from page');
-      return;
-    }
-
-    // Create contacts for each extracted member and dispatch enrichment
-    for (const member of members.slice(0, 10)) {
-      if (!member.name) continue;
-
-      const nameParts = member.name.trim().split(/\s+/);
-      const firstName = nameParts[0] || undefined;
-      const lastName = nameParts.slice(1).join(' ') || undefined;
-
-      const contact = await this.saveOrUpdateContact({
-        firstName,
-        lastName,
-        title: member.title || undefined,
-        companyName,
-        companyId: savedCompany.id,
-        source: 'web_search',
-        status: 'discovered',
-        rawData: {
-          url: result.url,
-          teamPageSource: true,
-          query,
-        },
-      });
-
-      await this.dispatchNext('enrichment', {
-        contactId: contact.id,
-        masterAgentId,
-        pipelineContext: this._ctx,
-        dryRun,
-      });
-    }
-
-    await this.emitEvent('team_page:processed', {
-      companyName,
-      url: result.url,
-      membersExtracted: members.length,
-    });
-
-    logger.info({ url: result.url, companyName, membersExtracted: members.length }, 'Team page processed');
-  }
-
-  // ── Immediate company enrichment dispatch ───────────────────────────────────
-
-  private async dispatchCompanyEnrichment(
-    entry: { companyId: string; companyName: string; domain?: string },
-    masterAgentId: string,
-  ): Promise<number> {
-    try {
-      await this.dispatchNext('enrichment', {
-        companyId: entry.companyId,
-        masterAgentId,
-        pipelineContext: this._ctx,
-      });
-
-      this.sendMessage('enrichment', 'data_handoff', {
-        action: 'company_enrichment_dispatch',
-        companyId: entry.companyId,
-        companyName: entry.companyName,
-        domain: entry.domain,
-      });
-
-      return 1;
-    } catch (err) {
-      logger.warn({ err, companyId: entry.companyId, companyName: entry.companyName }, 'Failed to dispatch company enrichment');
-      return 0;
-    }
   }
 }

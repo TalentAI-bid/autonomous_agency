@@ -35,7 +35,7 @@ export const contacts = pgTable('contacts', {
   status: contactStatusEnum('status').default('discovered').notNull(),
   rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
   dataCompleteness: integer('data_completeness').default(0),
-  enrichmentRetryCount: integer('enrichment_retry_count').default(0),
+  // enrichmentRetryCount: integer('enrichment_retry_count').default(0), // Disabled — not migrated to production
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [

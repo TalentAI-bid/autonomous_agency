@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, count, avg, gt, inArray } from 'drizzle-orm';
+import { eq, and, desc, count, avg, gt, inArray, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents } from '../db/schema/index.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
@@ -329,7 +329,11 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
 
     const data = await withTenant(request.tenantId, async (tx) => {
       return tx.select().from(companies)
-        .where(and(eq(companies.masterAgentId, id), eq(companies.tenantId, request.tenantId)))
+        .where(and(
+          eq(companies.masterAgentId, id),
+          eq(companies.tenantId, request.tenantId),
+          sql`COALESCE(${companies.dataCompleteness}, 0) >= 30`,
+        ))
         .orderBy(desc(companies.createdAt))
         .limit(100);
     });

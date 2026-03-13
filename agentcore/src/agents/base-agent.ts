@@ -32,8 +32,8 @@ export abstract class BaseAgent {
 
   // ── LLM ──────────────────────────────────────────────────────────────────
 
-  protected async callTogether(messages: ChatMessage[]): Promise<string> {
-    return togetherComplete(this.tenantId, messages);
+  protected async callTogether(messages: ChatMessage[], opts?: { temperature?: number; max_tokens?: number; model?: string }): Promise<string> {
+    return togetherComplete(this.tenantId, messages, opts);
   }
 
   protected async callClaude(system: string, user: string): Promise<string> {

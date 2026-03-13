@@ -517,36 +517,8 @@ export class MasterAgent extends BaseAgent {
       logger.warn({ err, masterAgentId }, 'Failed to check for service outage in orchestrator');
     }
 
-    // Re-enrichment: dispatch enrichment for shallow contacts (status=enriched, low completeness, not retried too many times)
-    try {
-      const shallowContacts = await withTenant(this.tenantId, async (tx) => {
-        return tx.select({ id: contacts.id })
-          .from(contacts)
-          .where(and(
-            eq(contacts.tenantId, this.tenantId),
-            eq(contacts.masterAgentId, masterAgentId),
-            eq(contacts.status, 'enriched'),
-            lt(contacts.dataCompleteness, 50),
-            lt(contacts.enrichmentRetryCount, 3),
-            sql`${contacts.updatedAt} < NOW() - INTERVAL '6 hours'`,
-          ))
-          .limit(5);
-      });
-
-      for (const c of shallowContacts) {
-        await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId, deepMode: true });
-        await withTenant(this.tenantId, async (tx) => {
-          await tx.update(contacts)
-            .set({ enrichmentRetryCount: sql`enrichment_retry_count + 1` })
-            .where(eq(contacts.id, c.id));
-        });
-      }
-      if (shallowContacts.length > 0) {
-        actions.push(`Re-enrichment dispatched for ${shallowContacts.length} shallow contacts`);
-      }
-    } catch (err) {
-      logger.warn({ err, masterAgentId }, 'Failed to dispatch re-enrichment from orchestrator');
-    }
+    // Re-enrichment disabled — enrichment_retry_count column not migrated to production DB
+    // TODO: Re-enable after running db:generate + applying migration
 
     if (metrics.scored > 20 && metrics.contacted < 5) {
       decisions.push('Outreach bottleneck detected — scored contacts are not being contacted.');

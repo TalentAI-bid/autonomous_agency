@@ -490,6 +490,27 @@ export async function approveProposal(tenantId: string, conversationId: string, 
   const hasOutreach = pipelineSteps.some(s => s.agentType === 'outreach');
   const hasEmailListen = pipelineSteps.some(s => s.agentType === 'email-listen');
 
+  // Auto-fill email config IDs (same logic as chat flow)
+  const [approvalListeners, approvalAccounts] = await Promise.all([
+    withTenant(tenantId, async (tx) => {
+      return tx.select({ id: emailListenerConfigs.id })
+        .from(emailListenerConfigs)
+        .where(and(eq(emailListenerConfigs.tenantId, tenantId), eq(emailListenerConfigs.isActive, true)));
+    }),
+    withTenant(tenantId, async (tx) => {
+      return tx.select({ id: emailAccounts.id })
+        .from(emailAccounts)
+        .where(and(eq(emailAccounts.tenantId, tenantId), eq(emailAccounts.isActive, true)));
+    }),
+  ]);
+
+  if (hasOutreach && !config.emailAccountId && approvalAccounts.length === 1) {
+    config.emailAccountId = approvalAccounts[0].id;
+  }
+  if (hasEmailListen && !config.emailListenerConfigId && approvalListeners.length === 1) {
+    config.emailListenerConfigId = approvalListeners[0].id;
+  }
+
   // Validate email sending account
   if (hasOutreach && !config.emailAccountId) {
     throw new ValidationError(

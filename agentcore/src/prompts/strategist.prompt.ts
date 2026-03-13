@@ -28,7 +28,18 @@ GOOD examples (specific, actionable):
 - "migrating from Salesforce" OR "replacing CRM" fintech
 - "Series A" "healthcare SaaS" 2025
 - site:reddit.com "looking for" "development agency"
-- "Head of Engineering" "we're building" site:linkedin.com`;
+- "Head of Engineering" "we're building" site:linkedin.com
+
+For each opportunity type, generate at least 2-3 queries. Include diverse query patterns:
+- Company LIST queries: "top [industry] startups [location] [year]", "[industry] companies Series A [location]"
+- LinkedIn company discovery: site:linkedin.com/company/ "[industry]" "[location]"
+- Hiring signal queries: site:lever.co OR site:greenhouse.io "[role keyword]" "[location]"
+- Funding queries: "[industry]" "raises" OR "Series A" OR "Series B" "[location]" [current year]
+- Technology adoption: "[specific tech]" "we're using" OR "we switched to" OR "we migrated"
+- Pain point queries: "[industry]" "struggling with" OR "looking for" OR "need help with" "[service keyword]"
+- Conference/event queries: "[industry] conference" OR "[industry] summit" speakers [year] [location]
+
+The queries MUST be diverse — cover different angles, platforms, and signals. Do NOT generate similar queries with minor variations.`;
 }
 
 export function buildInitialStrategyUserPrompt(ctx: PipelineContext, mission?: string): string {
@@ -57,6 +68,7 @@ export function buildInitialStrategyUserPrompt(ctx: PipelineContext, mission?: s
     }
   }
 
+  sections.push(`\nIMPORTANT: Generate queries that will find SPECIFIC COMPANIES, not generic content. Each query should return company websites, LinkedIn company pages, news about specific companies, or directories listing companies. Avoid queries that return tutorials, generic articles, or product documentation.`);
   sections.push(`\nGenerate a comprehensive initial sales strategy as JSON.`);
 
   return sections.join('\n');

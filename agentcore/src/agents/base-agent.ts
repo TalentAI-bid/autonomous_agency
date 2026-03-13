@@ -40,8 +40,12 @@ export abstract class BaseAgent {
     return claudeComplete(this.tenantId, system, user);
   }
 
-  protected async extractJSON<T>(messages: ChatMessage[], retries?: number): Promise<T> {
-    return togetherExtractJSON<T>(this.tenantId, messages, retries);
+  protected async extractJSON<T>(
+    messages: ChatMessage[],
+    retries?: number,
+    opts?: { temperature?: number; model?: string },
+  ): Promise<T> {
+    return togetherExtractJSON<T>(this.tenantId, messages, retries, opts);
   }
 
   // ── Web ───────────────────────────────────────────────────────────────────

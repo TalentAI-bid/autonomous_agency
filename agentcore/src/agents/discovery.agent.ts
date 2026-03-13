@@ -1,22 +1,17 @@
 import { eq, and } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { masterAgents, opportunities } from '../db/schema/index.js';
-import {
-  buildSystemPrompt as classificationSystemPrompt,
-  buildUserPrompt as classificationUserPrompt,
-  type ClassifiedResult,
-} from '../prompts/classification.prompt.js';
+import { masterAgents } from '../db/schema/index.js';
 import { discoveryEngine } from '../tools/discovery-engine.js';
 import type { DiscoveryParams } from '../tools/discovery-sources/types.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
 import logger from '../utils/logger.js';
 
-// ── FAANG / mega-corp blocklist (Problem 4) ──────────────────────────────────
+// ── FAANG / mega-corp blocklist ──────────────────────────────────────────────
 const MEGA_CORP_DOMAINS = new Set([
   'google.com', 'meta.com', 'facebook.com', 'apple.com', 'amazon.com',
-  'aws.amazon.com', 'netflix.com', 'microsoft.com', 'github.com',
-  'linkedin.com', 'oracle.com', 'salesforce.com', 'ibm.com', 'intel.com',
+  'aws.amazon.com', 'netflix.com', 'microsoft.com',
+  'oracle.com', 'salesforce.com', 'ibm.com', 'intel.com',
   'cisco.com', 'adobe.com', 'uber.com', 'airbnb.com', 'stripe.com', 'spotify.com',
 ]);
 
@@ -24,6 +19,18 @@ function isMegaCorp(domain: string): boolean {
   if (!domain) return false;
   const d = domain.toLowerCase().replace('www.', '');
   return MEGA_CORP_DOMAINS.has(d);
+}
+
+/** Domains that are platforms/aggregators — not the company itself */
+const PLATFORM_DOMAINS = new Set([
+  'linkedin.com', 'crunchbase.com', 'glassdoor.com', 'indeed.com',
+  'ziprecruiter.com', 'monster.com', 'angel.co', 'lever.co',
+  'greenhouse.io', 'workable.com', 'github.com',
+]);
+
+function isPlatformDomain(domain: string): boolean {
+  const d = domain.toLowerCase().replace('www.', '');
+  return PLATFORM_DOMAINS.has(d) || [...PLATFORM_DOMAINS].some(p => d.endsWith(`.${p}`));
 }
 
 export class DiscoveryAgent extends BaseAgent {
@@ -36,12 +43,11 @@ export class DiscoveryAgent extends BaseAgent {
       return this.executeDeepDiscovery(input);
     }
 
-    const { searchQueries, maxResults = 10, masterAgentId, dryRun, opportunityFocused } = input as {
+    const { searchQueries, maxResults = 10, masterAgentId, dryRun } = input as {
       searchQueries: string[];
       maxResults?: number;
       masterAgentId: string;
       dryRun?: boolean;
-      opportunityFocused?: boolean;
     };
 
     logger.info({ tenantId: this.tenantId, masterAgentId, queryCount: searchQueries.length }, 'DiscoveryAgent starting');
@@ -70,127 +76,81 @@ export class DiscoveryAgent extends BaseAgent {
 
     let candidatesFound = 0;
     let companiesFound = 0;
-    let jobListingsProcessed = 0;
-    let decisionMakersFound = 0;
     let teamPagesProcessed = 0;
-    let directoryPagesProcessed = 0;
-    let irrelevantFiltered = 0;
     let skipped = 0;
     let megaCorpFiltered = 0;
-    let opportunitiesCreated = 0;
     let enrichmentDispatched = 0;
-
-    // Build ICP exclusion context for classification
-    const icpExclusion = this.buildICPExclusion();
 
     for (const query of searchQueries) {
       const results = await this.trackAction('search_executed', query, () => this.searchWeb(query, maxResults as number));
 
       if (results.length === 0) continue;
 
-      // Batch-classify all results from this query via LLM
-      const indexed = results.map((r, i) => ({
-        index: i,
-        url: r.url,
-        title: r.title ?? '',
-        snippet: r.snippet ?? '',
-      }));
+      // Direct URL-pattern routing — no LLM classification
+      for (const result of results) {
+        if (!result.url) continue;
+        const url = result.url.toLowerCase();
 
-      let classified: ClassifiedResult[];
-      try {
-        classified = await this.extractJSON<ClassifiedResult[]>([
-          { role: 'system', content: classificationSystemPrompt(useCase, this._ctx?.sales, icpExclusion) },
-          { role: 'user', content: classificationUserPrompt(indexed, useCase) },
-        ]);
-      } catch (err) {
-        logger.warn({ err, query }, 'Classification failed, skipping query batch');
-        skipped += results.length;
-        continue;
-      }
-
-      for (const item of classified) {
-        const result = results[item.index];
-        if (!result?.url) { skipped++; continue; }
-
-        // Skip low-confidence classifications
-        if (typeof item.confidence === 'number' && item.confidence < 0.4) {
-          irrelevantFiltered++;
-          continue;
-        }
-
-        // FAANG filter for sales mode (Problem 4)
-        if (useCase === 'sales' && item.extractedCompany) {
-          let extractedDomain: string | undefined;
-          try { extractedDomain = new URL(result.url).hostname.replace('www.', ''); } catch { /* ignore */ }
-          if (extractedDomain && isMegaCorp(extractedDomain)) {
-            megaCorpFiltered++;
-            continue;
-          }
-        }
-
-        if (item.classification === 'candidate_profile' || item.classification === 'decision_maker') {
-          await this.handleCandidate(result, item, query, masterAgentId, dryRun);
-          if (item.classification === 'decision_maker') {
-            decisionMakersFound++;
-          } else {
+        try {
+          if (url.includes('linkedin.com/in/')) {
+            // LinkedIn profile → save contact → dispatch document agent
+            await this.handleLinkedInProfile(result, query, masterAgentId, dryRun);
             candidatesFound++;
+          } else if (url.includes('linkedin.com/company/')) {
+            // LinkedIn company page → save company → dispatch enrichment
+            const company = await this.handleCompanyUrl(result, query, useCase);
+            if (company) {
+              enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
+              companiesFound++;
+            }
+          } else if (/\/(team|about|leadership|people|our-team|about-us)\b/i.test(result.url)) {
+            // Team/about page → scrape for team members
+            const companyName = result.title?.split(/[|–—-]/)[0]?.trim() || 'Unknown';
+            await this.handleTeamPage(result, companyName, query, masterAgentId, dryRun);
+            teamPagesProcessed++;
+          } else {
+            // Any other URL → extract company from title/domain → dispatch enrichment
+            const company = await this.handleCompanyUrl(result, query, useCase);
+            if (company) {
+              enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
+              companiesFound++;
+            } else {
+              skipped++;
+            }
           }
-        } else if (item.classification === 'company_page') {
-          const companyResult = await this.handleCompany(result, item, query, useCase);
-          if (companyResult) {
-            enrichmentDispatched += await this.dispatchCompanyEnrichment(companyResult, masterAgentId);
-          }
-          companiesFound++;
-        } else if (item.classification === 'team_page') {
-          await this.handleTeamPage(result, item, query, masterAgentId, dryRun);
-          teamPagesProcessed++;
-        } else if (item.classification === 'content_with_companies') {
-          const contentCompanies = await this.handleContentWithCompanies(result, item, query, useCase, masterAgentId);
-          for (const company of contentCompanies) {
-            enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
-          }
-          companiesFound += (item.extractedCompanies?.length ?? 0);
-        } else if (item.classification === 'directory_page') {
-          const dirCompanies = await this.handleDirectoryPage(result, item, query, useCase);
-          for (const company of dirCompanies) {
-            enrichmentDispatched += await this.dispatchCompanyEnrichment(company, masterAgentId);
-          }
-          directoryPagesProcessed++;
-        } else if (item.classification === 'job_listing') {
-          const { opportunityCreated, company: jobCompany } = await this.handleJobListing(result, item, query, useCase, masterAgentId, opportunityFocused);
-          if (opportunityCreated) opportunitiesCreated++;
-          if (jobCompany) {
-            enrichmentDispatched += await this.dispatchCompanyEnrichment(jobCompany, masterAgentId);
-          }
-          jobListingsProcessed++;
-        } else {
-          irrelevantFiltered++;
+        } catch (err) {
+          logger.warn({ err, url: result.url, query }, 'Failed to process discovery result');
+          skipped++;
         }
       }
 
+      // Diagnostic logging
+      logger.info({
+        query,
+        resultCount: results.length,
+        processed: { candidates: candidatesFound, companies: companiesFound, teamPages: teamPagesProcessed, skipped },
+        sampleUrls: results.slice(0, 3).map(r => r.url),
+      }, 'Discovery query processed');
     }
-
-    // Log incomplete companies (no domain) as agent room discovery details
-    // Companies with dataCompleteness 0 are already filtered from company lists by routes
 
     this.sendMessage(null, 'reasoning', {
       action: 'discovery_completed',
-      classified: { candidates: candidatesFound, decisionMakers: decisionMakersFound, companies: companiesFound, teamPages: teamPagesProcessed, directoryPages: directoryPagesProcessed, jobListings: jobListingsProcessed, irrelevant: irrelevantFiltered, megaCorpFiltered },
+      classified: { candidates: candidatesFound, companies: companiesFound, teamPages: teamPagesProcessed, megaCorpFiltered },
       enrichmentDispatched,
       queryCount: searchQueries.length,
     });
 
     this.logActivity('discovery_completed', 'completed', {
-      details: { candidatesFound, decisionMakersFound, companiesFound, teamPagesProcessed, directoryPagesProcessed, jobListingsProcessed, opportunitiesCreated, enrichmentDispatched, irrelevantFiltered, megaCorpFiltered, skipped },
+      details: { candidatesFound, companiesFound, teamPagesProcessed, enrichmentDispatched, megaCorpFiltered, skipped },
     });
     await this.clearCurrentAction();
 
     logger.info(
-      { tenantId: this.tenantId, candidatesFound, decisionMakersFound, companiesFound, teamPagesProcessed, directoryPagesProcessed, jobListingsProcessed, opportunitiesCreated, enrichmentDispatched, irrelevantFiltered, megaCorpFiltered, skipped },
+      { tenantId: this.tenantId, candidatesFound, companiesFound, teamPagesProcessed, enrichmentDispatched, megaCorpFiltered, skipped },
       'DiscoveryAgent completed',
     );
 
-    return { candidatesFound, decisionMakersFound, companiesFound, teamPagesProcessed, directoryPagesProcessed, jobListingsProcessed, opportunitiesCreated, enrichmentDispatched, irrelevantFiltered, megaCorpFiltered, skipped };
+    return { candidatesFound, companiesFound, teamPagesProcessed, enrichmentDispatched, megaCorpFiltered, skipped };
   }
 
   private async executeDeepDiscovery(input: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -306,7 +266,7 @@ export class DiscoveryAgent extends BaseAgent {
     return { companiesFound, peopleFound, metadata: discoveryResult.metadata };
   }
 
-  // ── Domain resolution (Problem 5) ──────────────────────────────────────────
+  // ── Domain resolution ──────────────────────────────────────────────────────
 
   private async resolveCompanyDomain(companyName: string): Promise<string | undefined> {
     const cacheKey = `domain-resolve:${companyName.toLowerCase()}`;
@@ -354,92 +314,167 @@ export class DiscoveryAgent extends BaseAgent {
 
   // ── Handler methods ────────────────────────────────────────────────────────
 
-  private async handleCandidate(
+  /**
+   * Handle a LinkedIn profile URL — extract name/title/company from title,
+   * save contact, dispatch to document agent for scraping.
+   */
+  private async handleLinkedInProfile(
     result: { url: string; title: string; snippet: string },
-    item: ClassifiedResult,
     query: string,
     masterAgentId: string,
     dryRun?: boolean,
   ): Promise<void> {
-    const isLinkedIn = result.url.includes('linkedin.com/in/');
+    // Parse LinkedIn title format: "John Smith - CTO at TechCo | LinkedIn"
+    const titleText = (result.title || '').replace(/\s*\|\s*LinkedIn\s*$/i, '').trim();
 
-    // Parse name from LLM extraction
-    const nameParts = (item.extractedName ?? '').split(/\s+/);
-    const firstName = nameParts[0] || undefined;
-    const lastName = nameParts.slice(1).join(' ') || undefined;
+    let firstName: string | undefined;
+    let lastName: string | undefined;
+    let title: string | undefined;
+    let companyName: string | undefined;
 
-    // Create company record if company name was extracted
+    // Pattern: "Name - Title at Company"
+    const match = titleText.match(/^(.+?)\s*[-–—]\s*(.+?)(?:\s+at\s+|\s+@\s+)(.+)$/i);
+    if (match) {
+      const nameParts = match[1]!.trim().split(/\s+/);
+      firstName = nameParts[0] || undefined;
+      lastName = nameParts.slice(1).join(' ') || undefined;
+      title = match[2]!.trim() || undefined;
+      companyName = match[3]!.trim() || undefined;
+    } else {
+      // Fallback: just extract name from before first separator
+      const nameParts = titleText.split(/[-–—|]/)[0]?.trim().split(/\s+/) ?? [];
+      firstName = nameParts[0] || undefined;
+      lastName = nameParts.slice(1).join(' ') || undefined;
+    }
+
+    // Save company if extracted
     let companyId: string | undefined;
-    if (item.extractedCompany) {
+    if (companyName) {
       try {
         const company = await this.saveOrUpdateCompany({
-          name: item.extractedCompany,
-          rawData: { discoveredVia: 'candidate_classification', discoveryQuery: query },
+          name: companyName,
+          rawData: { discoveredVia: 'linkedin_profile', discoveryQuery: query },
         });
         companyId = company.id;
       } catch (err) {
-        logger.warn({ err, companyName: item.extractedCompany }, 'Failed to create company for candidate');
+        logger.debug({ err, companyName }, 'Failed to create company for LinkedIn profile');
       }
     }
 
     const contact = await this.saveOrUpdateContact({
-      linkedinUrl: isLinkedIn ? result.url : undefined,
+      linkedinUrl: result.url,
       firstName,
       lastName,
-      title: item.extractedTitle || undefined,
-      companyName: item.extractedCompany || undefined,
-      companyId: companyId || undefined,
-      source: isLinkedIn ? 'linkedin_search' : 'web_search',
+      title,
+      companyName,
+      companyId,
+      source: 'linkedin_search',
       status: 'discovered',
       rawData: {
         url: result.url,
         title: result.title,
         snippet: result.snippet,
         query,
-        classificationConfidence: item.confidence,
-        classificationReasoning: item.reasoning,
-        classification: item.classification,
       },
     });
 
-    if (isLinkedIn) {
-      // LinkedIn profiles go through document agent for full scrape first
-      await this.dispatchNext('document', {
-        url: result.url,
-        type: 'linkedin_profile',
-        contactId: contact.id,
-        masterAgentId,
-        pipelineContext: this._ctx,
-        dryRun,
-      });
-    } else {
-      // Non-LinkedIn candidates go straight to enrichment
-      await this.dispatchNext('enrichment', {
-        contactId: contact.id,
-        masterAgentId,
-        pipelineContext: this._ctx,
-        dryRun,
-      });
-    }
+    // LinkedIn profiles go through document agent for full scrape first
+    await this.dispatchNext('document', {
+      url: result.url,
+      type: 'linkedin_profile',
+      contactId: contact.id,
+      masterAgentId,
+      pipelineContext: this._ctx,
+      dryRun,
+    });
 
     await this.emitEvent('contact:discovered', {
       contactId: contact.id,
-      source: isLinkedIn ? 'linkedin_search' : 'web_search',
+      source: 'linkedin_search',
       url: result.url,
-      classification: item.classification,
     });
   }
 
+  /**
+   * Handle any URL as a potential company source — extract company name
+   * from title, resolve domain, save company.
+   */
+  private async handleCompanyUrl(
+    result: { url: string; title: string; snippet: string },
+    query: string,
+    useCase?: string,
+  ): Promise<{ companyId: string; companyName: string; domain?: string } | null> {
+    // Extract company name from title (before first separator)
+    const companyName = result.title?.split(/[|–—-]/)[0]?.trim();
+    if (!companyName || companyName.length < 2) return null;
+
+    // Validate company name
+    try {
+      // Use the base-agent's validation via saveOrUpdateCompany — it will throw if invalid
+      // But first check basic patterns to avoid unnecessary work
+      if (companyName.length > 80 || companyName.split(/\s+/).length > 8) return null;
+      if (/^(how|what|why|when|where|which|can|does|should|is)\s/i.test(companyName)) return null;
+      if (/\?\s*$/.test(companyName)) return null;
+    } catch { return null; }
+
+    // Extract domain from URL
+    let domain: string | undefined;
+    try {
+      const urlDomain = new URL(result.url).hostname.replace('www.', '');
+      if (isPlatformDomain(urlDomain)) {
+        // Platform URL (LinkedIn, Crunchbase, etc.) — resolve real company domain
+        domain = await this.resolveCompanyDomain(companyName);
+      } else {
+        domain = urlDomain;
+      }
+    } catch { /* ignore */ }
+
+    // Skip mega-corps in sales mode
+    if (useCase === 'sales' && domain && isMegaCorp(domain)) return null;
+
+    try {
+      const company = await this.saveOrUpdateCompany({
+        name: companyName,
+        domain,
+        linkedinUrl: result.url.includes('linkedin.com/company/') ? result.url : undefined,
+        rawData: {
+          ...(domain ? {} : { domainStatus: 'unresolved' }),
+          discoveryUrl: result.url,
+          discoveryTitle: result.title,
+          discoverySnippet: result.snippet,
+          discoveryQuery: query,
+        },
+      });
+
+      if (!domain) {
+        await this.emitEvent('company:domain_unresolved', { companyId: company.id, companyName });
+      }
+
+      await this.emitEvent('company:discovered', {
+        companyId: company.id,
+        name: companyName,
+        domain,
+        url: result.url,
+      });
+
+      return { companyId: company.id, companyName, domain };
+    } catch (err) {
+      logger.debug({ err, companyName, url: result.url }, 'Failed to save company from URL');
+      return null;
+    }
+  }
+
+  /**
+   * Handle a team/about page — scrape for team members and dispatch enrichment.
+   */
   private async handleTeamPage(
     result: { url: string; title: string; snippet: string },
-    item: ClassifiedResult,
+    companyName: string,
     query: string,
     masterAgentId: string,
     dryRun?: boolean,
   ): Promise<void> {
-    const companyName = item.extractedCompany || result.title.split(/[|–—-]/)[0]?.trim() || 'Unknown';
-
-    // Save the company — resolve domain if URL is a third-party site
+    // Save the company
     let domain: string | undefined;
     try {
       domain = new URL(result.url).hostname.replace('www.', '');
@@ -505,7 +540,6 @@ export class DiscoveryAgent extends BaseAgent {
           url: result.url,
           teamPageSource: true,
           query,
-          classificationConfidence: item.confidence,
         },
       });
 
@@ -524,321 +558,6 @@ export class DiscoveryAgent extends BaseAgent {
     });
 
     logger.info({ url: result.url, companyName, membersExtracted: members.length }, 'Team page processed');
-  }
-
-  // ── Directory/list page handler (Problem 3) ─────────────────────────────────
-
-  private async handleDirectoryPage(
-    result: { url: string; title: string; snippet: string },
-    item: ClassifiedResult,
-    query: string,
-    useCase?: string,
-  ): Promise<{ companyId: string; companyName: string; domain?: string }[]> {
-    const discoveredCompanies: { companyId: string; companyName: string; domain?: string }[] = [];
-
-    // Skip known non-directory sites
-    const skipDomains = ['stackoverflow.com', 'stackexchange.com', 'reddit.com',
-      'github.com', 'medium.com', 'quora.com', 'wikipedia.org', 'w3schools.com',
-      'developer.mozilla.org', 'docs.google.com'];
-    try {
-      const host = new URL(result.url).hostname.replace('www.', '');
-      if (skipDomains.some(d => host.endsWith(d))) return discoveredCompanies;
-    } catch { /* continue */ }
-
-    let pageContent = '';
-    try {
-      pageContent = await this.scrapeUrl(result.url);
-    } catch (err) {
-      logger.warn({ err, url: result.url }, 'Failed to scrape directory page');
-      return discoveredCompanies;
-    }
-
-    if (!pageContent || pageContent.length < 100) return discoveredCompanies;
-
-    interface DirectoryCompany { name: string; domain?: string; description?: string; url?: string; }
-    let companies: DirectoryCompany[] = [];
-    try {
-      const extraction = await this.extractJSON<{ companies: DirectoryCompany[] }>([
-        {
-          role: 'system',
-          content: `You extract REAL company/organization names from business directory pages.
-
-RULES:
-- Return ONLY actual company or organization names
-- NEVER return article titles, question titles, page headers, or section headings
-- NEVER return strings containing "?" or "[duplicate]"
-- Company names are typically 1-5 words, proper nouns
-- If the page is not a business directory (e.g. it's a forum, Q&A site, tutorial), return an empty array
-
-Return valid JSON.`,
-        },
-        {
-          role: 'user',
-          content: `Extract companies from this page. Return JSON: { "companies": [{ "name": "Company Name", "domain": "company.com", "description": "Brief desc", "url": "https://..." }] }\n\nPAGE:\n${pageContent.slice(0, 6000)}`,
-        },
-      ]);
-      companies = extraction.companies ?? [];
-    } catch (err) {
-      logger.warn({ err, url: result.url }, 'Failed to extract companies from directory page');
-      return discoveredCompanies;
-    }
-
-    for (const company of companies.slice(0, 20)) {
-      if (!company.name) continue;
-
-      // Skip mega-corps in sales mode
-      if (useCase === 'sales' && company.domain && isMegaCorp(company.domain)) continue;
-
-      // Resolve domain if not provided
-      let domain = company.domain;
-      if (!domain && company.url) {
-        try { domain = new URL(company.url).hostname.replace('www.', ''); } catch { /* ignore */ }
-      }
-      if (!domain) {
-        domain = await this.resolveCompanyDomain(company.name);
-      }
-
-      const savedCompany = await this.saveOrUpdateCompany({
-        name: company.name,
-        domain,
-        rawData: {
-          ...(domain ? {} : { domainStatus: 'unresolved' }),
-          directorySource: result.url,
-          directoryTitle: result.title,
-          discoveryQuery: query,
-          description: company.description,
-        },
-      });
-
-      discoveredCompanies.push({ companyId: savedCompany.id, companyName: company.name, domain });
-
-      if (!domain) {
-        await this.emitEvent('company:domain_unresolved', { companyId: savedCompany.id, companyName: company.name });
-        this.sendMessage(null, 'reasoning', {
-          action: 'company_discovered_incomplete',
-          companyName: company.name,
-          companyId: savedCompany.id,
-          reason: 'no_domain_resolved',
-          source: result.url,
-        });
-      }
-    }
-
-    logger.info({ url: result.url, companiesExtracted: companies.length }, 'Directory page processed');
-    return discoveredCompanies;
-  }
-
-  private async handleJobListing(
-    result: { url: string; title: string; snippet: string },
-    item: ClassifiedResult,
-    query: string,
-    useCase?: string,
-    masterAgentId?: string,
-    opportunityFocused?: boolean,
-  ): Promise<{ opportunityCreated: boolean; company: { companyId: string; companyName: string; domain?: string } | null }> {
-    const companyName = item.extractedCompany || result.title.split(/[|–—-]/)[0]?.trim() || 'Unknown';
-
-    // Resolve actual company domain (Problem 5 — job board URLs give wrong domains)
-    let domain: string | undefined;
-    try {
-      const urlDomain = new URL(result.url).hostname.replace('www.', '');
-      // If URL is a job board, resolve the actual company domain
-      const jobBoardDomains = ['indeed.com', 'glassdoor.com', 'linkedin.com', 'ziprecruiter.com', 'monster.com', 'angel.co', 'lever.co', 'greenhouse.io', 'workable.com'];
-      if (jobBoardDomains.some(jb => urlDomain.includes(jb))) {
-        domain = await this.resolveCompanyDomain(companyName);
-      } else {
-        domain = urlDomain;
-      }
-    } catch { /* ignore */ }
-
-    // Skip mega-corps in sales mode
-    if (useCase === 'sales' && domain && isMegaCorp(domain)) return { opportunityCreated: false, company: null };
-
-    const company = await this.saveOrUpdateCompany({
-      name: companyName,
-      domain,
-      rawData: {
-        ...(domain ? {} : { domainStatus: 'unresolved' }),
-        jobListings: [
-          {
-            title: item.extractedJobTitle || result.title,
-            skills: item.extractedRequiredSkills ?? [],
-            url: result.url,
-            snippet: result.snippet,
-            discoveryQuery: query,
-          },
-        ],
-      },
-    });
-
-    if (!domain) {
-      await this.emitEvent('company:domain_unresolved', { companyId: company.id, companyName });
-    }
-
-    // Create opportunity record for sales mode (hiring signal = buying intent)
-    let opportunityCreated = false;
-    if (useCase === 'sales' && masterAgentId) {
-      try {
-        const technologies = item.extractedRequiredSkills ?? [];
-        // Hiring signal = moderate-to-high intent (70-80)
-        const buyingIntent = opportunityFocused ? 80 : 70;
-
-        await withTenant(this.tenantId, async (tx) => {
-          await tx.insert(opportunities).values({
-            tenantId: this.tenantId,
-            masterAgentId,
-            title: `Hiring: ${item.extractedJobTitle || result.title}`.slice(0, 500),
-            description: result.snippet,
-            opportunityType: 'hiring_signal',
-            source: 'web_discovery',
-            sourceUrl: result.url,
-            sourcePlatform: (() => {
-              try { return new URL(result.url).hostname; } catch { return undefined; }
-            })(),
-            companyName,
-            companyDomain: domain,
-            technologies,
-            buyingIntentScore: buyingIntent,
-            urgency: 'soon',
-            status: 'new',
-            companyId: company.id,
-          });
-        });
-        opportunityCreated = true;
-      } catch (err) {
-        logger.warn({ err, companyName, url: result.url }, 'Failed to create opportunity from job listing');
-      }
-    }
-
-    await this.emitEvent('company:job_listing', {
-      companyId: company.id,
-      companyName,
-      jobTitle: item.extractedJobTitle || result.title,
-      url: result.url,
-      opportunityCreated,
-    });
-
-    return { opportunityCreated, company: { companyId: company.id, companyName, domain } };
-  }
-
-  private async handleCompany(
-    result: { url: string; title: string; snippet: string },
-    item: ClassifiedResult,
-    query: string,
-    useCase?: string,
-  ): Promise<{ companyId: string; companyName: string; domain?: string } | null> {
-    // Extract domain from URL
-    let domain: string | undefined;
-    try {
-      const urlDomain = new URL(result.url).hostname.replace('www.', '');
-      // If URL is LinkedIn/Crunchbase, resolve real domain (Problem 5)
-      if (urlDomain.includes('linkedin.com') || urlDomain.includes('crunchbase.com')) {
-        const companyName = item.extractedCompany || item.extractedName || 'Unknown';
-        domain = await this.resolveCompanyDomain(companyName);
-      } else {
-        domain = urlDomain;
-      }
-    } catch { /* ignore */ }
-
-    const companyName = item.extractedCompany || item.extractedName || result.title.split(/[|–—-]/)[0]?.trim() || 'Unknown';
-
-    // Skip mega-corps in sales mode
-    if (useCase === 'sales' && domain && isMegaCorp(domain)) return null;
-
-    const company = await this.saveOrUpdateCompany({
-      name: companyName,
-      domain,
-      linkedinUrl: result.url.includes('linkedin.com/company/') ? result.url : undefined,
-      rawData: {
-        ...(domain ? {} : { domainStatus: 'unresolved' }),
-        discoveryUrl: result.url,
-        discoveryTitle: result.title,
-        discoverySnippet: result.snippet,
-        discoveryQuery: query,
-        classificationConfidence: item.confidence,
-      },
-    });
-
-    if (!domain) {
-      await this.emitEvent('company:domain_unresolved', { companyId: company.id, companyName });
-      // Log incomplete company as agent room discovery detail
-      this.sendMessage(null, 'reasoning', {
-        action: 'company_discovered_incomplete',
-        companyName,
-        companyId: company.id,
-        reason: 'no_domain_resolved',
-        source: result.url,
-      });
-    }
-
-    await this.emitEvent('company:discovered', {
-      companyId: company.id,
-      name: companyName,
-      domain,
-      url: result.url,
-    });
-
-    return { companyId: company.id, companyName, domain };
-  }
-
-  // ── Content with company mentions handler ───────────────────────────────────
-
-  private async handleContentWithCompanies(
-    result: { url: string; title: string; snippet: string },
-    item: ClassifiedResult,
-    query: string,
-    useCase?: string,
-    _masterAgentId?: string,
-  ): Promise<{ companyId: string; companyName: string; domain?: string }[]> {
-    const companyNames = item.extractedCompanies ?? [];
-    const discoveredCompanies: { companyId: string; companyName: string; domain?: string }[] = [];
-    if (companyNames.length === 0) return discoveredCompanies;
-
-    for (const companyName of companyNames.slice(0, 15)) {
-      if (!companyName || companyName.length < 2) continue;
-
-      // Skip mega-corps in sales mode
-      if (useCase === 'sales') {
-        const lcName = companyName.toLowerCase();
-        if (MEGA_CORP_DOMAINS.has(`${lcName}.com`) || isMegaCorp(lcName)) continue;
-      }
-
-      try {
-        const domain = await this.resolveCompanyDomain(companyName);
-
-        // Skip mega-corps by resolved domain
-        if (useCase === 'sales' && domain && isMegaCorp(domain)) continue;
-
-        const savedCompany = await this.saveOrUpdateCompany({
-          name: companyName,
-          domain,
-          rawData: {
-            ...(domain ? {} : { domainStatus: 'unresolved' }),
-            contentSource: result.url,
-            contentTitle: result.title,
-            discoveryQuery: query,
-          },
-        });
-
-        discoveredCompanies.push({ companyId: savedCompany.id, companyName, domain });
-
-        if (!domain) {
-          await this.emitEvent('company:domain_unresolved', { companyId: savedCompany.id, companyName });
-          this.sendMessage(null, 'reasoning', {
-            action: 'company_discovered_incomplete',
-            companyName,
-            companyId: savedCompany.id,
-            reason: 'no_domain_resolved',
-            source: result.url,
-          });
-        }
-      } catch (err) {
-        logger.warn({ err, companyName, url: result.url }, 'Failed to process company from content');
-      }
-    }
-
-    logger.info({ url: result.url, companiesExtracted: companyNames.length }, 'Content with companies processed');
-    return discoveredCompanies;
   }
 
   // ── Immediate company enrichment dispatch ───────────────────────────────────
@@ -866,26 +585,5 @@ Return valid JSON.`,
       logger.warn({ err, companyId: entry.companyId, companyName: entry.companyName }, 'Failed to dispatch company enrichment');
       return 0;
     }
-  }
-
-  // ── ICP exclusion context builder ──────────────────────────────────────────
-
-  private buildICPExclusion(): { excludeCompanies?: string[]; companySizeRange?: string } | undefined {
-    if (!this._ctx) return undefined;
-    const parts: { excludeCompanies?: string[]; companySizeRange?: string } = {};
-
-    // Build exclude list from mega-corp domains
-    const excludeList = [...MEGA_CORP_DOMAINS].map(d => d.replace('.com', ''));
-    parts.excludeCompanies = excludeList;
-
-    // Company size range from sales config
-    const sizeRange = this._ctx.sales?.salesStrategy?.companyQualificationCriteria?.sizeRange;
-    if (sizeRange) {
-      parts.companySizeRange = `${sizeRange.min ?? 10}-${sizeRange.max ?? 2000} employees`;
-    } else if (this._ctx.sales?.companySizes?.length) {
-      parts.companySizeRange = this._ctx.sales.companySizes.join(', ');
-    }
-
-    return parts;
   }
 }

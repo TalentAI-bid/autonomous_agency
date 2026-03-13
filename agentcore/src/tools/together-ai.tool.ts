@@ -198,12 +198,13 @@ export async function extractJSON<T>(
   tenantId: string,
   messages: ChatMessage[],
   maxRetries = 3,
+  opts?: { temperature?: number; model?: string },
 ): Promise<T> {
   const { extractJSONFromText } = await import('../utils/json-extract.js');
   const msgs = [...messages];
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const text = await complete(tenantId, msgs);
+    const text = await complete(tenantId, msgs, opts);
 
     try {
       return extractJSONFromText<T>(text);

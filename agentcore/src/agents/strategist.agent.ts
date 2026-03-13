@@ -53,7 +53,7 @@ export class StrategistAgent extends BaseAgent {
     const strategy = await this.extractJSON<SalesStrategy>([
       { role: 'system', content: buildInitialStrategySystemPrompt() },
       { role: 'user', content: buildInitialStrategyUserPrompt(ctx, mission) },
-    ]);
+    ], undefined, { model: 'deepseek-ai/DeepSeek-V3', temperature: 0.4 });
 
     // Save to masterAgent.config.salesStrategy
     await withTenant(this.tenantId, async (tx) => {

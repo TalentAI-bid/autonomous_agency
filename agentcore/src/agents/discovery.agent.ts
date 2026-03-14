@@ -70,11 +70,12 @@ export class DiscoveryAgent extends BaseAgent {
       return this.executeDeepDiscovery(input);
     }
 
-    const { searchQueries, maxResults = 10, masterAgentId, dryRun } = input as {
+    const { searchQueries, maxResults = 10, masterAgentId, dryRun, opportunityFocused } = input as {
       searchQueries: string[];
       maxResults?: number;
       masterAgentId: string;
       dryRun?: boolean;
+      opportunityFocused?: boolean;
     };
 
     logger.info({ tenantId: this.tenantId, masterAgentId, queryCount: searchQueries.length }, 'DiscoveryAgent starting');
@@ -108,6 +109,42 @@ export class DiscoveryAgent extends BaseAgent {
     let enrichmentDispatched = 0;
 
     for (const query of searchQueries) {
+      // ── Route Reddit queries to specialized Reddit intelligence handler ──
+      if (query.includes('site:reddit.com')) {
+        try {
+          const { searchRedditIntelligence } = await import('../tools/discovery-sources/reddit-intelligence.js');
+          const cleanQuery = query.replace(/site:reddit\.com\S*/gi, '').trim();
+          const redditCompanies = await searchRedditIntelligence(
+            { keywords: [cleanQuery], useCase: useCase as 'sales' | 'recruitment' | undefined, maxResults },
+            this.tenantId,
+          );
+          for (const rc of redditCompanies) {
+            if (!rc.name || rc.confidence < 40) continue;
+            try {
+              const saved = await this.saveOrUpdateCompany({
+                name: rc.name,
+                domain: rc.domain || undefined,
+                industry: rc.industry || undefined,
+                description: rc.description || undefined,
+                size: rc.size || undefined,
+                rawData: { ...rc.rawData, source: 'reddit_intelligence', discoveryQuery: query },
+              });
+              enrichmentDispatched += await this.dispatchCompanyEnrichment(
+                { companyId: saved.id, companyName: rc.name, domain: rc.domain },
+                masterAgentId,
+              );
+              companiesFound++;
+            } catch (err) {
+              logger.debug({ err, name: rc.name }, 'Failed to save Reddit-discovered company');
+            }
+          }
+          logger.info({ query: cleanQuery, companiesFound: redditCompanies.length }, 'Reddit intelligence query processed');
+          continue; // Skip normal web search for this query
+        } catch (err) {
+          logger.warn({ err, query }, 'Reddit intelligence search failed, falling back to web search');
+        }
+      }
+
       const results = await this.trackAction('search_executed', query, () => this.searchWeb(query, maxResults as number));
       if (results.length === 0) continue;
 

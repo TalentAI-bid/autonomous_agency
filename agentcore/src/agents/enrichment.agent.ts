@@ -183,10 +183,10 @@ export class EnrichmentAgent extends BaseAgent {
             careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href);
           })(),
 
-          // Source 2: Team/Leadership page — try 2 paths (reduced from 5)
+          // Source 2: Team/Leadership page — try multiple paths
           (async () => {
             if (!companyUrl) return;
-            for (const path of ['/team', '/about']) {
+            for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
               try {
                 const url = new URL(path, companyUrl).href;
                 const content = await this.scrapeUrl(url);
@@ -347,26 +347,39 @@ export class EnrichmentAgent extends BaseAgent {
                 }
               }
 
-              // Create a contact record for the key person (status: 'discovered')
+              // Create a contact record for the key person
               try {
                 const nameParts = person.name.trim().split(/\s+/);
                 const firstName = nameParts[0] ?? '';
                 const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-                await this.saveOrUpdateContact({
+                const keyPersonContact = await this.saveOrUpdateContact({
                   firstName,
                   lastName,
                   title: person.title || undefined,
                   companyName: contactCompanyName,
                   companyId: company.id,
+                  masterAgentId,
                   linkedinUrl: personLinkedinUrl || undefined,
                   email: personEmail || undefined,
+                  status: personEmail ? 'enriched' : 'discovered',
+                  source: 'web_search',
                   rawData: {
                     source: 'key_person_enrichment',
                     department: person.department || undefined,
                     parentContactId: contactId,
                   },
                 });
-                logger.info({ contactId, personName: person.name }, 'Key person contact created');
+                logger.info({ contactId, personName: person.name, hasEmail: !!personEmail }, 'Key person contact created');
+
+                // Dispatch to scoring if we have email
+                if (personEmail && keyPersonContact.id) {
+                  await this.dispatchNext('scoring', {
+                    contactId: keyPersonContact.id,
+                    masterAgentId,
+                    pipelineContext: ctx,
+                    dryRun,
+                  });
+                }
               } catch (err) {
                 logger.warn({ err, contactId, personName: person.name }, 'Failed to create key person contact');
               }
@@ -433,7 +446,7 @@ export class EnrichmentAgent extends BaseAgent {
           const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId);
           if (result.email) {
             emailFound = result.email;
-            emailVerified = result.confidence >= 85;
+            emailVerified = result.confidence >= 70;
           }
         }
       } catch (err) {
@@ -527,7 +540,7 @@ export class EnrichmentAgent extends BaseAgent {
     // Save data completeness to contact record
     updateData.dataCompleteness = dataCompleteness;
 
-    const qualityDecision = dataCompleteness >= 50 ? 'pass' : (dataCompleteness >= 35 ? 'retry' : 'archive');
+    const qualityDecision = dataCompleteness >= 40 ? 'pass' : (dataCompleteness >= 25 ? 'retry' : 'archive');
     this.sendMessage(null, 'reasoning', {
       contactName,
       dataCompleteness,
@@ -536,10 +549,33 @@ export class EnrichmentAgent extends BaseAgent {
       companyEnriched,
     });
 
-    if (dataCompleteness < 50) {
+    if (dataCompleteness < 40) {
+      // Fast-path: if we found an email, go directly to scoring regardless of completeness
+      if (emailFound) {
+        updateData.status = 'enriched';
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.update(contacts).set(updateData).where(eq(contacts.id, contactId));
+        });
+
+        await this.dispatchNext('scoring', { contactId, masterAgentId, pipelineContext: ctx, dryRun });
+
+        this.logActivity('enrichment_completed_with_email', 'completed', {
+          inputSummary: contactName,
+          details: { contactId, dataCompleteness, emailFound, fastPath: true },
+        });
+        await this.clearCurrentAction();
+
+        logger.info({ contactId, dataCompleteness, emailFound }, 'EnrichmentAgent: email fast-path → scoring');
+
+        return {
+          email: emailFound, emailVerified, companyEnriched, companyId,
+          dataCompleteness, status: 'enriched_email_fastpath',
+        };
+      }
+
       const retryCount = (input.retryCount as number) ?? 0;
 
-      if (dataCompleteness >= 35 && retryCount < 2) {
+      if (dataCompleteness >= 25 && retryCount < 2) {
         // Retry enrichment with deeper search strategies
         updateData.status = 'discovered'; // keep in pipeline for retry
 
@@ -573,8 +609,8 @@ export class EnrichmentAgent extends BaseAgent {
         };
       }
 
-      // Retries exhausted but >= 30% — mark as enriched (partial) and still dispatch to scoring
-      if (dataCompleteness >= 35) {
+      // Retries exhausted but >= 25% — mark as enriched (partial) and still dispatch to scoring
+      if (dataCompleteness >= 25) {
         updateData.status = 'enriched';
         await withTenant(this.tenantId, async (tx) => {
           await tx.update(contacts).set(updateData).where(eq(contacts.id, contactId));
@@ -596,7 +632,7 @@ export class EnrichmentAgent extends BaseAgent {
         };
       }
 
-      // Archive if < 30%
+      // Archive if < 25%
       updateData.status = 'archived';
       updateData.rawData = {
         ...(updateData.rawData as Record<string, unknown> ?? raw),
@@ -780,10 +816,10 @@ export class EnrichmentAgent extends BaseAgent {
       const companySourceResults = await Promise.allSettled([
         (async () => { if (!companyUrl) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
         (async () => { if (!companyUrl) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
-        // Team page — try 2 paths (reduced from 5)
+        // Team page — try multiple paths
         (async () => {
           if (!companyUrl) return;
-          for (const path of ['/team', '/about']) {
+          for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
             try {
               const url = new URL(path, companyUrl).href;
               const content = await this.scrapeUrl(url);
@@ -892,6 +928,80 @@ export class EnrichmentAgent extends BaseAgent {
           dataCompleteness: companyDataCompleteness,
           reason: 'insufficient_enrichment_data',
         });
+      }
+
+      // ── Team-to-contacts pipeline: find team → find emails → create contacts → scoring ──
+      if (companyDataCompleteness >= 50 && deepCompany.keyPeople?.length) {
+        const masterAgentId = input.masterAgentId as string;
+        const ctx = this.getPipelineContext(input);
+
+        logger.info({ companyId, companyName, keyPeopleCount: deepCompany.keyPeople.length }, 'Finding emails for team members');
+
+        for (const person of deepCompany.keyPeople.slice(0, 10)) {
+          if (!person.name) continue;
+          const nameParts = person.name.trim().split(/\s+/);
+          const firstName = nameParts[0] ?? '';
+          const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+          if (!firstName || !lastName) continue;
+
+          // 1. Search LinkedIn for this person
+          let personLinkedinUrl = person.linkedinUrl || '';
+          if (!personLinkedinUrl) {
+            try {
+              const liQuery = `site:linkedin.com/in/ "${person.name}" "${companyName}"`;
+              const liResults = await this.searchWeb(liQuery, 3);
+              personLinkedinUrl = liResults.find(r => r.url.includes('linkedin.com/in/'))?.url ?? '';
+            } catch { /* continue */ }
+          }
+
+          // 2. Find email via email intelligence engine (Generect → SearXNG → GitHub → MX guess)
+          let personEmail = person.email || '';
+          if (!personEmail) {
+            const emailDomain = companyDomain || companyName;
+            try {
+              const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId);
+              if (emailResult.email) {
+                personEmail = emailResult.email;
+                logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member');
+              }
+            } catch (err) {
+              logger.warn({ err, personName: person.name }, 'Email finding failed for team member');
+            }
+          }
+
+          // 3. Create contact record
+          try {
+            const contact = await this.saveOrUpdateContact({
+              firstName,
+              lastName,
+              title: person.title || undefined,
+              companyName,
+              companyId,
+              masterAgentId,
+              linkedinUrl: personLinkedinUrl || undefined,
+              email: personEmail || undefined,
+              source: 'web_search',
+              status: personEmail ? 'enriched' : 'discovered',
+              rawData: {
+                source: 'company_enrichment_team',
+                department: person.department || undefined,
+              },
+            });
+
+            // 4. Dispatch to scoring if we have email
+            if (personEmail) {
+              await this.dispatchNext('scoring', {
+                contactId: contact.id,
+                masterAgentId,
+                pipelineContext: ctx,
+                dryRun: input.dryRun,
+              });
+              logger.info({ companyName, personName: person.name, email: personEmail }, 'Team member dispatched to scoring');
+            }
+          } catch (err) {
+            logger.debug({ err, personName: person.name }, 'Failed to create team member contact');
+          }
+        }
       }
 
       this.sendMessage('discovery', 'data_handoff', {

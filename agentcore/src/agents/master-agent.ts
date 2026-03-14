@@ -132,8 +132,8 @@ export class MasterAgent extends BaseAgent {
         }),
       };
 
-      // 3d. For sales, run strategist INLINE so its search queries feed discovery
-      if (isSales && pipelineContext.sales) {
+      // 3d. Run strategist INLINE so its search queries feed discovery
+      {
         try {
           const { StrategistAgent } = await import('./strategist.agent.js');
           const strategist = new StrategistAgent({ tenantId: this.tenantId, masterAgentId });
@@ -147,7 +147,8 @@ export class MasterAgent extends BaseAgent {
 
           if (strategyResult && strategyResult.strategy) {
             const strategy = strategyResult.strategy as SalesStrategy;
-            pipelineContext.sales!.salesStrategy = strategy;
+            if (!pipelineContext.sales) pipelineContext.sales = {};
+            pipelineContext.sales.salesStrategy = strategy;
             logger.info({ masterAgentId, queryCount: strategy.opportunitySearchQueries?.length ?? 0 }, 'StrategistAgent initial strategy completed (inline)');
           } else {
             logger.warn({ masterAgentId }, 'Strategist timed out — falling back to fire-and-forget');
@@ -293,7 +294,7 @@ export class MasterAgent extends BaseAgent {
 
       // 7a. For sales: dispatch opportunity-focused queries FIRST
       const strategyQueries = pipelineContext?.sales?.salesStrategy?.opportunitySearchQueries;
-      if (pipelineContext?.useCase === 'sales' && strategyQueries && strategyQueries.length > 0) {
+      if (strategyQueries && strategyQueries.length > 0) {
         for (const sq of strategyQueries) {
           const searchQuery = typeof sq === 'string' ? sq : sq.query;
           if (!searchQuery) continue;

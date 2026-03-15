@@ -58,7 +58,7 @@ interface PageExtraction {
   }>;
 }
 
-const FAST_MODEL = 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
+const FAST_MODEL = 'openai.gpt-oss-20b-1:0';
 
 export class DiscoveryAgent extends BaseAgent {
   private _ctx: PipelineContext | undefined;
@@ -380,8 +380,8 @@ Do NOT invent data — only extract what is clearly stated on the page.`,
 URL: ${url}
 Snippet: ${snippet || 'N/A'}
 
-PAGE CONTENT (first 4000 chars):
-${pageContent.slice(0, 4000)}`,
+PAGE CONTENT (first 2000 chars):
+${pageContent.slice(0, 2000)}`,
         },
       ], undefined, { model: FAST_MODEL, temperature: 0 });
 

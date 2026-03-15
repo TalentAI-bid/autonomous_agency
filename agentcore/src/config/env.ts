@@ -12,7 +12,11 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
 
-  // External AI Services
+  // AWS Bedrock
+  AWS_BEARER_TOKEN_BEDROCK: z.string(),
+  AWS_BEDROCK_REGION: z.string().default('us-east-1'),
+
+  // Legacy AI Services (unused — kept for backward compat)
   TOGETHER_API_KEY: z.string().optional(),
   TOGETHER_API_URL: z.string().url().default('https://api.together.xyz/v1'),
   CLAUDE_API_KEY: z.string().optional(),

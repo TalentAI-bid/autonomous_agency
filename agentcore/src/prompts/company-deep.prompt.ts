@@ -71,39 +71,39 @@ export function buildUserPrompt(data: {
   sections.push(`COMPANY: ${data.companyName}${data.domain ? ` (${data.domain})` : ''}`);
 
   if (data.homepageContent) {
-    sections.push(`HOMEPAGE CONTENT:\n${data.homepageContent.slice(0, 4000)}`);
+    sections.push(`HOMEPAGE CONTENT:\n${data.homepageContent.slice(0, 2500)}`);
   }
 
   if (data.aboutPageContent) {
-    sections.push(`ABOUT PAGE CONTENT:\n${data.aboutPageContent.slice(0, 3000)}`);
+    sections.push(`ABOUT PAGE CONTENT:\n${data.aboutPageContent.slice(0, 2000)}`);
   }
 
   if (data.careersPageContent) {
-    sections.push(`CAREERS PAGE CONTENT:\n${data.careersPageContent.slice(0, 3000)}`);
+    sections.push(`CAREERS PAGE CONTENT:\n${data.careersPageContent.slice(0, 1500)}`);
   }
 
   if (data.teamPageContent) {
-    sections.push(`TEAM/LEADERSHIP PAGE CONTENT:\n${data.teamPageContent.slice(0, 3000)}`);
+    sections.push(`TEAM/LEADERSHIP PAGE CONTENT:\n${data.teamPageContent.slice(0, 2500)}`);
   }
 
   if (data.linkedinCompanyContent) {
-    sections.push(`LINKEDIN COMPANY PAGE CONTENT:\n${data.linkedinCompanyContent.slice(0, 3000)}`);
+    sections.push(`LINKEDIN COMPANY PAGE CONTENT:\n${data.linkedinCompanyContent.slice(0, 1500)}`);
   }
 
   if (data.crunchbaseContent) {
-    sections.push(`CRUNCHBASE / FUNDING CONTENT:\n${data.crunchbaseContent.slice(0, 2000)}`);
+    sections.push(`CRUNCHBASE / FUNDING CONTENT:\n${data.crunchbaseContent.slice(0, 1000)}`);
   }
 
   if (data.newsContent) {
-    sections.push(`RECENT NEWS:\n${data.newsContent.slice(0, 2000)}`);
+    sections.push(`RECENT NEWS:\n${data.newsContent.slice(0, 1000)}`);
   }
 
   if (data.glassdoorContent) {
-    sections.push(`GLASSDOOR REVIEWS:\n${data.glassdoorContent.slice(0, 2000)}`);
+    sections.push(`GLASSDOOR REVIEWS:\n${data.glassdoorContent.slice(0, 500)}`);
   }
 
   if (data.searchResults) {
-    sections.push(`SEARCH RESULTS:\n${data.searchResults.slice(0, 2000)}`);
+    sections.push(`SEARCH RESULTS:\n${data.searchResults.slice(0, 1000)}`);
   }
 
   return `Extract comprehensive company information from the sources below into a DeepCompanyProfile JSON object.

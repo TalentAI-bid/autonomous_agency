@@ -8,33 +8,40 @@ export interface ChatMessage {
   content: string;
 }
 
-interface TogetherResponse {
+interface BedrockResponse {
   choices?: Array<{ message?: { content?: string } }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 const redis: Redis = createRedisConnection();
 
-const MODEL = 'deepseek-ai/DeepSeek-R1';
+const MODEL = 'openai.gpt-oss-120b-1:0';
+export const SMART_MODEL = 'deepseek.v3.2';
 const BACKOFF_MS = [1000, 2000, 4000];
 
-async function callAPI(messages: ChatMessage[], opts?: { temperature?: number; max_tokens?: number; model?: string }): Promise<TogetherResponse> {
-  const apiKey = env.TOGETHER_API_KEY;
-  if (!apiKey) throw new Error('TOGETHER_API_KEY not configured');
+function getBedrockUrl(): string {
+  return `https://bedrock-runtime.${env.AWS_BEDROCK_REGION}.amazonaws.com/openai/v1/chat/completions`;
+}
+
+async function callAPI(messages: ChatMessage[], opts?: { temperature?: number; max_tokens?: number; model?: string }): Promise<BedrockResponse> {
+  const token = env.AWS_BEARER_TOKEN_BEDROCK;
+  if (!token) throw new Error('AWS_BEARER_TOKEN_BEDROCK not configured');
+
+  const url = getBedrockUrl();
 
   for (let attempt = 0; attempt <= 3; attempt++) {
     try {
-      const response = await fetch(`${env.TOGETHER_API_URL}/chat/completions`, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           model: opts?.model ?? MODEL,
           messages,
           temperature: opts?.temperature ?? 0.7,
-          max_tokens: opts?.max_tokens ?? 16384,
+          max_tokens: opts?.max_tokens ?? 4096,
         }),
       });
 
@@ -43,18 +50,18 @@ async function callAPI(messages: ChatMessage[], opts?: { temperature?: number; m
           await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]!));
           continue;
         }
-        throw new Error(`Together AI returned ${response.status}`);
+        throw new Error(`Bedrock returned ${response.status}`);
       }
 
-      if (!response.ok) throw new Error(`Together AI returned ${response.status}`);
+      if (!response.ok) throw new Error(`Bedrock returned ${response.status}: ${await response.text()}`);
 
-      return await response.json() as TogetherResponse;
+      return await response.json() as BedrockResponse;
     } catch (err) {
       if (attempt === 3) throw err;
       await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]!));
     }
   }
-  throw new Error('Together AI: all retries exhausted');
+  throw new Error('Bedrock: all retries exhausted');
 }
 
 export async function complete(
@@ -63,14 +70,12 @@ export async function complete(
   opts?: { temperature?: number; max_tokens?: number; model?: string },
 ): Promise<string> {
   const data = await callAPI(messages, opts);
-  const rawText = data.choices?.[0]?.message?.content ?? '';
-  // Strip DeepSeek R1 <think> blocks before returning
-  const text = rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const text = (data.choices?.[0]?.message?.content ?? '').trim();
 
   // Track token usage
   const tokens = (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
   if (tokens > 0) {
-    await redis.incrby(`tenant:${tenantId}:usage:together:tokens`, tokens);
+    await redis.incrby(`tenant:${tenantId}:usage:bedrock:tokens`, tokens);
   }
 
   return text;
@@ -81,37 +86,36 @@ export async function* completeStream(
   messages: ChatMessage[],
   opts?: { temperature?: number; max_tokens?: number; model?: string },
 ): AsyncGenerator<string, string, unknown> {
-  const apiKey = env.TOGETHER_API_KEY;
-  if (!apiKey) throw new Error('TOGETHER_API_KEY not configured');
+  const token = env.AWS_BEARER_TOKEN_BEDROCK;
+  if (!token) throw new Error('AWS_BEARER_TOKEN_BEDROCK not configured');
 
-  const response = await fetch(`${env.TOGETHER_API_URL}/chat/completions`, {
+  const url = getBedrockUrl();
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       model: opts?.model ?? MODEL,
       messages,
       temperature: opts?.temperature ?? 0.7,
-      max_tokens: opts?.max_tokens ?? 16384,
+      max_tokens: opts?.max_tokens ?? 4096,
       stream: true,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Together AI streaming returned ${response.status}`);
+    throw new Error(`Bedrock streaming returned ${response.status}`);
   }
 
   const body = response.body;
-  if (!body) throw new Error('Together AI: no response body for stream');
+  if (!body) throw new Error('Bedrock: no response body for stream');
 
   const decoder = new TextDecoder();
   let accumulated = '';
   let buffer = '';
-  // Track <think> blocks in streaming to suppress them
-  let insideThink = false;
-  let thinkBuffer = '';
 
   const reader = body.getReader();
   try {
@@ -121,7 +125,6 @@ export async function* completeStream(
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      // Keep the last potentially incomplete line in the buffer
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
@@ -136,48 +139,13 @@ export async function* completeStream(
           };
           const content = json.choices?.[0]?.delta?.content;
           if (content) {
-            // Suppress <think>...</think> blocks from streaming output
-            if (insideThink) {
-              thinkBuffer += content;
-              if (thinkBuffer.includes('</think>')) {
-                // End of think block — emit anything after </think>
-                const afterThink = thinkBuffer.split('</think>').slice(1).join('</think>');
-                insideThink = false;
-                thinkBuffer = '';
-                if (afterThink) {
-                  accumulated += afterThink;
-                  yield afterThink;
-                }
-              }
-            } else if (content.includes('<think>')) {
-              // Start of think block
-              const beforeThink = content.split('<think>')[0] ?? '';
-              if (beforeThink) {
-                accumulated += beforeThink;
-                yield beforeThink;
-              }
-              insideThink = true;
-              thinkBuffer = content.slice(content.indexOf('<think>') + 7);
-              // Check if think block ends in the same chunk
-              if (thinkBuffer.includes('</think>')) {
-                const afterThink = thinkBuffer.split('</think>').slice(1).join('</think>');
-                insideThink = false;
-                thinkBuffer = '';
-                if (afterThink) {
-                  accumulated += afterThink;
-                  yield afterThink;
-                }
-              }
-            } else {
-              accumulated += content;
-              yield content;
-            }
+            accumulated += content;
+            yield content;
           }
-          // Track usage from the final chunk if available
           if (json.usage) {
             const tokens = (json.usage.prompt_tokens ?? 0) + (json.usage.completion_tokens ?? 0);
             if (tokens > 0) {
-              await redis.incrby(`tenant:${tenantId}:usage:together:tokens`, tokens);
+              await redis.incrby(`tenant:${tenantId}:usage:bedrock:tokens`, tokens);
             }
           }
         } catch {
@@ -189,8 +157,6 @@ export async function* completeStream(
     reader.releaseLock();
   }
 
-  // Track usage if we didn't get it from the stream
-  // (some providers only send usage in the final event)
   return accumulated;
 }
 
@@ -209,12 +175,12 @@ export async function extractJSON<T>(
     try {
       return extractJSONFromText<T>(text);
     } catch (err) {
-      logger.warn({ attempt, tenantId, errMsg: err instanceof Error ? err.message : String(err) }, 'Together AI JSON parse failed, retrying');
+      logger.warn({ attempt, tenantId, errMsg: err instanceof Error ? err.message : String(err) }, 'Bedrock JSON parse failed, retrying');
       if (attempt < maxRetries - 1) {
         msgs.push({ role: 'assistant', content: text });
         msgs.push({ role: 'user', content: 'Output must be valid JSON only. No markdown, no explanation, just the raw JSON object.' });
       }
     }
   }
-  throw new Error('Together AI: failed to extract valid JSON after retries');
+  throw new Error('Bedrock: failed to extract valid JSON after retries');
 }

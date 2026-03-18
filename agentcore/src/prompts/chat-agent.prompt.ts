@@ -122,24 +122,28 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
   },
   "pipeline": [
     { "agentType": "discovery", "order": 1, "description": "What this step does for this specific use case", "config": {} },
-    { "agentType": "document", "order": 2, "description": "...", "config": {} },
-    { "agentType": "enrichment", "order": 3, "description": "...", "config": {} },
-    { "agentType": "scoring", "order": 4, "description": "...", "config": {} },
-    { "agentType": "outreach", "order": 5, "description": "...", "config": {} },
-    { "agentType": "reply", "order": 6, "description": "...", "config": {} },
-    { "agentType": "action", "order": 7, "description": "...", "config": {} }
+    { "agentType": "enrichment", "order": 2, "description": "...", "config": {} },
+    { "agentType": "scoring", "order": 3, "description": "...", "config": {} }
   ],
+  // ↑ This is the MINIMAL pipeline. Only add other agents when needed:
+  // - "document" → only for recruitment (CV/LinkedIn parsing) or when user uploads documents
+  // - "outreach" → only if enableOutreach is true and email account is configured
+  // - "reply" + "action" → only if outreach is included
   "summary": "Brief summary of what the pipeline will do",
   "estimatedDuration": "e.g. 2-4 hours"
 }
 </pipeline_proposal>
 
 ## Pipeline Rules
-- **Web-search pipelines:** If the goal involves finding new contacts from the web, discovery is the first step, followed by document, enrichment, scoring, etc.
-- Discovery is NOT always required — only include it when the user wants to find new contacts from the web.
-- Document follows discovery (for processing LinkedIn profiles).
-- Enrichment requires discovered contacts.
-- Scoring requires enriched contact data.
+- **Default pipeline order:** Discovery → Enrichment → Scoring. This is the standard flow for sales, partnerships, research, and custom use cases.
+- **Recruitment pipeline order:** Discovery → Document → Enrichment → Scoring. Document is added because recruitment needs to parse LinkedIn profiles and CVs.
+- Discovery is NOT always required — only include it when the user wants to find new contacts/companies from the web.
+- **Document agent is OPTIONAL** — only include it when:
+  - The pipeline is recruitment-focused (parsing LinkedIn profiles, CVs, job specs)
+  - The user explicitly mentions uploading documents for the agent to parse
+  - Do NOT include Document for sales, partnerships, research, or custom pipelines unless the user asks for document processing
+- Enrichment requires discovered contacts/companies.
+- Scoring requires enriched data.
 - Outreach requires scoring (only contacts passing the threshold get emails).
 - Reply and action are optional — only include if outreach is enabled.
 - If outreach is disabled, stop the pipeline after scoring.

@@ -43,6 +43,7 @@ import agentRoomRoutes from './routes/agent-room.routes.js';
 
 async function buildApp() {
   const fastify = Fastify({
+    bodyLimit: 50 * 1024 * 1024, // 50MB — needed for PDF/DOCX uploads
     logger: {
       level: env.LOG_LEVEL,
       ...(env.NODE_ENV === 'development'

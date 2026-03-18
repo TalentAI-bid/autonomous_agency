@@ -511,8 +511,8 @@ export async function approveProposal(tenantId: string, conversationId: string, 
     config.emailListenerConfigId = approvalListeners[0].id;
   }
 
-  // Validate email sending account
-  if (hasOutreach && !config.emailAccountId) {
+  // Validate email sending account (skip if user explicitly disabled outreach)
+  if (hasOutreach && !config.emailAccountId && config.enableOutreach !== false) {
     throw new ValidationError(
       'This pipeline includes outreach but no email sending account is selected. Please configure one in Settings > Email, then ask the agent to update the proposal.'
     );

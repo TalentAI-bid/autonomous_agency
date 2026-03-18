@@ -53,6 +53,7 @@ export class MasterAgent extends BaseAgent {
     // Read enabled agents from config (null = all agents, for backwards compat)
     const enabledAgents = (agentConfig.enabledAgents as string[]) ?? null;
     const hasDiscovery = !enabledAgents || enabledAgents.includes('discovery');
+    const enableOutreach = agentConfig.enableOutreach !== false; // default true for backward compat
 
     let requirements: Record<string, unknown> = {};
     let campaignId: string | undefined;
@@ -173,53 +174,67 @@ export class MasterAgent extends BaseAgent {
       }
 
       // 4. Auto-create campaign (or reuse existing) + save all config in one write
-      campaignId = await withTenant(this.tenantId, async (tx) => {
-        // Check for existing active campaign
-        const [existing] = await tx.select().from(campaigns)
-          .where(and(
-            eq(campaigns.masterAgentId, masterAgentId),
-            eq(campaigns.tenantId, this.tenantId),
-            eq(campaigns.status, 'active'),
-          ))
-          .limit(1);
+      if (enableOutreach) {
+        campaignId = await withTenant(this.tenantId, async (tx) => {
+          // Check for existing active campaign
+          const [existing] = await tx.select().from(campaigns)
+            .where(and(
+              eq(campaigns.masterAgentId, masterAgentId),
+              eq(campaigns.tenantId, this.tenantId),
+              eq(campaigns.status, 'active'),
+            ))
+            .limit(1);
 
-        let cid: string;
-        if (existing) {
-          cid = existing.id;
-          logger.info({ masterAgentId, campaignId: cid }, 'Reusing existing campaign');
-        } else {
-          const [newCampaign] = await tx.insert(campaigns).values({
-            tenantId: this.tenantId,
-            masterAgentId,
-            name: `Auto: ${agent.name}`,
-            type: 'email',
-            status: 'active',
-          }).returning();
-          cid = newCampaign!.id;
+          let cid: string;
+          if (existing) {
+            cid = existing.id;
+            logger.info({ masterAgentId, campaignId: cid }, 'Reusing existing campaign');
+          } else {
+            const [newCampaign] = await tx.insert(campaigns).values({
+              tenantId: this.tenantId,
+              masterAgentId,
+              name: `Auto: ${agent.name}`,
+              type: 'email',
+              status: 'active',
+            }).returning();
+            cid = newCampaign!.id;
 
-          await tx.insert(campaignSteps).values([
-            { campaignId: cid, stepNumber: 1, subject: 'Initial outreach', delayDays: 0, channel: 'email' as const },
-            { campaignId: cid, stepNumber: 2, subject: 'Follow-up', delayDays: 3, channel: 'email' as const },
-            { campaignId: cid, stepNumber: 3, subject: 'Final follow-up', delayDays: 7, channel: 'email' as const },
-          ]);
-        }
+            await tx.insert(campaignSteps).values([
+              { campaignId: cid, stepNumber: 1, subject: 'Initial outreach', delayDays: 0, channel: 'email' as const },
+              { campaignId: cid, stepNumber: 2, subject: 'Follow-up', delayDays: 3, channel: 'email' as const },
+              { campaignId: cid, stepNumber: 3, subject: 'Final follow-up', delayDays: 7, channel: 'email' as const },
+            ]);
+          }
 
-        // SINGLE combined config save — all data in one write
-        await tx
-          .update(masterAgents)
-          .set({
-            config: { ...agentConfig, ...requirements, campaignId: cid, pipelineContext },
-            updatedAt: new Date(),
-          })
-          .where(eq(masterAgents.id, masterAgentId));
+          // SINGLE combined config save — all data in one write
+          await tx
+            .update(masterAgents)
+            .set({
+              config: { ...agentConfig, ...requirements, campaignId: cid, pipelineContext },
+              updatedAt: new Date(),
+            })
+            .where(eq(masterAgents.id, masterAgentId));
 
-        return cid;
-      });
+          return cid;
+        });
 
-      logger.info({ tenantId: this.tenantId, masterAgentId, campaignId }, 'MasterAgent auto-created campaign');
+        logger.info({ tenantId: this.tenantId, masterAgentId, campaignId }, 'MasterAgent auto-created campaign');
 
-      // Update pipelineContext with campaignId
-      if (pipelineContext) pipelineContext.campaignId = campaignId;
+        // Update pipelineContext with campaignId
+        if (pipelineContext) pipelineContext.campaignId = campaignId;
+      } else {
+        // Outreach disabled — just save config without campaign
+        await withTenant(this.tenantId, async (tx) => {
+          await tx
+            .update(masterAgents)
+            .set({
+              config: { ...agentConfig, ...requirements, pipelineContext },
+              updatedAt: new Date(),
+            })
+            .where(eq(masterAgents.id, masterAgentId));
+        });
+        logger.info({ tenantId: this.tenantId, masterAgentId }, 'MasterAgent: outreach disabled, skipping campaign creation');
+      }
 
       // 5. Generate search queries using Together AI
       const queryMessages = [

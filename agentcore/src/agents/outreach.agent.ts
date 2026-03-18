@@ -22,6 +22,21 @@ export class OutreachAgent extends BaseAgent {
     };
 
     logger.info({ tenantId: this.tenantId, contactId, stepNumber }, 'OutreachAgent starting');
+
+    // 0. Check if outreach is disabled for this agent
+    if (masterAgentId) {
+      const [agentRow] = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+          .limit(1);
+      });
+      const agentConfig = (agentRow?.config as Record<string, unknown>) ?? {};
+      if (agentConfig.enableOutreach === false) {
+        logger.info({ tenantId: this.tenantId, masterAgentId, contactId }, 'OutreachAgent: outreach disabled for this agent, skipping');
+        return { skipped: true, reason: 'outreach_disabled' };
+      }
+    }
+
     await this.setCurrentAction('outreach', `Generating email step ${stepNumber} for ${contactId.slice(0, 8)}`);
 
     // 1. Load contact + full company data

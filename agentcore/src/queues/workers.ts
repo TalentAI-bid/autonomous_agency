@@ -48,9 +48,10 @@ export async function scheduleAgentJobs(
 ): Promise<void> {
   registerTenantWorkers(tenantId);
   const enabledAgents = (config.enabledAgents as string[]) ?? [];
+  const enableOutreach = config.enableOutreach !== false; // default true for backward compat
 
-  // Schedule email-send repeatable job (every 10s) if outreach/email-send enabled
-  if (!enabledAgents.length || enabledAgents.includes('email-send') || enabledAgents.includes('outreach')) {
+  // Schedule email-send repeatable job (every 10s) if outreach/email-send enabled AND outreach not disabled
+  if (enableOutreach && (!enabledAgents.length || enabledAgents.includes('email-send') || enabledAgents.includes('outreach'))) {
     const emailSendQueue = getQueue(tenantId, 'email-send');
     // Remove stale repeatable before re-adding
     const existingSendJobs = await emailSendQueue.getRepeatableJobs();

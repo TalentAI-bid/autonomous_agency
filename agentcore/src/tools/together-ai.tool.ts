@@ -19,6 +19,14 @@ const MODEL = 'openai.gpt-oss-120b-1:0';
 export const SMART_MODEL = 'deepseek.v3.2';
 const BACKOFF_MS = [1000, 2000, 4000];
 
+/** Strip DeepSeek <think>...</think> reasoning blocks from LLM output */
+function stripThinkTags(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')   // closed <think>...</think>
+    .replace(/<think>[\s\S]*/gi, '')              // unclosed <think> (strip to end)
+    .trim();
+}
+
 function getBedrockUrl(): string {
   return `https://bedrock-runtime.${env.AWS_BEDROCK_REGION}.amazonaws.com/openai/v1/chat/completions`;
 }
@@ -70,7 +78,8 @@ export async function complete(
   opts?: { temperature?: number; max_tokens?: number; model?: string },
 ): Promise<string> {
   const data = await callAPI(messages, opts);
-  const text = (data.choices?.[0]?.message?.content ?? '').trim();
+  const raw = (data.choices?.[0]?.message?.content ?? '').trim();
+  const text = stripThinkTags(raw);
 
   // Track token usage
   const tokens = (data.usage?.prompt_tokens ?? 0) + (data.usage?.completion_tokens ?? 0);
@@ -157,7 +166,7 @@ export async function* completeStream(
     reader.releaseLock();
   }
 
-  return accumulated;
+  return stripThinkTags(accumulated);
 }
 
 export async function extractJSON<T>(

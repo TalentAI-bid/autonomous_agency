@@ -27,8 +27,11 @@ export function extractJSONFromText<T = unknown>(text: string): T {
     throw new JSONExtractionError('Empty input', text ?? '');
   }
 
-  // 1. Strip <think>...</think> blocks
-  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  // 1. Strip <think>...</think> blocks (including unclosed <think> tags)
+  let cleaned = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')   // closed tags
+    .replace(/<think>[\s\S]*/gi, '')              // unclosed tag (strip to end)
+    .trim();
 
   // 2. Direct parse
   try {

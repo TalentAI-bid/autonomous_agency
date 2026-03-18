@@ -146,7 +146,10 @@ export class DiscoveryAgent extends BaseAgent {
       }
 
       const results = await this.trackAction('search_executed', query, () => this.searchWeb(query, maxResults as number));
-      if (results.length === 0) continue;
+      if (results.length === 0) {
+        logger.warn({ query, tenantId: this.tenantId, masterAgentId }, 'SearXNG returned 0 results for query');
+        continue;
+      }
 
       // Process top 5 most promising results per query (scraping budget)
       const prioritized = this.prioritizeResults(results);
@@ -273,6 +276,14 @@ export class DiscoveryAgent extends BaseAgent {
         resultCount: results.length,
         processed: { companies: companiesFound, candidates: candidatesFound, pagesScraped, skipped },
       }, 'Discovery query processed');
+    }
+
+    if (companiesFound === 0 && candidatesFound === 0) {
+      logger.warn(
+        { tenantId: this.tenantId, masterAgentId, queryCount: searchQueries.length },
+        'DiscoveryAgent found ZERO companies/candidates across all queries — SearXNG may be down or queries too specific',
+      );
+      await this.emitEvent('pipeline:discovery_empty', { masterAgentId, queryCount: searchQueries.length });
     }
 
     this.sendMessage(null, 'reasoning', {

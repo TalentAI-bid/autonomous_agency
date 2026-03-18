@@ -74,7 +74,10 @@ export async function search(
   maxResults = 10,
 ): Promise<SearchResult[]> {
   // Circuit breaker check
-  if (await isCircuitOpen()) return [];
+  if (await isCircuitOpen()) {
+    logger.warn({ tenantId, query }, 'SearXNG circuit breaker OPEN — returning empty results');
+    return [];
+  }
 
   // Rate limit check
   const rateLimitKey = `tenant:${tenantId}:ratelimit:search`;
@@ -166,7 +169,10 @@ export async function searchDiscovery(
   maxResults = 10,
 ): Promise<SearchResult[]> {
   // Circuit breaker check
-  if (await isCircuitOpen()) return [];
+  if (await isCircuitOpen()) {
+    logger.warn({ tenantId, query }, 'SearXNG circuit breaker OPEN — returning empty results (discovery)');
+    return [];
+  }
 
   // Rate limit check — separate bucket for discovery
   const rateLimitKey = `tenant:${tenantId}:ratelimit:discovery`;

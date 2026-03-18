@@ -136,7 +136,7 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
 
 ## Pipeline Rules
 - **Default pipeline order:** Discovery → Enrichment → Scoring. This is the standard flow for sales, partnerships, research, and custom use cases.
-- **Recruitment pipeline order:** Discovery → Document → Enrichment → Scoring. Document is added because recruitment needs to parse LinkedIn profiles and CVs.
+- **Recruitment pipeline order:** Discovery → Enrichment → Document → Scoring. Document comes after Enrichment because enrichment discovers emails and company data first, then Document processes LinkedIn profiles and CVs with that enriched context.
 - Discovery is NOT always required — only include it when the user wants to find new contacts/companies from the web.
 - **Document agent is OPTIONAL** — only include it when:
   - The pipeline is recruitment-focused (parsing LinkedIn profiles, CVs, job specs)

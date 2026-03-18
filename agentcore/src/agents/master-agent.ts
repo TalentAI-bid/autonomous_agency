@@ -446,6 +446,48 @@ export class MasterAgent extends BaseAgent {
     const decisions: string[] = [];
     const actions: string[] = [];
 
+    // 3a. Check if strategist generated queries that weren't dispatched yet
+    try {
+      const [agentRow] = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+          .limit(1);
+      });
+      const cfg = (agentRow?.config as Record<string, unknown>) ?? {};
+      const salesStrategy = cfg.salesStrategy as SalesStrategy | undefined;
+      const pendingQueries = salesStrategy?.opportunitySearchQueries;
+      const alreadyDispatched = (cfg.dispatchedStrategyQueries as boolean) ?? false;
+
+      if (pendingQueries?.length && !alreadyDispatched && metrics.discovered === 0) {
+        let jobIdx = 0;
+        for (const sq of pendingQueries) {
+          const searchQuery = typeof sq === 'string' ? sq : (sq as Record<string, unknown>).query as string;
+          if (!searchQuery) continue;
+          await this.dispatchNext('discovery', {
+            searchQueries: [searchQuery],
+            maxResults: 10,
+            masterAgentId,
+            opportunityFocused: true,
+          }, { delay: jobIdx * 5000 });
+          jobIdx++;
+        }
+        // Mark as dispatched to avoid re-dispatching on next cycle
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.update(masterAgents).set({
+            config: { ...cfg, dispatchedStrategyQueries: true },
+            updatedAt: new Date(),
+          }).where(eq(masterAgents.id, masterAgentId));
+        });
+        if (jobIdx > 0) {
+          actions.push(`Dispatched ${jobIdx} strategist queries as discovery jobs`);
+          decisions.push('Found undispatched strategist queries — dispatching them now.');
+          logger.info({ masterAgentId, queryCount: jobIdx }, 'Orchestrator dispatched undispatched strategist queries');
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'Failed to check strategist queries in orchestration');
+    }
+
     if (archiveRate > 60) {
       decisions.push('High archive rate detected — discovery may be producing low-quality results.');
       this.sendMessage(null, 'reasoning', {
@@ -460,10 +502,12 @@ export class MasterAgent extends BaseAgent {
       decisions.push('Low scoring acceptance rate — threshold may be too strict or enrichment data insufficient.');
     }
 
-    if (metrics.discovered > 50 && metrics.enriched < 10) {
-      decisions.push('Enrichment bottleneck detected — dispatching enrichment for unenriched companies.');
+    if (metrics.discovered > 0 && metrics.enriched < Math.max(metrics.discovered * 0.5, 5)) {
+      decisions.push('Enrichment bottleneck detected — dispatching enrichment for unenriched companies and contacts.');
 
-      // ACTION: Find companies with domain but low dataCompleteness and dispatch enrichment
+      let dispatched = 0;
+
+      // ACTION 1: Find companies with low dataCompleteness and dispatch enrichment
       try {
         const unenrichedCompanies = await withTenant(this.tenantId, async (tx) => {
           return tx.select({ id: companies.id, name: companies.name, domain: companies.domain })
@@ -472,12 +516,10 @@ export class MasterAgent extends BaseAgent {
               eq(companies.tenantId, this.tenantId),
               eq(companies.masterAgentId, masterAgentId),
               lt(companies.dataCompleteness, 70),
-              isNotNull(companies.domain),
             ))
             .limit(10);
         });
 
-        let dispatched = 0;
         for (const comp of unenrichedCompanies) {
           try {
             await this.dispatchNext('enrichment', {
@@ -489,17 +531,42 @@ export class MasterAgent extends BaseAgent {
             logger.warn({ err, companyId: comp.id }, 'Failed to dispatch company enrichment from orchestrator');
           }
         }
-
-        if (dispatched > 0) {
-          actions.push(`Dispatched enrichment for ${dispatched} unenriched companies`);
-          this.sendMessage('enrichment', 'task_assignment', {
-            action: 'orchestrator_enrichment_dispatch',
-            companyCount: dispatched,
-            reason: 'enrichment_bottleneck',
-          });
-        }
       } catch (err) {
         logger.warn({ err, masterAgentId }, 'Failed to query unenriched companies for orchestration');
+      }
+
+      // ACTION 2: Find contacts stuck in 'discovered' status and dispatch enrichment
+      try {
+        const unenrichedContacts = await withTenant(this.tenantId, async (tx) => {
+          return tx.select({ id: contacts.id })
+            .from(contacts)
+            .where(and(
+              eq(contacts.tenantId, this.tenantId),
+              eq(contacts.masterAgentId, masterAgentId),
+              eq(contacts.status, 'discovered'),
+            ))
+            .limit(20);
+        });
+
+        for (const c of unenrichedContacts) {
+          try {
+            await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId });
+            dispatched++;
+          } catch (err) {
+            logger.warn({ err, contactId: c.id }, 'Failed to dispatch contact enrichment from orchestrator');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, masterAgentId }, 'Failed to query unenriched contacts for orchestration');
+      }
+
+      if (dispatched > 0) {
+        actions.push(`Dispatched enrichment for ${dispatched} unenriched companies/contacts`);
+        this.sendMessage('enrichment', 'task_assignment', {
+          action: 'orchestrator_enrichment_dispatch',
+          count: dispatched,
+          reason: 'enrichment_bottleneck',
+        });
       }
     }
 

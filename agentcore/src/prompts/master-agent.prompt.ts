@@ -46,7 +46,9 @@ export function buildUserPrompt(data: {
     .join('\n\n---\n\n');
 
   if (data.useCase === 'sales') {
-    return `Analyze this sales campaign mission and extract structured requirements for finding and reaching decision-makers at target companies.
+    return `Analyze this mission and extract structured requirements for finding and reaching the right contacts at target organizations.
+
+IMPORTANT: The mission could target ANY type of organization — companies, universities, government agencies, nonprofits, consulting firms, etc. Adapt ALL fields to match the actual mission. Do NOT default to tech/SaaS terminology unless the mission is explicitly about tech.
 
 MISSION: ${data.mission}
 
@@ -56,16 +58,16 @@ ${docsText || 'No documents provided.'}
 Extract and return a JSON object with this exact structure:
 {
   "useCase": "sales",
-  "targetRoles": ["decision-maker titles to find, e.g. CTO, VP Engineering, Head of Product, Director of IT"],
-  "requiredSkills": ["target company attributes, e.g. SaaS, fintech, 50-200 employees, Series B"],
-  "preferredSkills": ["nice-to-have company/prospect attributes"],
+  "targetRoles": ["contact titles to find — adapt to mission, e.g. CTO, Dean of Research, VP Marketing, Program Director, Partnership Manager"],
+  "requiredSkills": ["target organization attributes — adapt to mission, e.g. industry focus, size, type, programs, certifications"],
+  "preferredSkills": ["nice-to-have organization/prospect attributes"],
   "minExperience": 0,
   "locations": ["target cities or regions, use 'Remote' if applicable"],
-  "targetCompanyAttributes": ["industry descriptors, company size indicators, tech stack signals"],
+  "targetCompanyAttributes": ["organization descriptors: industry, size, type, focus areas"],
   "idealCustomerProfile": {
-    "industries": ["target industries"],
-    "companySizes": ["e.g. 50-200, 200-1000, startup, enterprise"],
-    "techStack": ["technologies the target companies likely use"]
+    "industries": ["target industries or sectors"],
+    "companySizes": ["e.g. 50-200, 200-1000, startup, enterprise, large university, small agency"],
+    "techStack": ["relevant signals: technologies, programs, certifications, partnerships, initiatives"]
   },
   "scoringWeights": {
     "authority": 30,

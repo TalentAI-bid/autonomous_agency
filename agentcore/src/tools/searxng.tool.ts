@@ -12,8 +12,8 @@ export interface SearchResult {
 
 const redis: Redis = createRedisConnection();
 
-const RATE_LIMIT_MAX = 500;
-const DISCOVERY_RATE_LIMIT_MAX = 500;
+const RATE_LIMIT_MAX = 2000;
+const DISCOVERY_RATE_LIMIT_MAX = 2000;
 const RATE_LIMIT_WINDOW_SEC = 3600; // 1 hour
 const CACHE_TTL_SEC = 43200; // 12 hours
 const CIRCUIT_BREAKER_THRESHOLD = 5;
@@ -97,13 +97,9 @@ export async function search(
     })).catch(() => {});
     return [];
   }
-  // Conservation mode at 90%: general search returns empty, only enrichment (via searchDiscovery) gets through
-  if (count > RATE_LIMIT_MAX * 0.9) {
-    logger.warn({ tenantId, count }, 'SearXNG search conservation mode — returning empty to preserve budget for enrichment');
-    return [];
-  }
   // Warning at 80%
   if (count === Math.floor(RATE_LIMIT_MAX * 0.8)) {
+    logger.warn({ tenantId, count, limit: RATE_LIMIT_MAX }, 'SearXNG search budget at 80%');
     pubRedis.publish(`agent-events:${tenantId}`, JSON.stringify({
       event: 'pipeline:rate_limit_warning', data: { bucket: 'search', used: count, limit: RATE_LIMIT_MAX }, timestamp: new Date().toISOString(),
     })).catch(() => {});
@@ -120,7 +116,7 @@ export async function search(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const url = `${env.SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&engines=google,bing,duckduckgo&categories=general`;
+    const url = `${env.SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&engines=google,bing,duckduckgo,brave,startpage&categories=general`;
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
@@ -201,7 +197,7 @@ export async function searchDiscovery(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const url = `${env.SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&engines=google,bing,duckduckgo&categories=general`;
+    const url = `${env.SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&engines=google,bing,duckduckgo,brave,startpage&categories=general`;
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 

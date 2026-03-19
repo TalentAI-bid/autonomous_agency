@@ -69,7 +69,9 @@ For each opportunity type, generate at least 2-3 queries. Use diverse query patt
 - News/announcements: "[organization type]" "launches" OR "announces" OR "partners with" "[topic]" [year]
 - Reddit/forums: site:reddit.com "[topic]" "recommend" OR "looking for" OR "experience with"
 
-The queries MUST be diverse — cover different angles, platforms, and signals. Do NOT generate similar queries with minor variations. MATCH the query style to the mission's industry.`;
+The queries MUST be diverse — cover different angles, platforms, and signals. Do NOT generate similar queries with minor variations. MATCH the query style to the mission's industry.
+
+IMPORTANT: Output ONLY the JSON object. Do NOT include any reasoning, explanation, or <think> tags. Just the raw JSON.`;
 }
 
 export function buildInitialStrategyUserPrompt(ctx: PipelineContext, mission?: string): string {

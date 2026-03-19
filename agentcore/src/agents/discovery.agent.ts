@@ -39,9 +39,30 @@ function shouldSkipDomain(domain: string): boolean {
   return SKIP_DOMAINS.has(d) || [...SKIP_DOMAINS].some(p => d.endsWith(`.${p}`));
 }
 
+/** Detect dead/invalid LinkedIn profile URLs from search result metadata */
+function isDeadLinkedInProfile(title: string, snippet: string, url: string): boolean {
+  const t = (title || '').toLowerCase();
+  const s = (snippet || '').toLowerCase();
+  // LinkedIn 404/login pages in search results
+  if (t.includes('page not found') || t.includes('page doesn\'t exist')) return true;
+  if (t === 'linkedin' || t === 'linkedin login' || t === 'sign in | linkedin') return true;
+  // Very short titles with no name info (just "LinkedIn")
+  if (t.replace(/\s*\|\s*linkedin\s*/gi, '').trim().length < 3) return true;
+  // Snippet indicates removed profile
+  if (s.includes('this page doesn\'t exist') || s.includes('page you requested doesn\'t exist')) return true;
+  if (s.includes('this profile is not available') || s.includes('profile not found')) return true;
+  // URL validation: must have a valid slug after /in/
+  const slugMatch = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  if (!slugMatch || slugMatch[1]!.length < 2) return true;
+  // Reject obviously non-profile slugs
+  const slug = slugMatch[1]!.toLowerCase();
+  if (['404', 'error', 'login', 'signup', 'pub', 'directory'].includes(slug)) return true;
+  return false;
+}
+
 /** LLM extraction result from a scraped page */
 interface PageExtraction {
-  type: 'company_page' | 'directory' | 'team_page' | 'job_listing' | 'person_profile' | 'irrelevant';
+  type: 'company_page' | 'directory' | 'team_page' | 'job_listing' | 'person_profile' | 'institution_page' | 'irrelevant';
   companies: Array<{
     name: string;
     domain?: string;
@@ -50,6 +71,7 @@ interface PageExtraction {
     size?: string;
     location?: string;
     funding?: string;
+    entityType?: string; // 'company' | 'university' | 'government' | 'ngo' | 'agency' | 'institution'
   }>;
   people: Array<{
     name: string;
@@ -108,6 +130,16 @@ export class DiscoveryAgent extends BaseAgent {
     let skipped = 0;
     let enrichmentDispatched = 0;
 
+    // Build mission context for LLM classification
+    let missionContext: string | undefined;
+    if (this._ctx) {
+      const parts: string[] = [];
+      if (this._ctx.sales?.industries?.length) parts.push(`Target sectors: ${this._ctx.sales.industries.join(', ')}`);
+      if (this._ctx.targetRoles?.length) parts.push(`Target roles: ${this._ctx.targetRoles.join(', ')}`);
+      if (this._ctx.locations?.length) parts.push(`Locations: ${this._ctx.locations.join(', ')}`);
+      if (parts.length > 0) missionContext = parts.join('. ');
+    }
+
     for (const query of searchQueries) {
       // ── Route Reddit queries to specialized Reddit intelligence handler ──
       if (query.includes('site:reddit.com')) {
@@ -162,6 +194,11 @@ export class DiscoveryAgent extends BaseAgent {
 
           // ── LinkedIn profiles go to document agent (no scrape needed here) ──
           if (url.includes('linkedin.com/in/')) {
+            if (isDeadLinkedInProfile(result.title, result.snippet, result.url)) {
+              logger.debug({ url: result.url, title: result.title }, 'Skipping dead/invalid LinkedIn profile');
+              skipped++;
+              continue;
+            }
             await this.handleLinkedInProfile(result, query, masterAgentId, dryRun);
             candidatesFound++;
             continue;
@@ -199,7 +236,7 @@ export class DiscoveryAgent extends BaseAgent {
 
           // Combined classify + extract in one LLM call
           const extraction = await this.classifyAndExtract(
-            result.title, result.url, result.snippet, pageContent,
+            result.title, result.url, result.snippet, pageContent, missionContext,
           );
 
           if (!extraction || extraction.type === 'irrelevant') {
@@ -225,6 +262,7 @@ export class DiscoveryAgent extends BaseAgent {
                   discoveryQuery: query,
                   extractedFrom: extraction.type,
                   location: co.location || undefined,
+                  entityType: co.entityType || 'company',
                 },
               });
 
@@ -315,6 +353,8 @@ export class DiscoveryAgent extends BaseAgent {
       let score = 0;
       const url = r.url.toLowerCase();
       const title = (r.title || '').toLowerCase();
+      let hostname = '';
+      try { hostname = new URL(r.url).hostname.replace('www.', ''); } catch { /* skip */ }
 
       // High value: LinkedIn profiles and company pages
       if (url.includes('linkedin.com/in/')) score += 10;
@@ -332,18 +372,24 @@ export class DiscoveryAgent extends BaseAgent {
       if (url.includes('crunchbase.com/organization/')) score += 6;
       if (url.includes('wellfound.com/company/')) score += 6;
 
+      // Academic institutions
+      if (url.includes('.edu/') || url.includes('.ac.uk/') || url.includes('.ac.') || /\.edu$/.test(url)) score += 7;
+      // Government / NGO
+      if (url.includes('.gov/') || url.includes('.gov.') || /\.gov$/.test(url)) score += 5;
+      if (url.includes('.org/') && hostname && !shouldSkipDomain(hostname)) score += 3;
+
       // Medium: Title signals company list/directory
       if (/\b(companies|startups|firms|agencies)\b/i.test(title)) score += 4;
       if (/\b(top|best|leading|fastest)\b/i.test(title)) score += 3;
+      // University/institution title signals
+      if (/\b(university|universit[éeà]|université|college|faculty|department|school of|institute of|research center)\b/i.test(title)) score += 5;
+      if (/\b(organizations|institutions|agencies|foundations|associations)\b/i.test(title)) score += 4;
 
       // Low: News articles (scrape only if nothing better)
       if (/\b(news|article|blog|opinion|review)\b/i.test(title)) score -= 2;
 
       // Skip: Known bad domains
-      try {
-        const hostname = new URL(r.url).hostname.replace('www.', '');
-        if (shouldSkipDomain(hostname)) score -= 100;
-      } catch { /* skip */ }
+      if (hostname && shouldSkipDomain(hostname)) score -= 100;
 
       return { ...r, score };
     });
@@ -360,27 +406,33 @@ export class DiscoveryAgent extends BaseAgent {
     url: string,
     snippet: string,
     pageContent: string,
+    missionContext?: string,
   ): Promise<PageExtraction | null> {
     try {
+      const missionBlock = missionContext
+        ? `\nMISSION CONTEXT: ${missionContext}\nFocus on extracting entities that match this mission. If looking for universities, extract universities. If looking for companies, extract companies.\n`
+        : '';
+
       const extraction = await this.extractJSON<PageExtraction>([
         {
           role: 'system',
-          content: `You analyze web page content and extract business data.
+          content: `You analyze web page content and extract organizational and people data.
 
 Given a page's content, URL, and title, you must:
 1. Classify the page type
-2. Extract ALL companies and/or people mentioned
-
+2. Extract ALL organizations and/or people mentioned
+${missionBlock}
 Page types:
-- "company_page" = a single company's own website/profile
-- "directory" = a list/article mentioning multiple companies
-- "team_page" = a company page showing team members
-- "job_listing" = a job posting (the hiring company is valuable data)
+- "company_page" = a single organization's own website/profile (commercial entity)
+- "institution_page" = a university, research institution, or government agency page
+- "directory" = a list/article mentioning multiple organizations
+- "team_page" = an organization page showing team members/faculty/staff
+- "job_listing" = a job/position posting (the hiring organization is valuable data)
 - "person_profile" = an individual's profile page
 - "irrelevant" = login pages, generic content, error pages, encyclopedia, event registration, geographic info
 
-For EACH company found, extract: name, domain (if visible), industry, description (1 sentence), size, location, funding.
-For EACH person found, extract: name, title, company they work at.
+For EACH organization found, extract: name, domain (if visible), industry (or academic field/sector), description (1 sentence), size, location, funding (use "N/A" for non-commercial entities like universities), entityType ("company", "university", "government", "ngo", "agency", "institution").
+For EACH person found, extract: name, title/role, organization they work at.
 
 Return ONLY valid JSON. If the page is irrelevant, return { "type": "irrelevant", "companies": [], "people": [] }.
 Do NOT invent data — only extract what is clearly stated on the page.`,

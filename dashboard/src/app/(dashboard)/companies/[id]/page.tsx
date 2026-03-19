@@ -40,6 +40,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
   const deep = (company.rawData ?? {}) as CompanyDeepData;
 
+  /** Safely render a value that might be an object (e.g. headquarters: {city, state, country}) */
+  const safeStr = (val: unknown): string => {
+    if (!val) return '';
+    if (typeof val === 'string') return val;
+    if (typeof val === 'object') {
+      // Join non-empty values: {city: "London", state: "", country: "UK"} → "London, UK"
+      return Object.values(val as Record<string, unknown>)
+        .filter((v) => v && typeof v === 'string' && v.trim())
+        .join(', ');
+    }
+    return String(val);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -83,11 +96,11 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <div>
                 <p className="text-muted-foreground">Founded</p>
-                <p className="font-medium">{deep.foundedYear || '—'}</p>
+                <p className="font-medium">{safeStr(deep.foundedYear) || '—'}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Headquarters</p>
-                <p className="font-medium">{deep.headquarters || '—'}</p>
+                <p className="font-medium">{safeStr(deep.headquarters) || '—'}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">LinkedIn</p>

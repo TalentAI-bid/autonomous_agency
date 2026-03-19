@@ -444,9 +444,9 @@ export class EnrichmentAgent extends BaseAgent {
 
         if (domain) {
           const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId);
-          if (result.email) {
+          if (result.email && result.confidence >= 50) {
             emailFound = result.email;
-            emailVerified = result.confidence >= 70;
+            emailVerified = result.confidence >= 80;
           }
         }
       } catch (err) {

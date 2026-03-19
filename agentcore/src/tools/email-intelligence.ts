@@ -208,11 +208,14 @@ class EmailIntelligenceEngine {
 
     // ── Layer 4: SearXNG dorking ─────────────────────────────────────────────
     try {
-      const result = await this.searxngDiscovery(first, last, domain, tenantId);
-      if (result) {
-        await this.persistDiscovery(first, last, domain, result);
-        await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-        return result;
+      const searxResult = await this.searxngDiscovery(first, last, domain, tenantId);
+      if (searxResult?.email) {
+        const validated = await this.validateViaGenerect(searxResult.email, searxResult);
+        if (validated) {
+          await this.persistDiscovery(first, last, domain, validated);
+          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
+          return validated;
+        }
       }
     } catch (err) {
       logger.debug({ err, first, last, domain }, 'SearXNG discovery failed');
@@ -220,11 +223,14 @@ class EmailIntelligenceEngine {
 
     // ── Layer 5: GitHub commit mining ────────────────────────────────────────
     try {
-      const result = await this.githubDiscovery(first, last, domain, companyNameOrDomain);
-      if (result) {
-        await this.persistDiscovery(first, last, domain, result);
-        await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-        return result;
+      const ghResult = await this.githubDiscovery(first, last, domain, companyNameOrDomain);
+      if (ghResult?.email) {
+        const validated = await this.validateViaGenerect(ghResult.email, ghResult);
+        if (validated) {
+          await this.persistDiscovery(first, last, domain, validated);
+          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
+          return validated;
+        }
       }
     } catch (err) {
       logger.debug({ err, first, last, domain }, 'GitHub discovery failed');
@@ -232,11 +238,14 @@ class EmailIntelligenceEngine {
 
     // ── Layer 6: Known domain pattern ────────────────────────────────────────
     try {
-      const result = await this.knownPatternGuess(first, last, domain);
-      if (result) {
-        await this.persistDiscovery(first, last, domain, result);
-        await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-        return result;
+      const patternResult = await this.knownPatternGuess(first, last, domain);
+      if (patternResult?.email) {
+        const validated = await this.validateViaGenerect(patternResult.email, patternResult);
+        if (validated) {
+          await this.persistDiscovery(first, last, domain, validated);
+          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
+          return validated;
+        }
       }
     } catch (err) {
       logger.debug({ err, first, last, domain }, 'Known pattern guess failed');
@@ -244,11 +253,14 @@ class EmailIntelligenceEngine {
 
     // ── Layer 7: MX-informed guess ───────────────────────────────────────────
     try {
-      const result = await this.mxGuess(first, last, domain);
-      if (result) {
-        await this.persistDiscovery(first, last, domain, result);
-        await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-        return result;
+      const mxResult = await this.mxGuess(first, last, domain);
+      if (mxResult?.email) {
+        const validated = await this.validateViaGenerect(mxResult.email, mxResult);
+        if (validated) {
+          await this.persistDiscovery(first, last, domain, validated);
+          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
+          return validated;
+        }
       }
     } catch (err) {
       logger.debug({ err, first, last, domain }, 'MX guess failed');
@@ -341,6 +353,31 @@ class EmailIntelligenceEngine {
       }
     } catch (err) {
       logger.warn({ err, email, domain, signalType }, 'Failed to record delivery signal');
+    }
+  }
+
+  // ── Generect validation for fallback layers ──────────────────────────────
+
+  private async validateViaGenerect(email: string, result: EmailResult): Promise<EmailResult | null> {
+    if (!generectEmailTool.isConfigured()) {
+      // Without Generect, reject low-confidence guesses
+      if (result.confidence < 70) return null;
+      return result;
+    }
+    try {
+      const validation = await generectEmailTool.validateEmail(email);
+      if (validation.valid) {
+        return { ...result, confidence: Math.max(result.confidence, 85) };
+      }
+      if (validation.catchAll) {
+        return { ...result, confidence: Math.min(result.confidence, 60) };
+      }
+      // Invalid — reject
+      logger.debug({ email, method: result.method }, 'Email rejected by Generect validation');
+      return null;
+    } catch (err) {
+      logger.debug({ err, email }, 'Generect validation failed, keeping original confidence');
+      return result;
     }
   }
 

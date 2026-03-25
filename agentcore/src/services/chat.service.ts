@@ -183,10 +183,10 @@ export async function sendMessage(
     });
   }
 
-  // Turn-count safeguard: force proposal after 4+ user messages with no proposal yet
+  // Turn-count safeguard: force proposal after 3+ user messages with no proposal yet
   const userMessageCount = llmMessages.filter(m => m.role === 'user').length;
   const hasProposalAlready = allMessages.some(m => m.type === 'pipeline_proposal');
-  if (userMessageCount >= 4 && !hasProposalAlready) {
+  if (userMessageCount >= 3 && !hasProposalAlready) {
     llmMessages.push({
       role: 'system',
       content: 'CRITICAL: You have been gathering information for several messages. You MUST output a <pipeline_proposal> now. Use sensible defaults for any missing information. If an email account or listener is needed and only one is available, auto-select it. Do not ask another question.',
@@ -383,7 +383,7 @@ export async function* sendMessageStream(
   // Turn-count safeguard
   const userMessageCount = llmMessages.filter(m => m.role === 'user').length;
   const hasProposalAlready = allMessages.some(m => m.type === 'pipeline_proposal');
-  if (userMessageCount >= 4 && !hasProposalAlready) {
+  if (userMessageCount >= 3 && !hasProposalAlready) {
     llmMessages.push({
       role: 'system',
       content: 'CRITICAL: You have been gathering information for several messages. You MUST output a <pipeline_proposal> now. Use sensible defaults for any missing information. If an email account or listener is needed and only one is available, auto-select it. Do not ask another question.',

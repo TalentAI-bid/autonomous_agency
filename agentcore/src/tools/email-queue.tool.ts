@@ -165,3 +165,24 @@ export async function popBatchQueue(tenantId: string, count: number): Promise<st
   }
   return ids;
 }
+
+/**
+ * Flush the email batch queue for a tenant.
+ * Clears the Redis list and marks all queued DB records as cancelled.
+ * Call this on agent start/restart to prevent stale emails from being sent.
+ */
+export async function flushEmailQueue(tenantId: string): Promise<number> {
+  const redisKey = `tenant:${tenantId}:email-batch-queue`;
+  const flushedCount = await redis.llen(redisKey);
+  if (flushedCount > 0) {
+    await redis.del(redisKey);
+    // Mark queued DB records as cancelled so they can't be re-sent
+    await withTenant(tenantId, async (tx) => {
+      await tx.update(emailQueue)
+        .set({ status: 'cancelled', lastError: 'Queue flushed on agent restart' })
+        .where(and(eq(emailQueue.tenantId, tenantId), eq(emailQueue.status, 'queued')));
+    });
+    logger.info({ tenantId, flushedCount }, 'Email batch queue flushed');
+  }
+  return flushedCount;
+}

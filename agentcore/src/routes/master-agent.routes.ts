@@ -8,6 +8,7 @@ import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { extractJSON } from '../tools/together-ai.tool.js';
 import { removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
+import { flushEmailQueue } from '../tools/email-queue.tool.js';
 import logger from '../utils/logger.js';
 import {
   buildSystemPrompt as buildPipelineSystemPrompt,
@@ -215,6 +216,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
       logger.info({ tenantId: request.tenantId, agentId: id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from /start');
       await removeAllEmailListenerJobs(request.tenantId);
       await removeAllEmailSendJobs(request.tenantId);
+      await flushEmailQueue(request.tenantId);
       await scheduleAgentJobs(request.tenantId, id, agentCfg);
       logger.info({ tenantId: request.tenantId, agentId: id }, 'Agent jobs scheduled from /start');
 

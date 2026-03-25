@@ -7,6 +7,7 @@ import { parseDOCX } from '../tools/docx-parser.tool.js';
 import { buildChatSystemPrompt } from '../prompts/chat-agent.prompt.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
+import { flushEmailQueue } from '../tools/email-queue.tool.js';
 import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js';
 import type { ChatMessage } from '../tools/together-ai.tool.js';
 import logger from '../utils/logger.js';
@@ -600,6 +601,9 @@ export async function approveProposal(tenantId: string, conversationId: string, 
       .set({ status: 'running', updatedAt: new Date() })
       .where(eq(masterAgents.id, agent.id));
   });
+
+  // Flush any stale emails from previous runs
+  await flushEmailQueue(tenantId);
 
   registerTenantWorkers(tenantId);
 

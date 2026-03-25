@@ -927,7 +927,7 @@ export class EnrichmentAgent extends BaseAgent {
       }
 
       // ── Team-to-contacts pipeline: find team → find emails → create contacts → scoring ──
-      if (companyDataCompleteness >= 50 && deepCompany.keyPeople?.length) {
+      if (companyDataCompleteness >= 30 && deepCompany.keyPeople?.length) {
         const masterAgentId = input.masterAgentId as string;
         const ctx = this.getPipelineContext(input);
 

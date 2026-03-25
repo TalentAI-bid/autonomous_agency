@@ -90,7 +90,7 @@ export class OutreachAgent extends BaseAgent {
 
     // 2b. Load configured email account (if set in agent config)
     let emailAccountId: string | undefined;
-    let fromEmail = env.SMTP_USER || 'recruitment@agentcore.app';
+    let fromEmail = env.SMTP_USER || 'outreach@agentcore.app';
     const configuredEmailAccountId = config.emailAccountId as string | undefined;
     if (configuredEmailAccountId) {
       const [emailAccount] = await withTenant(this.tenantId, async (tx) => {
@@ -172,7 +172,7 @@ export class OutreachAgent extends BaseAgent {
 
     let email: OutreachEmail;
 
-    if ((useCase === 'sales' || useCase === 'recruitment') && hasSenderContext) {
+    if (useCase === 'sales' || useCase === 'recruitment') {
       // Build full EmailGenerationContext
       const contactRawData = (contact.rawData ?? {}) as Record<string, unknown>;
       const companyRawData = (companyRecord?.rawData ?? {}) as Record<string, unknown>;

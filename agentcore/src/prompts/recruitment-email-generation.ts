@@ -17,7 +17,8 @@ RULES:
 - Low-pressure CTA: "Would you be open to a quick chat?" or similar
 - No generic openers ("I hope this finds you well", "I came across your profile")
 - No markdown formatting — use plain text with basic HTML (<p>, <br>, <strong>) only
-- Sign off with the sender's first name only
+- Do NOT include a signature or sign-off in the body — the email template adds it automatically
+- Do NOT add "Best regards", "Cheers", sender name, or any closing at the end of the body
 - Subject line: specific and role-relevant, no clickbait
 - Do NOT mention that you are AI or that this is automated${rulesSection}
 

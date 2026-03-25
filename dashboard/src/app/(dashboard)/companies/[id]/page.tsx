@@ -2,6 +2,7 @@
 
 import { use } from 'react';
 import { useCompany } from '@/hooks/use-companies';
+import { useContacts } from '@/hooks/use-contacts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import {
   ArrowLeft, Globe, Building2, Users, Cpu, DollarSign,
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
-  Mail, ExternalLink, Search,
+  Mail, ExternalLink, Search, Linkedin, CheckCircle2,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { CompanyDeepData } from '@/types';
@@ -17,6 +18,8 @@ import type { CompanyDeepData } from '@/types';
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: company, isLoading } = useCompany(id);
+  const { data: contactsRes } = useContacts({ companyId: id });
+  const companyContacts = contactsRes?.data ?? [];
 
   if (isLoading) {
     return (
@@ -132,6 +135,65 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No tech stack data available</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* People / Contacts */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="w-4 h-4" /> People
+              {companyContacts.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-xs">{companyContacts.length}</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {companyContacts.length > 0 ? (
+              <div className="space-y-3">
+                {companyContacts.map((contact) => (
+                  <div key={contact.id} className="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="min-w-0">
+                        <Link href={`/contacts/${contact.id}`} className="font-medium text-sm hover:underline">
+                          {[contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown'}
+                        </Link>
+                        {contact.title && (
+                          <p className="text-xs text-muted-foreground truncate">{contact.title}</p>
+                        )}
+                        {contact.email && (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <a href={`mailto:${contact.email}`} className="text-xs text-blue-400 hover:underline truncate">
+                              {contact.email}
+                            </a>
+                            {contact.emailVerified && (
+                              <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {contact.score != null && contact.score > 0 && (
+                        <Badge variant="outline" className="text-xs">{contact.score}</Badge>
+                      )}
+                      {contact.linkedinUrl && (
+                        <a href={contact.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground">
+                          <Linkedin className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                      <Link href={`/contacts/${contact.id}`}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No contacts discovered yet for this company</p>
             )}
           </CardContent>
         </Card>

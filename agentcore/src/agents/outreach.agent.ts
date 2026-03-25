@@ -4,6 +4,7 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents, emailAccounts, opportunities } from '../db/schema/index.js';
 import { enqueueEmail } from '../tools/email-queue.tool.js';
+import { wrapEmailBody } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
 import { buildSystemPrompt, buildUserPrompt, type OutreachEmail } from '../prompts/outreach.prompt.js';
 import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
@@ -273,8 +274,19 @@ export class OutreachAgent extends BaseAgent {
       });
     }
 
-    // 5. Enqueue email (or skip in dry-run mode)
+    // 5. Wrap email body in professional HTML template
     const trackingId = randomUUID();
+    const wrappedBody = wrapEmailBody({
+      body: email.body,
+      senderName: (config.senderFirstName as string) ?? undefined,
+      senderTitle: (config.senderTitle as string) ?? undefined,
+      senderCompany: (config.senderCompanyName as string) ?? agent?.name ?? undefined,
+      senderWebsite: (config.senderWebsite as string) ?? undefined,
+      calendlyUrl: (config.calendlyUrl as string) ?? undefined,
+      unsubscribeUrl: `${env.PUBLIC_API_URL}/unsubscribe/${trackingId}`,
+    });
+
+    // 6. Enqueue email (or skip in dry-run mode)
     let queuedId: string | null = null;
     let messageId: string;
 
@@ -298,7 +310,7 @@ export class OutreachAgent extends BaseAgent {
           fromEmail,
           toEmail: contact.email!,
           subject: email.subject,
-          body: email.body,
+          body: wrappedBody,
           messageId,
         });
       });
@@ -311,7 +323,7 @@ export class OutreachAgent extends BaseAgent {
         fromEmail,
         toEmail: contact.email!,
         subject: email.subject,
-        body: email.body,
+        body: wrappedBody,
         trackingId,
         masterAgentId,
         campaignId: effectiveCampaignId ?? undefined,

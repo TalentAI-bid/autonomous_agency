@@ -86,7 +86,8 @@ RULES:
 - MUST propose a specific service/solution from the sender's offerings that directly addresses the prospect's situation
 - No generic openers ("I hope this finds you well", "I came across your company")
 - No markdown formatting in the email body — use plain text with basic HTML (<p>, <br>, <strong>) only
-- Sign off with the sender's first name only
+- Do NOT include a signature or sign-off in the body — the email template adds it automatically
+- Do NOT add "Best regards", "Cheers", sender name, or any closing at the end of the body
 - Subject line: no clickbait, no ALL CAPS, no exclamation marks
 - Do NOT mention that you are AI or that this is automated
 - If an OPPORTUNITY SIGNAL is provided, you MUST reference it specifically. Tie your proposed service to the observed need. Never send generic "we can help" emails when you have a concrete signal${rulesSection}

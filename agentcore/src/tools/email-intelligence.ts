@@ -1,4 +1,3 @@
-import dns from 'dns';
 import { eq, and, desc } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { db } from '../config/database.js';
@@ -31,41 +30,7 @@ const SEARXNG_MAX_QUERIES = 10;
 const CRAWL4AI_MAX_PAGES = 2;
 const GITHUB_RATE_LIMIT_FLOOR = 10;
 
-/** Map MX hostname keywords → provider + most likely patterns */
-const MX_PATTERN_MAP: Record<string, { provider: string; patterns: string[] }> = {
-  'google': { provider: 'google', patterns: ['{first}.{last}', '{first}{last}', '{f}{last}'] },
-  'googlemail': { provider: 'google', patterns: ['{first}.{last}', '{first}{last}', '{f}{last}'] },
-  'outlook': { provider: 'microsoft', patterns: ['{first}.{last}', '{first}{last}', '{f}{last}'] },
-  'microsoft': { provider: 'microsoft', patterns: ['{first}.{last}', '{first}{last}', '{f}{last}'] },
-  'zoho': { provider: 'zoho', patterns: ['{first}.{last}', '{first}', '{first}{last}'] },
-  'protonmail': { provider: 'protonmail', patterns: ['{first}.{last}', '{first}{last}'] },
-  'pphosted': { provider: 'proofpoint', patterns: ['{first}.{last}', '{f}{last}'] },
-  'mimecast': { provider: 'mimecast', patterns: ['{first}.{last}', '{f}{last}'] },
-};
-
-// Confidence by MX provider (lower = less reliable for guessing)
-const MX_PROVIDER_CONFIDENCE: Record<string, number> = {
-  google: 45,
-  microsoft: 45,
-  zoho: 40,
-  protonmail: 35,
-  proofpoint: 50,
-  mimecast: 50,
-  custom: 25,
-};
-
 // ── Helper functions ─────────────────────────────────────────────────────────
-
-function applyPattern(pattern: string, first: string, last: string, domain: string): string {
-  const f = first[0]?.toLowerCase() ?? '';
-  const l = last[0]?.toLowerCase() ?? '';
-  return pattern
-    .replace('{first}', first.toLowerCase())
-    .replace('{last}', last.toLowerCase())
-    .replace('{f}', f)
-    .replace('{l}', l)
-    + `@${domain}`;
-}
 
 function reverseEngineerPattern(email: string, first: string, last: string, domain: string): string | null {
   const local = email.split('@')[0];
@@ -101,14 +66,6 @@ function extractEmailsFromText(text: string, domain?: string): string[] {
     return unique.filter((e) => e.endsWith(`@${domain.toLowerCase()}`));
   }
   return unique;
-}
-
-function classifyMXProvider(mxHost: string): { provider: string; patterns: string[] } {
-  const lower = mxHost.toLowerCase();
-  for (const [keyword, info] of Object.entries(MX_PATTERN_MAP)) {
-    if (lower.includes(keyword)) return info;
-  }
-  return { provider: 'custom', patterns: ['{first}.{last}', '{first}{last}', '{f}{last}'] };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -186,7 +143,7 @@ class EmailIntelligenceEngine {
       logger.debug({ err }, 'DB cache read failed');
     }
 
-    // ── Layer 3: Generect API ──────────────────────────────────────────────
+    // ── Layer 3: Generect API (primary source) ──────────────────────────────
     if (generectEmailTool.isConfigured()) {
       try {
         const generectResult = await generectEmailTool.findEmail(first, last, domain);
@@ -206,7 +163,7 @@ class EmailIntelligenceEngine {
       }
     }
 
-    // ── Layer 4: SearXNG dorking ─────────────────────────────────────────────
+    // ── Layer 4: SearXNG dorking (fallback for devs/researchers) ────────────
     try {
       const searxResult = await this.searxngDiscovery(first, last, domain, tenantId);
       if (searxResult?.email) {
@@ -221,7 +178,7 @@ class EmailIntelligenceEngine {
       logger.debug({ err, first, last, domain }, 'SearXNG discovery failed');
     }
 
-    // ── Layer 5: GitHub commit mining ────────────────────────────────────────
+    // ── Layer 5: GitHub commit mining (fallback for developers) ─────────────
     try {
       const ghResult = await this.githubDiscovery(first, last, domain, companyNameOrDomain);
       if (ghResult?.email) {
@@ -234,36 +191,6 @@ class EmailIntelligenceEngine {
       }
     } catch (err) {
       logger.debug({ err, first, last, domain }, 'GitHub discovery failed');
-    }
-
-    // ── Layer 6: Known domain pattern ────────────────────────────────────────
-    try {
-      const patternResult = await this.knownPatternGuess(first, last, domain);
-      if (patternResult?.email) {
-        const validated = await this.validateViaGenerect(patternResult.email, patternResult);
-        if (validated) {
-          await this.persistDiscovery(first, last, domain, validated);
-          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
-          return validated;
-        }
-      }
-    } catch (err) {
-      logger.debug({ err, first, last, domain }, 'Known pattern guess failed');
-    }
-
-    // ── Layer 7: MX-informed guess ───────────────────────────────────────────
-    try {
-      const mxResult = await this.mxGuess(first, last, domain);
-      if (mxResult?.email) {
-        const validated = await this.validateViaGenerect(mxResult.email, mxResult);
-        if (validated) {
-          await this.persistDiscovery(first, last, domain, validated);
-          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
-          return validated;
-        }
-      }
-    } catch (err) {
-      logger.debug({ err, first, last, domain }, 'MX guess failed');
     }
 
     return { email: null, confidence: 0, method: null, source: null };
@@ -583,115 +510,6 @@ class EmailIntelligenceEngine {
     return null;
   }
 
-  private async knownPatternGuess(
-    first: string,
-    last: string,
-    domain: string,
-  ): Promise<EmailResult | null> {
-    // Check cached patterns
-    const patternCacheKey = `domain:pattern:${domain}`;
-    let bestPattern: { pattern: string; confidence: number } | null = null;
-    let isCatchAll = false;
-
-    try {
-      const cached = await this.redis.get(patternCacheKey);
-      if (cached) {
-        const data = JSON.parse(cached) as { pattern: string; confidence: number; isCatchAll: boolean };
-        bestPattern = { pattern: data.pattern, confidence: data.confidence };
-        isCatchAll = data.isCatchAll;
-      }
-    } catch {
-      // continue to DB
-    }
-
-    if (!bestPattern) {
-      try {
-        const [record] = await db
-          .select()
-          .from(domainPatterns)
-          .where(eq(domainPatterns.domain, domain))
-          .orderBy(desc(domainPatterns.confidence))
-          .limit(1);
-
-        if (record) {
-          bestPattern = { pattern: record.pattern, confidence: record.confidence };
-          isCatchAll = record.isCatchAll;
-          await this.redis.setex(
-            patternCacheKey,
-            CACHE_TTL_90D,
-            JSON.stringify({ pattern: record.pattern, confidence: record.confidence, isCatchAll: record.isCatchAll }),
-          );
-        }
-      } catch (err) {
-        logger.debug({ err }, 'Known pattern DB query failed');
-        return null;
-      }
-    }
-
-    if (!bestPattern || bestPattern.confidence <= 85 || isCatchAll) return null;
-
-    const email = applyPattern(bestPattern.pattern, first, last, domain);
-    return {
-      email,
-      confidence: Math.min(bestPattern.confidence, 75), // cap at 75 for pattern-only
-      method: 'domain_pattern',
-      source: `pattern: ${bestPattern.pattern}`,
-    };
-  }
-
-  private async mxGuess(
-    first: string,
-    last: string,
-    domain: string,
-  ): Promise<EmailResult | null> {
-    const mxCacheKey = `domain:mx:${domain}`;
-
-    let mxHost: string | null = null;
-    try {
-      const cached = await this.redis.get(mxCacheKey);
-      if (cached === '__none__') return null;
-      if (cached) {
-        mxHost = cached;
-      }
-    } catch {
-      // continue
-    }
-
-    if (!mxHost) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        const records = await dns.promises.resolveMx(domain);
-        clearTimeout(timeout);
-        if (!records.length) {
-          await this.redis.setex(mxCacheKey, CACHE_TTL_1H, '__none__');
-          return null;
-        }
-        records.sort((a, b) => a.priority - b.priority);
-        mxHost = records[0]!.exchange;
-        await this.redis.setex(mxCacheKey, CACHE_TTL_30D, mxHost);
-      } catch {
-        await this.redis.setex(mxCacheKey, CACHE_TTL_1H, '__none__').catch(() => {});
-        return null;
-      }
-    }
-
-    const { provider, patterns } = classifyMXProvider(mxHost);
-    const baseConfidence = MX_PROVIDER_CONFIDENCE[provider] ?? 25;
-
-    // Use first pattern (most likely for the provider)
-    const pattern = patterns[0];
-    if (!pattern) return null;
-
-    const email = applyPattern(pattern, first, last, domain);
-    return {
-      email,
-      confidence: baseConfidence,
-      method: 'mx_guess',
-      source: `mx: ${mxHost} (${provider}), pattern: ${pattern}`,
-    };
-  }
-
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   private async resolveDomain(companyNameOrDomain: string, tenantId?: string): Promise<string | null> {
@@ -710,7 +528,7 @@ class EmailIntelligenceEngine {
       // continue
     }
 
-    // Search for company website
+    // Search for company website via SearXNG
     const tid = tenantId ?? 'global';
     try {
       const results = await search(tid, `${companyNameOrDomain} official website`, 5);
@@ -794,7 +612,7 @@ class EmailIntelligenceEngine {
             .set({
               email: result.email,
               confidence: result.confidence,
-              method: result.method as 'generect' | 'searxng' | 'github' | 'domain_pattern' | 'mx_guess' | 'manual' | 'crawl' | null,
+              method: result.method as 'generect' | 'searxng' | 'github' | 'manual' | 'crawl' | null,
               source: result.source,
               invalidated: false,
               updatedAt: new Date(),
@@ -808,7 +626,7 @@ class EmailIntelligenceEngine {
           lastName: last.toLowerCase(),
           domain,
           confidence: result.confidence,
-          method: result.method as 'generect' | 'searxng' | 'github' | 'domain_pattern' | 'mx_guess' | 'manual' | 'crawl' | null,
+          method: result.method as 'generect' | 'searxng' | 'github' | 'manual' | 'crawl' | null,
           source: result.source,
         });
       }

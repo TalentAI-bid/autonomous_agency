@@ -553,6 +553,7 @@ export interface ContactFilters {
   status?: ContactStatus;
   source?: ContactSource;
   masterAgentId?: string;
+  companyId?: string;
   minScore?: number;
   maxScore?: number;
   cursor?: string;

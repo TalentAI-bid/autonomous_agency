@@ -37,10 +37,11 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       minScore?: string;
       maxScore?: string;
       masterAgentId?: string;
+      companyId?: string;
     };
   }>('/', async (request) => {
     const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
-    const { cursor, status, source, search, minScore, maxScore, masterAgentId } = request.query;
+    const { cursor, status, source, search, minScore, maxScore, masterAgentId, companyId } = request.query;
 
     const results = await withTenant(request.tenantId, async (tx) => {
       const conditions = [eq(contacts.tenantId, request.tenantId)];
@@ -50,6 +51,7 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       }
       if (source) conditions.push(eq(contacts.source, source as any));
       if (masterAgentId) conditions.push(eq(contacts.masterAgentId, masterAgentId));
+      if (companyId) conditions.push(eq(contacts.companyId, companyId));
       if (minScore) conditions.push(sql`${contacts.score} >= ${parseInt(minScore, 10)}`);
       if (maxScore) conditions.push(sql`${contacts.score} <= ${parseInt(maxScore, 10)}`);
       if (search) {

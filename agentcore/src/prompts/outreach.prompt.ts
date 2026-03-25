@@ -30,6 +30,8 @@ Style guidelines:
 - Lead with something specific about the candidate
 - Clearly state the opportunity and value proposition
 - End with a low-friction call to action
+- Do NOT include a signature or sign-off — the email template adds it automatically
+- Do NOT add "Best regards", "Cheers", sender name, or any closing at the end of the body
 - NO generic phrases like "I hope this finds you well" or "I came across your profile"
 - DO reference specific skills, experience, or achievements
 - Subject line: punchy, 6-8 words, no clickbait

@@ -7,6 +7,7 @@ import { getQueueStatus } from '../services/queue.service.js';
 import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserPrompt } from '../prompts/master-agent.prompt.js';
 import { buildSystemPrompt as discoverySystemPrompt, buildUserPrompt as discoveryUserPrompt } from '../prompts/discovery.prompt.js';
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
+import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import logger from '../utils/logger.js';
 
 export class MasterAgent extends BaseAgent {
@@ -296,6 +297,22 @@ export class MasterAgent extends BaseAgent {
         }
       }
     });
+
+    // 6b. SearXNG health check — warn user if search is unavailable
+    if (hasDiscovery) {
+      const searxngStatus = await checkSearxngHealth();
+      if (!searxngStatus.ok) {
+        logger.error({ masterAgentId, url: searxngStatus.url, error: searxngStatus.error }, 'SearXNG unreachable — discovery will return empty results');
+        this.sendMessage(null, 'system_alert', {
+          action: 'service_unavailable',
+          service: 'searxng',
+          url: searxngStatus.url,
+          error: searxngStatus.error,
+          message: 'Web search (SearXNG) is not reachable. Discovery agents will not find new companies. Please check that SearXNG is running.',
+        });
+        await this.emitEvent('pipeline:service_down', { service: 'searxng', url: searxngStatus.url });
+      }
+    }
 
     // 7. Dispatch discovery jobs in staggered batches of 5 (5-min gaps between batches)
     if (hasDiscovery) {

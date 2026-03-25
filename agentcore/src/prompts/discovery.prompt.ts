@@ -11,7 +11,14 @@ Adapt your search strategy to the TARGET TYPE described in the requirements:
 CRITICAL RULE — Location enforcement:
 If locations are specified, EVERY query MUST include the location as a required term (not optional, not in parentheses with OR alternatives that omit it). Do not generate any query without the target location.
 
-Always respond with valid JSON. Generate diverse queries to maximize coverage.`;
+Always respond with valid JSON. Generate diverse queries to maximize coverage.
+
+CRITICAL QUERY FORMAT RULES:
+- Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results from search engines.
+- Good: "DevOps companies" France infrastructure
+- Bad: "société" "ESN" "DevOps" "services" "France" "recrutement"
+- Mix quoted exact phrases with unquoted keywords for best coverage.
+- When targeting non-English countries, generate queries in BOTH the local language AND English for broader coverage.`;
   }
 
   return `You are a Boolean search and LinkedIn sourcing expert. Generate highly targeted search queries to find candidates matching specific requirements. Focus on queries that will return relevant LinkedIn profiles and professional pages.
@@ -19,7 +26,12 @@ Always respond with valid JSON. Generate diverse queries to maximize coverage.`;
 CRITICAL RULE — Location enforcement:
 If locations are specified, EVERY query MUST include the location as a required term (not optional, not in parentheses with OR alternatives that omit it). Do not generate any query without the target location. The location must appear as a mandatory keyword in the query string.
 
-Always respond with valid JSON. Generate diverse queries to maximize coverage.`;
+Always respond with valid JSON. Generate diverse queries to maximize coverage.
+
+CRITICAL QUERY FORMAT RULES:
+- Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results from search engines.
+- Mix quoted exact phrases with unquoted keywords for best coverage.
+- When targeting non-English countries, generate queries in BOTH the local language AND English.`;
 }
 
 export function buildUserPrompt(data: {
@@ -43,15 +55,26 @@ TARGET ORGANIZATION ATTRIBUTES: ${data.requiredSkills.join(', ')}
 ${locationBlock}${!locationBlock ? `LOCATIONS: ${data.locations.join(', ')}\n` : ''}${data.industries?.length ? `INDUSTRIES / SECTORS: ${data.industries.join(', ')}` : ''}
 ${data.keywords?.length ? `KEYWORDS: ${data.keywords.join(', ')}` : ''}
 
-Generate queries for LinkedIn and web search. Adapt the search strategy to the target type:
-- LinkedIn profile searches: site:linkedin.com/in/ "[role]" "[industry]" [location]
-- LinkedIn organization searches: site:linkedin.com/company/ "[descriptor]" [location]
-- Organization team/leadership pages: "[org name]" team OR leadership OR about-us
+Generate queries for LinkedIn and web search. IMPORTANT: Use at most 2 quoted phrases per query — combine with unquoted keywords.
+
+Strategy by target type:
+- LinkedIn profiles: site:linkedin.com/in/ "[role]" [industry] [location]
+- LinkedIn companies: site:linkedin.com/company/ [descriptor] [location]
+- Team/leadership pages: "[org type]" team OR leadership [location]
 - Industry directories and association lists
-- Academic institutions: site:.edu OR site:.ac.uk OR site:.ac.fr "[topic]" "[department]"
-- Government/NGO: site:.gov OR site:.org "[initiative]" "[topic]"
-- Conference speaker/attendee lists
-- News and announcements: "[organization type]" "launches" OR "announces" [topic] [year]
+- Academic: site:.edu OR site:.ac.uk OR site:.ac.fr [topic] [department]
+- Government/NGO: site:.gov OR site:.org [initiative] [topic]
+- News: "[organization type]" funding OR launches [topic] [year]
+
+Examples of GOOD queries (max 2 quoted phrases):
+- site:linkedin.com/company/ "DevOps" France
+- "infrastructure companies" France cloud services
+- ESN DevOps consulting France
+- top DevOps firms Paris infrastructure
+
+Examples of BAD queries (too many quotes — will return 0 results):
+- "société" "ESN" "DevOps" "services" "France" "recrutement"
+- "enterprise" "consulting" "cloud" "infrastructure" "Paris"
 
 Do NOT include:
 - Generic blog or tutorial searches
@@ -60,13 +83,15 @@ Do NOT include:
 Return JSON:
 {
   "queries": [
-    "site:linkedin.com/in/ \\"[target role]\\" \\"[industry]\\" [location]",
-    "site:linkedin.com/company/ \\"[descriptor]\\" [location]",
+    "site:linkedin.com/in/ \\"[target role]\\" [industry] [location]",
+    "site:linkedin.com/company/ [descriptor] [location]",
+    "\\"[industry] companies\\" [location] [keyword]",
+    "[industry] [keyword] firms [location]",
     ...
   ]
 }
 
-Make queries specific and varied. Use different keyword combinations, boolean operators (AND, OR, NOT), and quotation marks for exact phrases. MATCH query style to the actual target type.`;
+Make queries specific and varied. Use different keyword combinations and boolean operators. MATCH query style to the actual target type. For non-English countries, include queries in both the local language and English.`;
   }
 
   // Default: recruitment

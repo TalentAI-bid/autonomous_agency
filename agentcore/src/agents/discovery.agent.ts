@@ -71,6 +71,33 @@ function matchesTargetLocation(companyLocation: string | undefined, targetLocati
   });
 }
 
+/**
+ * Simplify an over-quoted search query for retry.
+ * Removes excess quoting — keeps max 2 quoted phrases and makes the rest unquoted keywords.
+ * Example: '"société" "ESN" "DevOps" "services" "France"' → 'société ESN "DevOps" France'
+ */
+function simplifyQuery(query: string): string | null {
+  // Don't simplify site:-scoped queries (LinkedIn, etc.)
+  if (/site:\S+/.test(query)) return null;
+
+  const quotedPhrases = query.match(/"[^"]+"/g) || [];
+  if (quotedPhrases.length <= 2) return null; // already simple enough
+
+  // Extract all terms (quoted and unquoted)
+  const allTerms: string[] = [];
+  let remaining = query;
+  for (const phrase of quotedPhrases) {
+    remaining = remaining.replace(phrase, '');
+    allTerms.push(phrase.replace(/"/g, ''));
+  }
+  remaining.split(/\s+/).filter(t => t.length > 1 && !['OR', 'AND', 'NOT'].includes(t.toUpperCase())).forEach(t => allTerms.push(t));
+
+  if (allTerms.length === 0) return null;
+
+  const simplified = allTerms.slice(0, 4).join(' ');
+  return simplified !== query ? simplified : null;
+}
+
 /** LLM extraction result from a scraped page */
 interface PageExtraction {
   type: 'company_page' | 'directory' | 'team_page' | 'job_listing' | 'person_profile' | 'institution_page' | 'irrelevant';
@@ -192,9 +219,19 @@ export class DiscoveryAgent extends BaseAgent {
         }
       }
 
-      const results = await this.trackAction('search_executed', query, () => this.searchWeb(query, maxResults as number));
+      let results = await this.trackAction('search_executed', query, () => this.searchWeb(query, maxResults as number));
+
+      // Retry with simplified query if original returned empty
       if (results.length === 0) {
-        logger.warn({ query, tenantId: this.tenantId, masterAgentId }, 'SearXNG returned 0 results for query');
+        const simpler = simplifyQuery(query);
+        if (simpler) {
+          logger.info({ original: query, simplified: simpler, tenantId: this.tenantId }, 'Original query returned 0 results — retrying with simplified query');
+          results = await this.trackAction('search_retry', simpler, () => this.searchWeb(simpler, maxResults as number));
+        }
+      }
+
+      if (results.length === 0) {
+        logger.warn({ query, tenantId: this.tenantId, masterAgentId }, 'SearXNG returned 0 results for query (including retry)');
         continue;
       }
 
@@ -344,6 +381,11 @@ export class DiscoveryAgent extends BaseAgent {
         { tenantId: this.tenantId, masterAgentId, queryCount: searchQueries.length },
         'DiscoveryAgent found ZERO companies/candidates across all queries — SearXNG may be down or queries too specific',
       );
+      this.sendMessage(null, 'system_alert', {
+        action: 'discovery_empty',
+        queryCount: searchQueries.length,
+        message: `Discovery searched ${searchQueries.length} queries but found 0 new companies or contacts. Possible causes: (1) SearXNG is down or returning empty results, (2) search queries are too specific, (3) target niche is very narrow. Check SearXNG status at /api/health/services.`,
+      });
       await this.emitEvent('pipeline:discovery_empty', { masterAgentId, queryCount: searchQueries.length });
     }
 

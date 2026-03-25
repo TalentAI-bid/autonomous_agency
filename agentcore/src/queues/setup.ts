@@ -23,6 +23,16 @@ export const queueRedis = createRedisConnection();
 export const pubRedis = createRedisConnection();
 export const subRedis = createRedisConnection();
 
+// Prevent unhandled error events from crashing the process
+// The retryStrategy in createRedisConnection() handles reconnection automatically
+for (const [name, conn] of [['queue', queueRedis], ['pub', pubRedis], ['sub', subRedis]] as const) {
+  (conn as Redis).on('error', (err: Error) => {
+    const code = (err as any).code;
+    if (code === 'ECONNRESET' || code === 'ECONNREFUSED') return; // suppressed — retryStrategy handles reconnect
+    console.error(`[Redis:${name}] error:`, err.message);
+  });
+}
+
 export async function closeRedisConnections(): Promise<void> {
   await Promise.all([
     queueRedis.quit(),

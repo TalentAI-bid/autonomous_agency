@@ -531,12 +531,13 @@ export class MailboxAgent extends BaseAgent {
       if (existing) return existing;
     }
 
-    // Create new thread
+    // Create new thread — validate masterAgentId to avoid FK violation on deleted agents
+    const validMasterAgentId = await this.getValidMasterAgentId();
     const [thread] = await withTenant(this.tenantId, async (tx) => {
       return tx.insert(emailThreads).values({
         tenantId: this.tenantId,
         contactId,
-        masterAgentId: this.masterAgentId || undefined,
+        masterAgentId: validMasterAgentId || undefined,
         subject: normalizedSubject || null,
         lastMessageAt: new Date(),
         messageCount: 0,

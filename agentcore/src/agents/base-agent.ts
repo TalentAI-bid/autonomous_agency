@@ -15,6 +15,11 @@ import logger from '../utils/logger.js';
 
 /** Shared Redis connection for all agent instances (avoids per-instance connection leak) */
 const sharedAgentRedis: Redis = createRedisConnection();
+sharedAgentRedis.on('error', (err: Error) => {
+  const code = (err as any).code;
+  if (code === 'ECONNRESET' || code === 'ECONNREFUSED') return;
+  console.error('[Redis:agent] error:', err.message);
+});
 
 export abstract class BaseAgent {
   protected tenantId: string;
@@ -110,7 +115,7 @@ export abstract class BaseAgent {
     });
   }
 
-  private async getValidMasterAgentId(): Promise<string | undefined> {
+  protected async getValidMasterAgentId(): Promise<string | undefined> {
     if (!this.masterAgentId) return undefined;
     if (this._masterAgentIdValid === true) return this.masterAgentId;
     if (this._masterAgentIdValid === false) return undefined;

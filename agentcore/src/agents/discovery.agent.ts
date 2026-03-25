@@ -60,6 +60,17 @@ function isDeadLinkedInProfile(title: string, snippet: string, url: string): boo
   return false;
 }
 
+/** Check if a company's extracted location matches any target location */
+function matchesTargetLocation(companyLocation: string | undefined, targetLocations: string[]): boolean {
+  if (!targetLocations.length) return true; // no filter active
+  if (!companyLocation) return true; // can't validate — let it through for enrichment to verify
+  const loc = companyLocation.toLowerCase();
+  return targetLocations.some(target => {
+    const t = target.toLowerCase();
+    return loc.includes(t) || t.includes(loc);
+  });
+}
+
 /** LLM extraction result from a scraped page */
 interface PageExtraction {
   type: 'company_page' | 'directory' | 'team_page' | 'job_listing' | 'person_profile' | 'institution_page' | 'irrelevant';
@@ -152,6 +163,10 @@ export class DiscoveryAgent extends BaseAgent {
           );
           for (const rc of redditCompanies) {
             if (!rc.name || rc.confidence < 40) continue;
+            // Skip companies not matching target locations
+            if (this._ctx?.locations?.length && (rc as any).location) {
+              if (!matchesTargetLocation((rc as any).location, this._ctx.locations)) continue;
+            }
             try {
               const saved = await this.saveOrUpdateCompany({
                 name: rc.name,
@@ -248,6 +263,14 @@ export class DiscoveryAgent extends BaseAgent {
           for (const co of extraction.companies) {
             if (!co.name || co.name.length < 2) continue;
             if (useCase === 'sales' && co.domain && isMegaCorp(co.domain)) continue;
+
+            // Skip companies not matching target locations
+            if (this._ctx?.locations?.length && co.location) {
+              if (!matchesTargetLocation(co.location, this._ctx.locations)) {
+                logger.debug({ name: co.name, location: co.location, targets: this._ctx.locations }, 'Skipping company: location mismatch');
+                continue;
+              }
+            }
 
             try {
               const saved = await this.saveOrUpdateCompany({
@@ -431,7 +454,8 @@ Page types:
 - "person_profile" = an individual's profile page
 - "irrelevant" = login pages, generic content, error pages, encyclopedia, event registration, geographic info
 
-For EACH organization found, extract: name, domain (if visible), industry (or academic field/sector), description (1 sentence), size, location, funding (use "N/A" for non-commercial entities like universities), entityType ("company", "university", "government", "ngo", "agency", "institution").
+For EACH organization found, extract: name, domain (if visible), industry (or academic field/sector), description (1 sentence), size, location (MUST include country — e.g. "Paris, France" or "USA"), funding (use "N/A" for non-commercial entities like universities), entityType ("company", "university", "government", "ngo", "agency", "institution").
+⚠️ The "location" field is CRITICAL. Always include the country. Infer from domain (.fr = France, .de = Germany, .co.uk = UK) or page content if not stated explicitly.
 For EACH person found, extract: name, title/role, organization they work at.
 
 Return ONLY valid JSON. If the page is irrelevant, return { "type": "irrelevant", "companies": [], "people": [] }.

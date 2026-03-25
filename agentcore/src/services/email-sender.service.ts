@@ -54,7 +54,9 @@ export async function processEmailBatch(tenantId: string): Promise<{ sent: numbe
     }
   }
 
-  logger.info({ tenantId, sent, failed, total: items.length }, 'Email batch processed');
+  if (sent > 0 || failed > 0) {
+    logger.info({ tenantId, sent, failed, total: items.length }, 'Email batch processed');
+  }
   return { sent, failed };
 }
 

@@ -25,7 +25,7 @@ export const QUEUE_CONFIGS: Record<QueueType, {
     concurrency: 5,
   },
   enrichment: {
-    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 5000 } },
+    defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 15000 } },
     concurrency: 5,
   },
   document: {

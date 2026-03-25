@@ -3,6 +3,7 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks } from '../db/schema/index.js';
 import { AGENT_TYPES } from '../queues/queues.js';
+import { getQueueStatus } from '../services/queue.service.js';
 import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserPrompt } from '../prompts/master-agent.prompt.js';
 import { buildSystemPrompt as discoverySystemPrompt, buildUserPrompt as discoveryUserPrompt } from '../prompts/discovery.prompt.js';
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
@@ -409,6 +410,23 @@ export class MasterAgent extends BaseAgent {
 
     logger.info({ tenantId: this.tenantId, masterAgentId }, 'MasterAgent orchestration loop starting');
 
+    // 0. Load pipelineContext from master agent config for enrichment dispatches
+    let pipelineCtx: PipelineContext | undefined;
+    try {
+      const [agentRow] = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config, useCase: masterAgents.useCase })
+          .from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+          .limit(1);
+      });
+      if (agentRow) {
+        const cfg = (agentRow.config as Record<string, unknown>) ?? {};
+        pipelineCtx = (cfg.pipelineContext as PipelineContext) ?? { useCase: agentRow.useCase ?? undefined } as PipelineContext;
+      }
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'Failed to load pipelineContext for orchestration');
+    }
+
     // 1. Collect pipeline metrics
     const metrics = await withTenant(this.tenantId, async (tx) => {
       const statusCounts = await tx
@@ -445,6 +463,42 @@ export class MasterAgent extends BaseAgent {
     // 3. Make decisions and take action
     const decisions: string[] = [];
     const actions: string[] = [];
+
+    // 3z. When metrics are all zero, check BullMQ queue status for diagnostics
+    if (metrics.total === 0) {
+      try {
+        const [discoveryQ, enrichmentQ, scoringQ] = await Promise.all([
+          getQueueStatus(this.tenantId, 'discovery'),
+          getQueueStatus(this.tenantId, 'enrichment'),
+          getQueueStatus(this.tenantId, 'scoring'),
+        ]);
+
+        const totalActive = discoveryQ.active + enrichmentQ.active + scoringQ.active;
+        const totalWaiting = discoveryQ.waiting + enrichmentQ.waiting + scoringQ.waiting;
+        const totalDelayed = discoveryQ.delayed + enrichmentQ.delayed + scoringQ.delayed;
+        const totalFailed = discoveryQ.failed + enrichmentQ.failed + scoringQ.failed;
+
+        if (totalActive > 0 || totalWaiting > 0 || totalDelayed > 0) {
+          decisions.push(`Pipeline initializing — ${totalActive} active, ${totalWaiting} waiting, ${totalDelayed} delayed jobs across queues.`);
+        } else if (totalFailed > 0) {
+          decisions.push(`WARNING: ${totalFailed} failed jobs detected (discovery: ${discoveryQ.failed}, enrichment: ${enrichmentQ.failed}, scoring: ${scoringQ.failed}). Check worker logs for errors.`);
+        } else {
+          decisions.push('No contacts found yet — waiting for discovery to produce results.');
+        }
+
+        logger.info({
+          masterAgentId,
+          queueStatus: {
+            discovery: discoveryQ,
+            enrichment: enrichmentQ,
+            scoring: scoringQ,
+          },
+        }, 'Orchestrator: metrics total=0, checked queue status');
+      } catch (err) {
+        logger.warn({ err, masterAgentId }, 'Failed to check queue status in orchestrator');
+        decisions.push('No contacts found yet — queue status check failed.');
+      }
+    }
 
     // 3a. Check if strategist generated queries that weren't dispatched yet
     try {
@@ -525,6 +579,7 @@ export class MasterAgent extends BaseAgent {
             await this.dispatchNext('enrichment', {
               companyId: comp.id,
               masterAgentId,
+              pipelineContext: pipelineCtx,
             });
             dispatched++;
           } catch (err) {
@@ -550,7 +605,7 @@ export class MasterAgent extends BaseAgent {
 
         for (const c of unenrichedContacts) {
           try {
-            await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId });
+            await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId, pipelineContext: pipelineCtx });
             dispatched++;
           } catch (err) {
             logger.warn({ err, contactId: c.id }, 'Failed to dispatch contact enrichment from orchestrator');

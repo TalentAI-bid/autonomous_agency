@@ -38,19 +38,15 @@ export class EnrichmentAgent extends BaseAgent {
 
     logger.info({ tenantId: this.tenantId, contactId }, 'EnrichmentAgent starting');
 
-    // Check SearXNG budget before starting — defer if nearly exhausted
+    // Check SearXNG budget — warn if nearly exhausted but don't block enrichment
     try {
       const searchCount = await this.redis.get(`tenant:${this.tenantId}:ratelimit:search`);
       const remaining = 500 - (searchCount ? parseInt(searchCount, 10) : 0);
-      if (remaining < 20) {
+      if (remaining < 5) {
         const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
-        if (ttl > 300) { // > 5 min until reset
-          logger.warn({ tenantId: this.tenantId, contactId, remaining, ttl }, 'SearXNG budget nearly exhausted — deferring enrichment');
-          throw new Error(`SearXNG budget exhausted (${remaining} remaining, resets in ${ttl}s) — will retry after backoff`);
-        }
+        logger.warn({ tenantId: this.tenantId, contactId, remaining, ttl }, 'SearXNG budget nearly exhausted — enrichment will proceed with limited searches');
       }
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('SearXNG budget exhausted')) throw err;
+    } catch {
       // Redis check failure is non-critical, continue
     }
 
@@ -988,7 +984,7 @@ export class EnrichmentAgent extends BaseAgent {
               },
             });
 
-            // 4. Dispatch to scoring if we have email
+            // 4. Dispatch to scoring if we have email, otherwise dispatch to enrichment
             if (personEmail) {
               await this.dispatchNext('scoring', {
                 contactId: contact.id,
@@ -997,6 +993,14 @@ export class EnrichmentAgent extends BaseAgent {
                 dryRun: input.dryRun,
               });
               logger.info({ companyName, personName: person.name, email: personEmail }, 'Team member dispatched to scoring');
+            } else {
+              await this.dispatchNext('enrichment', {
+                contactId: contact.id,
+                masterAgentId,
+                pipelineContext: ctx,
+                dryRun: input.dryRun,
+              });
+              logger.info({ companyName, personName: person.name }, 'Team member without email dispatched to enrichment');
             }
           } catch (err) {
             logger.debug({ err, personName: person.name }, 'Failed to create team member contact');

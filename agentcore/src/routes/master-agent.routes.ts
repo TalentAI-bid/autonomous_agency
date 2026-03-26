@@ -203,6 +203,13 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     // Register workers for this tenant if not already done
     registerTenantWorkers(request.tenantId);
 
+    // Drain stale jobs and reset rate limits BEFORE execute dispatches new jobs
+    await drainAllPipelineQueues(request.tenantId);
+    await removeAllEmailListenerJobs(request.tenantId);
+    await removeAllEmailSendJobs(request.tenantId);
+    await flushEmailQueue(request.tenantId);
+    await resetSearchRateLimits(request.tenantId);
+
     // Run MasterAgent orchestrator — parses mission, generates queries, dispatches discovery jobs
     const masterAgent = new MasterAgent({ tenantId: request.tenantId, masterAgentId: id });
     try {
@@ -217,11 +224,6 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
       });
       const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
       logger.info({ tenantId: request.tenantId, agentId: id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from /start');
-      await drainAllPipelineQueues(request.tenantId);
-      await removeAllEmailListenerJobs(request.tenantId);
-      await removeAllEmailSendJobs(request.tenantId);
-      await flushEmailQueue(request.tenantId);
-      await resetSearchRateLimits(request.tenantId);
       await scheduleAgentJobs(request.tenantId, id, agentCfg);
       logger.info({ tenantId: request.tenantId, agentId: id }, 'Agent jobs scheduled from /start');
 

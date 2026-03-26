@@ -965,6 +965,16 @@ export class EnrichmentAgent extends BaseAgent {
             }
           }
 
+          // 2b. Verify email domain matches company domain
+          if (personEmail && companyDomain) {
+            const emailDomainPart = personEmail.split('@')[1]?.toLowerCase();
+            const normalizedCompanyDomain = companyDomain.replace(/^www\./, '').toLowerCase();
+            if (emailDomainPart && emailDomainPart !== normalizedCompanyDomain) {
+              logger.warn({ personName: person.name, email: personEmail, companyDomain, emailDomain: emailDomainPart }, 'Email domain mismatch — discarding email');
+              personEmail = '';
+            }
+          }
+
           // 3. Create contact record
           try {
             const contact = await this.saveOrUpdateContact({

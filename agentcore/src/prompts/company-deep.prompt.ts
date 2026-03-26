@@ -41,7 +41,9 @@ Rules:
 - For funding, use: "Pre-seed", "Seed", "Series A/B/C/D+", "Public", "Bootstrapped", "Unknown".
 - For recentFunding, extract the latest funding round details (e.g. "Series B - $50M led by Acme Ventures, Jan 2026"). Use "" if unknown.
 - For glassdoorRating, extract the overall rating (e.g. "4.2/5"). Use "" if not found.
-- Extract key people from about/team pages, LinkedIn company page (executives, founders, leadership):
+- Extract key people ONLY from official team/about/leadership pages or LinkedIn company profile:
+  - ONLY include people who CURRENTLY work at this company in a leadership or key role.
+  - Do NOT include: board advisors, investors, clients, partners, people mentioned in news articles, or former employees.
   - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive"), linkedinUrl (if visible on team page or LinkedIn), email (if visible on team/contact page).
   - Use empty strings for unknown fields.
 - Extract teamPageUrl: the URL of the team/leadership page if found. Use "" if not found.

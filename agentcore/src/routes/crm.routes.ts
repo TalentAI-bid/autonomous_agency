@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, asc } from 'drizzle-orm';
+import { eq, and, desc, asc, lt, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { crmStages, deals, crmActivities, contacts } from '../db/schema/index.js';
 import { logActivity, ensureDeal, moveDealStage, seedDefaultStages } from '../services/crm-activity.service.js';
@@ -119,17 +119,36 @@ export default async function crmRoutes(fastify: FastifyInstance) {
 
   // ── Deals ───────────────────────────────────────────────────────────────────
 
-  // GET /api/crm/deals
+  // GET /api/crm/deals (paginated)
   fastify.get('/deals', async (request) => {
-    const query = request.query as { stageId?: string; contactId?: string; masterAgentId?: string };
+    const query = request.query as { stageId?: string; contactId?: string; masterAgentId?: string; cursor?: string; limit?: string };
+    const limit = Math.min(parseInt(query.limit || '20', 10), 100);
+
+    const conditions = [eq(deals.tenantId, request.tenantId)];
+    if (query.stageId) conditions.push(eq(deals.stageId, query.stageId));
+    if (query.contactId) conditions.push(eq(deals.contactId, query.contactId));
+    if (query.masterAgentId) conditions.push(eq(deals.masterAgentId, query.masterAgentId));
+    if (query.cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(query.cursor, 'base64').toString());
+        conditions.push(lt(deals.createdAt, new Date(decoded.createdAt)));
+      } catch { throw new ValidationError('Invalid cursor'); }
+    }
+
     const results = await withTenant(request.tenantId, async (tx) => {
-      let q = tx.select().from(deals).where(eq(deals.tenantId, request.tenantId)).$dynamic();
-      if (query.stageId) q = q.where(and(eq(deals.tenantId, request.tenantId), eq(deals.stageId, query.stageId)));
-      if (query.contactId) q = q.where(and(eq(deals.tenantId, request.tenantId), eq(deals.contactId, query.contactId)));
-      if (query.masterAgentId) q = q.where(and(eq(deals.tenantId, request.tenantId), eq(deals.masterAgentId, query.masterAgentId)));
-      return q.orderBy(desc(deals.createdAt));
+      return tx.select().from(deals)
+        .where(and(...conditions))
+        .orderBy(desc(deals.createdAt))
+        .limit(limit + 1);
     });
-    return { data: results };
+
+    const hasMore = results.length > limit;
+    const data = hasMore ? results.slice(0, limit) : results;
+    const nextCursor = hasMore && data.length > 0
+      ? Buffer.from(JSON.stringify({ createdAt: data[data.length - 1]!.createdAt.toISOString() })).toString('base64')
+      : null;
+
+    return { data, pagination: { hasMore, nextCursor } };
   });
 
   // POST /api/crm/deals
@@ -226,20 +245,36 @@ export default async function crmRoutes(fastify: FastifyInstance) {
 
   // ── Activities ──────────────────────────────────────────────────────────────
 
-  // GET /api/crm/activities
+  // GET /api/crm/activities (paginated)
   fastify.get('/activities', async (request) => {
-    const query = request.query as { contactId?: string; dealId?: string; type?: string; limit?: string };
-    const limit = parseInt(query.limit ?? '50', 10);
+    const query = request.query as { contactId?: string; dealId?: string; type?: string; cursor?: string; limit?: string };
+    const limit = Math.min(parseInt(query.limit ?? '20', 10), 100);
+
+    const conditions = [eq(crmActivities.tenantId, request.tenantId)];
+    if (query.contactId) conditions.push(eq(crmActivities.contactId, query.contactId));
+    if (query.dealId) conditions.push(eq(crmActivities.dealId, query.dealId));
+    if (query.type) conditions.push(eq(crmActivities.type, query.type as any));
+    if (query.cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(query.cursor, 'base64').toString());
+        conditions.push(lt(crmActivities.occurredAt, new Date(decoded.occurredAt)));
+      } catch { throw new ValidationError('Invalid cursor'); }
+    }
 
     const results = await withTenant(request.tenantId, async (tx) => {
-      let q = tx.select().from(crmActivities).where(eq(crmActivities.tenantId, request.tenantId)).$dynamic();
-      if (query.contactId) q = q.where(and(eq(crmActivities.tenantId, request.tenantId), eq(crmActivities.contactId, query.contactId)));
-      if (query.dealId) q = q.where(and(eq(crmActivities.tenantId, request.tenantId), eq(crmActivities.dealId, query.dealId)));
-      if (query.type) q = q.where(and(eq(crmActivities.tenantId, request.tenantId), eq(crmActivities.type, query.type as any)));
-      return q.orderBy(desc(crmActivities.occurredAt)).limit(limit);
+      return tx.select().from(crmActivities)
+        .where(and(...conditions))
+        .orderBy(desc(crmActivities.occurredAt))
+        .limit(limit + 1);
     });
 
-    return { data: results };
+    const hasMore = results.length > limit;
+    const data = hasMore ? results.slice(0, limit) : results;
+    const nextCursor = hasMore && data.length > 0
+      ? Buffer.from(JSON.stringify({ occurredAt: data[data.length - 1]!.occurredAt.toISOString() })).toString('base64')
+      : null;
+
+    return { data, pagination: { hasMore, nextCursor } };
   });
 
   // POST /api/crm/activities

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, count, avg, gt, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, count, avg, gt, lt, inArray, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents } from '../db/schema/index.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
@@ -9,6 +9,8 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { extractJSON } from '../tools/together-ai.tool.js';
 import { removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
 import { flushEmailQueue } from '../tools/email-queue.tool.js';
+import { drainAllPipelineQueues } from '../services/queue.service.js';
+import { resetSearchRateLimits } from '../tools/searxng.tool.js';
 import logger from '../utils/logger.js';
 import {
   buildSystemPrompt as buildPipelineSystemPrompt,
@@ -131,12 +133,13 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     });
     if (result.length === 0) throw new NotFoundError('MasterAgent', id);
 
-    // Clean up repeatable jobs — prevents orphaned polls after agent deletion
+    // Clean up all pipeline + repeatable jobs — prevents orphaned jobs after agent deletion
     try {
+      await drainAllPipelineQueues(request.tenantId);
       await removeAllEmailListenerJobs(request.tenantId);
       await removeAllEmailSendJobs(request.tenantId);
     } catch (err) {
-      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'Failed to remove repeatable jobs on delete');
+      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'Failed to clean up jobs on delete');
     }
 
     return { success: true };
@@ -214,9 +217,11 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
       });
       const agentCfg = (freshAgent?.config as Record<string, unknown>) ?? {};
       logger.info({ tenantId: request.tenantId, agentId: id, configKeys: Object.keys(agentCfg) }, 'Scheduling agent jobs from /start');
+      await drainAllPipelineQueues(request.tenantId);
       await removeAllEmailListenerJobs(request.tenantId);
       await removeAllEmailSendJobs(request.tenantId);
       await flushEmailQueue(request.tenantId);
+      await resetSearchRateLimits(request.tenantId);
       await scheduleAgentJobs(request.tenantId, id, agentCfg);
       logger.info({ tenantId: request.tenantId, agentId: id }, 'Agent jobs scheduled from /start');
 
@@ -244,12 +249,13 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     });
     if (!agent) throw new NotFoundError('MasterAgent', id);
 
-    // Clean up all repeatable email jobs for this tenant
+    // Clean up all pipeline + repeatable email jobs for this tenant
     try {
+      await drainAllPipelineQueues(request.tenantId);
       await removeAllEmailListenerJobs(request.tenantId);
       await removeAllEmailSendJobs(request.tenantId);
     } catch (err) {
-      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'Failed to remove repeatable jobs on stop');
+      logger.error({ err, tenantId: request.tenantId, agentId: id }, 'Failed to clean up jobs on stop');
     }
 
     return { data: { status: 'paused' } };
@@ -286,11 +292,13 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     return { data };
   });
 
-  // GET /api/master-agents/:id/emails — Sent emails for this agent
-  fastify.get<{ Params: { id: string } }>('/:id/emails', async (request) => {
+  // GET /api/master-agents/:id/emails — Sent emails for this agent (paginated)
+  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/emails', async (request) => {
     const { id } = request.params;
+    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const { cursor } = request.query;
 
-    const data = await withTenant(request.tenantId, async (tx) => {
+    const results = await withTenant(request.tenantId, async (tx) => {
       // Find campaigns for this master agent
       const agentCampaigns = await tx
         .select({ id: campaigns.id })
@@ -301,8 +309,16 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
 
       const campaignIds = agentCampaigns.map((c) => c.id);
 
+      const conditions = [inArray(campaignContacts.campaignId, campaignIds)];
+      if (cursor) {
+        try {
+          const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString());
+          conditions.push(lt(emailsSent.sentAt, new Date(decoded.sentAt)));
+        } catch { throw new ValidationError('Invalid cursor'); }
+      }
+
       // Get emails through campaignContacts -> emailsSent
-      const emails = await tx
+      return tx
         .select({
           id: emailsSent.id,
           fromEmail: emailsSent.fromEmail,
@@ -315,45 +331,81 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
         })
         .from(emailsSent)
         .innerJoin(campaignContacts, eq(emailsSent.campaignContactId, campaignContacts.id))
-        .where(inArray(campaignContacts.campaignId, campaignIds))
+        .where(and(...conditions))
         .orderBy(desc(emailsSent.sentAt))
-        .limit(50);
-
-      return emails;
+        .limit(limit + 1);
     });
 
-    return { data };
+    const hasMore = results.length > limit;
+    const data = hasMore ? results.slice(0, limit) : results;
+    const nextCursor = hasMore && data.length > 0
+      ? Buffer.from(JSON.stringify({ sentAt: data[data.length - 1]!.sentAt?.toISOString() })).toString('base64')
+      : null;
+
+    return { data, pagination: { hasMore, nextCursor } };
   });
 
-  // GET /api/master-agents/:id/companies — Companies discovered by this agent
-  fastify.get<{ Params: { id: string } }>('/:id/companies', async (request) => {
+  // GET /api/master-agents/:id/companies — Companies discovered by this agent (paginated)
+  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/companies', async (request) => {
     const { id } = request.params;
+    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const { cursor } = request.query;
 
-    const data = await withTenant(request.tenantId, async (tx) => {
+    const conditions = [
+      eq(companies.masterAgentId, id),
+      eq(companies.tenantId, request.tenantId),
+      sql`COALESCE(${companies.dataCompleteness}, 0) >= 30`,
+    ];
+    if (cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString());
+        conditions.push(lt(companies.createdAt, new Date(decoded.createdAt)));
+      } catch { throw new ValidationError('Invalid cursor'); }
+    }
+
+    const results = await withTenant(request.tenantId, async (tx) => {
       return tx.select().from(companies)
-        .where(and(
-          eq(companies.masterAgentId, id),
-          eq(companies.tenantId, request.tenantId),
-          sql`COALESCE(${companies.dataCompleteness}, 0) >= 30`,
-        ))
+        .where(and(...conditions))
         .orderBy(desc(companies.createdAt))
-        .limit(100);
+        .limit(limit + 1);
     });
 
-    return { data };
+    const hasMore = results.length > limit;
+    const data = hasMore ? results.slice(0, limit) : results;
+    const nextCursor = hasMore && data.length > 0
+      ? Buffer.from(JSON.stringify({ createdAt: data[data.length - 1]!.createdAt.toISOString() })).toString('base64')
+      : null;
+
+    return { data, pagination: { hasMore, nextCursor } };
   });
 
-  // GET /api/master-agents/:id/documents — Documents for this agent
-  fastify.get<{ Params: { id: string } }>('/:id/documents', async (request) => {
+  // GET /api/master-agents/:id/documents — Documents for this agent (paginated)
+  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/documents', async (request) => {
     const { id } = request.params;
+    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const { cursor } = request.query;
 
-    const data = await withTenant(request.tenantId, async (tx) => {
+    const conditions = [eq(documents.masterAgentId, id), eq(documents.tenantId, request.tenantId)];
+    if (cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString());
+        conditions.push(lt(documents.createdAt, new Date(decoded.createdAt)));
+      } catch { throw new ValidationError('Invalid cursor'); }
+    }
+
+    const results = await withTenant(request.tenantId, async (tx) => {
       return tx.select().from(documents)
-        .where(and(eq(documents.masterAgentId, id), eq(documents.tenantId, request.tenantId)))
+        .where(and(...conditions))
         .orderBy(desc(documents.createdAt))
-        .limit(100);
+        .limit(limit + 1);
     });
 
-    return { data };
+    const hasMore = results.length > limit;
+    const data = hasMore ? results.slice(0, limit) : results;
+    const nextCursor = hasMore && data.length > 0
+      ? Buffer.from(JSON.stringify({ createdAt: data[data.length - 1]!.createdAt.toISOString() })).toString('base64')
+      : null;
+
+    return { data, pagination: { hasMore, nextCursor } };
   });
 }

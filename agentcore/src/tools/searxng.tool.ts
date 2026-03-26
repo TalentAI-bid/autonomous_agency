@@ -235,3 +235,20 @@ export async function searchDiscovery(
     return [];
   }
 }
+
+/**
+ * Reset all SearXNG rate limits and circuit breaker state for a tenant.
+ * Call this when starting a new pipeline so it gets a fresh search budget.
+ */
+export async function resetSearchRateLimits(tenantId: string): Promise<void> {
+  try {
+    await redis.del(`tenant:${tenantId}:ratelimit:search`);
+    await redis.del(`tenant:${tenantId}:ratelimit:discovery`);
+    await redis.del('circuit:searxng:open');
+    await redis.del('circuit:searxng:failures');
+    searxngDownWarned = false;
+    logger.info({ tenantId }, 'SearXNG rate limits and circuit breaker reset');
+  } catch (err) {
+    logger.warn({ err, tenantId }, 'Failed to reset SearXNG rate limits');
+  }
+}

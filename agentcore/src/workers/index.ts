@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Job, Worker } from 'bullmq';
 import { withTenant } from '../config/database.js';
-import { agentTasks } from '../db/schema/index.js';
+import { agentTasks, masterAgents as masterAgentsTable } from '../db/schema/index.js';
 import type { AgentType } from '../queues/queues.js';
 import { createDiscoveryWorker } from './discovery.worker.js';
 import { createDocumentWorker } from './document.worker.js';
@@ -49,7 +49,21 @@ export async function createTaskRecord(
   agentType: AgentType,
 ): Promise<{ id: string; tenantId: string }> {
   const tenantId = (job.data as Record<string, unknown>).tenantId as string;
-  const masterAgentId = (job.data as Record<string, unknown>).masterAgentId as string | undefined;
+  let masterAgentId = (job.data as Record<string, unknown>).masterAgentId as string | undefined;
+
+  // Validate masterAgentId exists — prevent FK violation for orphaned jobs
+  if (masterAgentId) {
+    const exists = await withTenant(tenantId, async (tx) => {
+      const [row] = await tx.select({ id: masterAgentsTable.id }).from(masterAgentsTable)
+        .where(eq(masterAgentsTable.id, masterAgentId!))
+        .limit(1);
+      return !!row;
+    });
+    if (!exists) {
+      logger.warn({ tenantId, masterAgentId, agentType, jobId: job.id }, 'masterAgentId not found — setting to null to prevent FK violation');
+      masterAgentId = undefined;
+    }
+  }
 
   const [task] = await withTenant(tenantId, async (tx) => {
     return tx.insert(agentTasks).values({

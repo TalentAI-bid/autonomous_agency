@@ -8,6 +8,8 @@ import { buildChatSystemPrompt } from '../prompts/chat-agent.prompt.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { flushEmailQueue } from '../tools/email-queue.tool.js';
+import { drainAllPipelineQueues } from './queue.service.js';
+import { resetSearchRateLimits } from '../tools/searxng.tool.js';
 import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js';
 import type { ChatMessage } from '../tools/together-ai.tool.js';
 import logger from '../utils/logger.js';
@@ -602,8 +604,10 @@ export async function approveProposal(tenantId: string, conversationId: string, 
       .where(eq(masterAgents.id, agent.id));
   });
 
-  // Flush any stale emails from previous runs
+  // Drain stale pipeline jobs + flush emails + reset search limits before starting fresh
+  await drainAllPipelineQueues(tenantId);
   await flushEmailQueue(tenantId);
+  await resetSearchRateLimits(tenantId);
 
   registerTenantWorkers(tenantId);
 

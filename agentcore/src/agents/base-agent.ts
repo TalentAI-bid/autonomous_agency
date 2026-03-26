@@ -102,6 +102,23 @@ export abstract class BaseAgent {
         }
       }
 
+      // Dedup by email — prevents duplicate contacts when LinkedIn URL is missing
+      if (data.email) {
+        const byEmail = await tx
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.tenantId, this.tenantId), eq(contacts.email, data.email)))
+          .limit(1);
+        if (byEmail.length > 0) {
+          const [updated] = await tx
+            .update(contacts)
+            .set({ ...data, updatedAt: new Date() })
+            .where(eq(contacts.id, byEmail[0]!.id))
+            .returning();
+          return updated!;
+        }
+      }
+
       const [created] = await tx
         .insert(contacts)
         .values({

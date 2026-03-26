@@ -72,6 +72,38 @@ export async function getAllQueuesStatus(tenantId: string) {
   return statuses;
 }
 
+/** Pipeline queue types to drain on start/stop/delete (excludes email-listen/email-send — handled separately) */
+const PIPELINE_QUEUE_TYPES: AgentType[] = [
+  'discovery', 'enrichment', 'document', 'scoring', 'outreach', 'reply', 'action',
+  'strategy', 'strategist', 'reddit-monitor', 'mailbox',
+];
+
+/**
+ * Drain all pipeline queues for a tenant — removes all waiting and delayed jobs.
+ * Call this before starting a new pipeline to clear stale jobs from previous runs.
+ */
+export async function drainAllPipelineQueues(tenantId: string): Promise<number> {
+  let totalDrained = 0;
+  for (const agentType of PIPELINE_QUEUE_TYPES) {
+    const queue = getQueue(tenantId, agentType);
+    try {
+      const waiting = await queue.getWaitingCount();
+      const delayed = await queue.getDelayedCount();
+      if (waiting + delayed > 0) {
+        await queue.drain();
+        totalDrained += waiting + delayed;
+        logger.info({ tenantId, agentType, waiting, delayed }, 'Queue drained');
+      }
+    } catch (err) {
+      logger.warn({ err, tenantId, agentType }, 'Failed to drain queue');
+    }
+  }
+  if (totalDrained > 0) {
+    logger.info({ tenantId, totalDrained }, 'All pipeline queues drained');
+  }
+  return totalDrained;
+}
+
 export async function pauseAgentQueue(tenantId: string, agentType: AgentType): Promise<void> {
   const queue = getQueue(tenantId, agentType);
   await queue.pause();

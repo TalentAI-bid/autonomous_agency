@@ -109,7 +109,9 @@ export async function search(
   const cacheKey = `tenant:${tenantId}:cache:search:${createHash('md5').update(query).digest('hex')}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
-    return JSON.parse(cached) as SearchResult[];
+    const parsed = JSON.parse(cached) as SearchResult[];
+    logger.debug({ tenantId, query, cachedResultCount: parsed.length }, 'SearXNG cache hit');
+    return parsed;
   }
 
   try {
@@ -133,6 +135,12 @@ export async function search(
         url: r.url ?? '',
         snippet: r.content ?? '',
       }));
+
+    if (results.length === 0) {
+      logger.warn({ tenantId, query, rawResultCount: data.results?.length ?? 0 }, 'SearXNG returned 0 usable results');
+    } else {
+      logger.info({ tenantId, query, resultCount: results.length }, 'SearXNG search returned results');
+    }
 
     if (results.length > 0) {
       await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));
@@ -190,7 +198,9 @@ export async function searchDiscovery(
   const cacheKey = `tenant:${tenantId}:cache:search:${createHash('md5').update(query).digest('hex')}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
-    return JSON.parse(cached) as SearchResult[];
+    const parsed = JSON.parse(cached) as SearchResult[];
+    logger.debug({ tenantId, query, cachedResultCount: parsed.length }, 'SearXNG cache hit (discovery)');
+    return parsed;
   }
 
   try {
@@ -214,6 +224,12 @@ export async function searchDiscovery(
         url: r.url ?? '',
         snippet: r.content ?? '',
       }));
+
+    if (results.length === 0) {
+      logger.warn({ tenantId, query, rawResultCount: data.results?.length ?? 0 }, 'SearXNG returned 0 usable results (discovery)');
+    } else {
+      logger.info({ tenantId, query, resultCount: results.length }, 'SearXNG discovery search returned results');
+    }
 
     if (results.length > 0) {
       await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(results));

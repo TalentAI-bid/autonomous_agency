@@ -143,6 +143,9 @@ export class EnrichmentAgent extends BaseAgent {
           companySearchResults = await this.searchWeb(
             `${contactCompanyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
           );
+          if (companySearchResults.length === 0) {
+            logger.warn({ companyName: contactCompanyName, queriesAttempted: smartQueries.companyWebsiteQueries.length + 1 }, 'All company website search queries returned 0 results');
+          }
         }
         const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
 
@@ -790,6 +793,9 @@ export class EnrichmentAgent extends BaseAgent {
         companySearchResults = await this.searchWeb(
           `${companyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
         );
+        if (companySearchResults.length === 0) {
+          logger.warn({ companyName, queriesAttempted: smartQueries.companyWebsiteQueries.length + 1 }, 'All company website search queries returned 0 results');
+        }
       }
       const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
 
@@ -1067,7 +1073,18 @@ export class EnrichmentAgent extends BaseAgent {
         { role: 'system', content: searchKeywordsSystemPrompt() },
         { role: 'user', content: searchKeywordsUserPrompt(params) },
       ]);
-      logger.info({ companyName: params.companyName, reasoning: queries.reasoning }, 'Smart query generation succeeded');
+      logger.info({
+        companyName: params.companyName,
+        reasoning: queries.reasoning,
+        queryCount: {
+          website: queries.companyWebsiteQueries?.length ?? 0,
+          linkedin: queries.linkedinCompanyQueries?.length ?? 0,
+          contact: queries.contactLinkedinQueries?.length ?? 0,
+          github: queries.contactGithubQueries?.length ?? 0,
+          social: queries.contactSocialQueries?.length ?? 0,
+          domain: queries.domainResolutionQueries?.length ?? 0,
+        },
+      }, 'Smart query generation succeeded');
       return queries;
     } catch (err) {
       logger.warn({ err, companyName: params.companyName }, 'Smart query generation failed, using fallback templates');

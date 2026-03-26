@@ -167,6 +167,8 @@ export class DiscoveryAgent extends BaseAgent {
     let pagesScraped = 0;
     let skipped = 0;
     let enrichmentDispatched = 0;
+    let queriesWithResults = 0;
+    let queriesEmpty = 0;
 
     // Build mission context for LLM classification
     let missionContext: string | undefined;
@@ -231,9 +233,11 @@ export class DiscoveryAgent extends BaseAgent {
       }
 
       if (results.length === 0) {
+        queriesEmpty++;
         logger.warn({ query, tenantId: this.tenantId, masterAgentId }, 'SearXNG returned 0 results for query (including retry)');
         continue;
       }
+      queriesWithResults++;
 
       // Process top 5 most promising results per query (scraping budget)
       const prioritized = this.prioritizeResults(results);
@@ -402,7 +406,7 @@ export class DiscoveryAgent extends BaseAgent {
     await this.clearCurrentAction();
 
     logger.info(
-      { tenantId: this.tenantId, companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped },
+      { tenantId: this.tenantId, totalQueries: searchQueries.length, queriesWithResults, queriesEmpty, companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped },
       'DiscoveryAgent completed',
     );
 

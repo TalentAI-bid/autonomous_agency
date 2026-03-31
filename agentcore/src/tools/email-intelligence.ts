@@ -26,7 +26,7 @@ const CACHE_TTL_7D = 7 * 24 * 3600;
 const CACHE_TTL_1H = 3600;
 
 const SEARXNG_DELAY_MS = 500;
-const SEARXNG_MAX_QUERIES = 10;
+const SEARXNG_MAX_QUERIES = 6;
 const CRAWL4AI_MAX_PAGES = 2;
 const GITHUB_RATE_LIMIT_FLOOR = 10;
 
@@ -319,16 +319,12 @@ class EmailIntelligenceEngine {
     const tid = tenantId ?? 'global';
 
     const queries = [
-      `"${first} ${last}" "@${domain}" email`,
       `"${first}.${last}@${domain}"`,
+      `"${first} ${last}" "@${domain}" email`,
+      `"${first[0]?.toLowerCase() ?? ''}${last.toLowerCase()}@${domain}"`,
       `"${first} ${last}" email ${domain}`,
-      `site:${domain} "${first} ${last}" email`,
       `"${first} ${last}" "${domain}" contact`,
       `"${first}.${last}" "${domain}"`,
-      `"${first[0]?.toLowerCase() ?? ''}${last.toLowerCase()}@${domain}"`,
-      `"${first} ${last}" site:github.com "${domain}"`,
-      `"${first} ${last}" site:twitter.com OR site:x.com "${domain}"`,
-      `"${first} ${last}" site:linkedin.com "${domain}" email`,
     ];
 
     let pagesScraped = 0;

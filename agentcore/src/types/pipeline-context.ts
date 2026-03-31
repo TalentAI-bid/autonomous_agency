@@ -5,6 +5,7 @@ export interface PipelineContext {
   masterAgentId: string;
   tenantId: string;
   campaignId?: string;
+  missionText?: string;
 
   // Shared targeting
   targetRoles: string[];

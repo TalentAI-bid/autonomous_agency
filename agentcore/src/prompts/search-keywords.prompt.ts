@@ -17,10 +17,11 @@ STRATEGIES:
 - For ambiguous company names (common words like "Apple", "Mercury", "Relay"), add qualifying terms like the industry, product type, or "startup" / "software company"
 - For companies that may go by abbreviations or alternate names, generate queries for both the full name and likely abbreviations
 - For companies with very generic names, try pairing the company name with the contact person's name or title
-- Always generate at least one query that excludes common noise sites (-site:indeed.com -site:glassdoor.com -site:wikipedia.org)
+- Generate at least one query excluding noise sites (-site:indeed.com -site:glassdoor.com -site:wikipedia.org)
 - For LinkedIn searches, try both exact-match quotes and partial matches
-- If a domain is already known, use site: operator to search within that domain
-- Generate 2-3 queries per category, ordered from most specific to broadest
+- DO NOT use site: on company domains (e.g., site:company.com) — our search engine cannot restrict to specific domains. The only valid site: usage is for platforms like site:linkedin.com, site:github.com
+- Use AT MOST 2 quoted phrases per query — more quoted terms returns zero results
+- Generate 1-2 queries per category, ordered from most specific to broadest
 
 Return valid JSON matching the GeneratedSearchQueries interface.`;
 }

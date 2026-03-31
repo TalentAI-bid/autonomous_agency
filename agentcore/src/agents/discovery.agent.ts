@@ -60,14 +60,85 @@ function isDeadLinkedInProfile(title: string, snippet: string, url: string): boo
   return false;
 }
 
+/** City → country mapping for geographic hierarchy matching */
+const CITY_TO_COUNTRY: Record<string, string> = {
+  dublin: 'ireland', cork: 'ireland', galway: 'ireland', limerick: 'ireland',
+  london: 'uk', manchester: 'uk', birmingham: 'uk', edinburgh: 'uk', glasgow: 'uk', bristol: 'uk', leeds: 'uk', cambridge: 'uk', oxford: 'uk',
+  paris: 'france', lyon: 'france', marseille: 'france', toulouse: 'france', nantes: 'france',
+  berlin: 'germany', munich: 'germany', hamburg: 'germany', frankfurt: 'germany', cologne: 'germany', stuttgart: 'germany',
+  amsterdam: 'netherlands', rotterdam: 'netherlands', 'the hague': 'netherlands', utrecht: 'netherlands',
+  madrid: 'spain', barcelona: 'spain', valencia: 'spain', seville: 'spain',
+  rome: 'italy', milan: 'italy', turin: 'italy', florence: 'italy',
+  lisbon: 'portugal', porto: 'portugal',
+  stockholm: 'sweden', gothenburg: 'sweden', malmo: 'sweden',
+  copenhagen: 'denmark', aarhus: 'denmark',
+  oslo: 'norway', bergen: 'norway',
+  helsinki: 'finland', espoo: 'finland',
+  zurich: 'switzerland', geneva: 'switzerland', bern: 'switzerland', basel: 'switzerland',
+  vienna: 'austria', graz: 'austria',
+  brussels: 'belgium', antwerp: 'belgium',
+  warsaw: 'poland', krakow: 'poland', wroclaw: 'poland',
+  prague: 'czech republic', brno: 'czech republic',
+  budapest: 'hungary',
+  bucharest: 'romania', cluj: 'romania',
+  sofia: 'bulgaria',
+  athens: 'greece', thessaloniki: 'greece',
+  tokyo: 'japan', osaka: 'japan',
+  beijing: 'china', shanghai: 'china', shenzhen: 'china', guangzhou: 'china',
+  mumbai: 'india', bangalore: 'india', delhi: 'india', hyderabad: 'india', pune: 'india', chennai: 'india',
+  sydney: 'australia', melbourne: 'australia', brisbane: 'australia', perth: 'australia',
+  toronto: 'canada', vancouver: 'canada', montreal: 'canada', ottawa: 'canada',
+  'new york': 'usa', 'san francisco': 'usa', 'los angeles': 'usa', chicago: 'usa', austin: 'usa', seattle: 'usa', boston: 'usa', denver: 'usa',
+  'tel aviv': 'israel', jerusalem: 'israel', haifa: 'israel',
+  singapore: 'singapore',
+  'buenos aires': 'argentina',
+  'sao paulo': 'brazil', 'rio de janeiro': 'brazil',
+  'mexico city': 'mexico',
+};
+
+/** Country aliases for flexible matching */
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  uk: ['united kingdom', 'great britain', 'england', 'scotland', 'wales', 'northern ireland'],
+  usa: ['united states', 'us', 'america', 'united states of america'],
+  uae: ['united arab emirates'],
+};
+
 /** Check if a company's extracted location matches any target location */
 function matchesTargetLocation(companyLocation: string | undefined, targetLocations: string[]): boolean {
   if (!targetLocations.length) return true; // no filter active
-  if (!companyLocation) return true; // can't validate — let it through for enrichment to verify
-  const loc = companyLocation.toLowerCase();
+  if (!companyLocation) return false; // unknown location + targets set → reject
+
+  const loc = companyLocation.toLowerCase().trim();
+
   return targetLocations.some(target => {
-    const t = target.toLowerCase();
-    return loc.includes(t) || t.includes(loc);
+    const t = target.toLowerCase().trim();
+
+    // Direct substring match (existing logic)
+    if (loc.includes(t) || t.includes(loc)) return true;
+
+    // Geographic hierarchy: check if company city maps to a target country
+    for (const [city, country] of Object.entries(CITY_TO_COUNTRY)) {
+      if (loc.includes(city)) {
+        if (t === country || t.includes(country) || country.includes(t)) return true;
+        // Check aliases
+        const aliases = COUNTRY_ALIASES[country];
+        if (aliases?.some(a => t.includes(a) || a.includes(t))) return true;
+      }
+    }
+
+    // Check if target is a city and company location contains the country
+    const targetCountry = CITY_TO_COUNTRY[t];
+    if (targetCountry && loc.includes(targetCountry)) return true;
+
+    // Country alias match
+    for (const [canonical, aliases] of Object.entries(COUNTRY_ALIASES)) {
+      const allForms = [canonical, ...aliases];
+      const locMatchesAny = allForms.some(f => loc.includes(f));
+      const targetMatchesAny = allForms.some(f => t.includes(f) || f.includes(t));
+      if (locMatchesAny && targetMatchesAny) return true;
+    }
+
+    return false;
   });
 }
 
@@ -110,6 +181,8 @@ interface PageExtraction {
     location?: string;
     funding?: string;
     entityType?: string; // 'company' | 'university' | 'government' | 'ngo' | 'agency' | 'institution'
+    relevanceScore?: number; // 0-100: how relevant to mission
+    relevanceReason?: string;
   }>;
   people: Array<{
     name: string;
@@ -170,14 +243,25 @@ export class DiscoveryAgent extends BaseAgent {
     let queriesWithResults = 0;
     let queriesEmpty = 0;
 
-    // Build mission context for LLM classification
+    // Build rich mission context for LLM classification and relevance scoring
     let missionContext: string | undefined;
     if (this._ctx) {
       const parts: string[] = [];
-      if (this._ctx.sales?.industries?.length) parts.push(`Target sectors: ${this._ctx.sales.industries.join(', ')}`);
+      if (this._ctx.missionText) parts.push(`MISSION: ${this._ctx.missionText}`);
+      if (this._ctx.sales?.industries?.length) parts.push(`Target industries: ${this._ctx.sales.industries.join(', ')}`);
       if (this._ctx.targetRoles?.length) parts.push(`Target roles: ${this._ctx.targetRoles.join(', ')}`);
-      if (this._ctx.locations?.length) parts.push(`Locations: ${this._ctx.locations.join(', ')}`);
-      if (parts.length > 0) missionContext = parts.join('. ');
+      if (this._ctx.locations?.length) parts.push(`Target locations: ${this._ctx.locations.join(', ')}`);
+      if (this._ctx.recruitment?.requiredSkills?.length) parts.push(`Required skills: ${this._ctx.recruitment.requiredSkills.join(', ')}`);
+      if (this._ctx.sales?.techStack?.length) parts.push(`Tech signals: ${this._ctx.sales.techStack.join(', ')}`);
+      const strategy = this._ctx.sales?.salesStrategy;
+      if (strategy?.companyQualificationCriteria) {
+        const cq = strategy.companyQualificationCriteria;
+        if (cq.industries?.length) parts.push(`Qualification industries: ${cq.industries.join(', ')}`);
+        if (cq.techSignals?.length) parts.push(`Tech signals: ${cq.techSignals.join(', ')}`);
+        if (cq.redFlags?.length) parts.push(`RED FLAGS (reject if present): ${cq.redFlags.join(', ')}`);
+        if (cq.sizeRange) parts.push(`Company size: ${cq.sizeRange.min ?? '?'}–${cq.sizeRange.max ?? '?'} employees`);
+      }
+      if (parts.length > 0) missionContext = parts.join('\n');
     }
 
     for (const query of searchQueries) {
@@ -305,10 +389,18 @@ export class DiscoveryAgent extends BaseAgent {
             if (!co.name || co.name.length < 2) continue;
             if (useCase === 'sales' && co.domain && isMegaCorp(co.domain)) continue;
 
-            // Skip companies not matching target locations
-            if (this._ctx?.locations?.length && co.location) {
+            // Relevance gate: skip companies below threshold when mission context is active
+            if (missionContext && typeof co.relevanceScore === 'number' && co.relevanceScore < 40) {
+              logger.debug({ name: co.name, relevanceScore: co.relevanceScore, reason: co.relevanceReason }, 'Skipping company: below relevance threshold');
+              skipped++;
+              continue;
+            }
+
+            // Skip companies not matching target locations (unknown location → reject when targets set)
+            if (this._ctx?.locations?.length) {
               if (!matchesTargetLocation(co.location, this._ctx.locations)) {
-                logger.debug({ name: co.name, location: co.location, targets: this._ctx.locations }, 'Skipping company: location mismatch');
+                logger.debug({ name: co.name, location: co.location ?? 'unknown', targets: this._ctx.locations }, 'Skipping company: location mismatch');
+                skipped++;
                 continue;
               }
             }
@@ -479,7 +571,7 @@ export class DiscoveryAgent extends BaseAgent {
   ): Promise<PageExtraction | null> {
     try {
       const missionBlock = missionContext
-        ? `\nMISSION CONTEXT: ${missionContext}\nFocus on extracting entities that match this mission. If looking for universities, extract universities. If looking for companies, extract companies.\n`
+        ? `\n--- MISSION CONTEXT (use this to score relevance) ---\n${missionContext}\n--- END MISSION CONTEXT ---\n\nIMPORTANT RELEVANCE RULES:\n- Only extract organizations that PLAUSIBLY match the mission above.\n- For each organization, assign a relevanceScore (0-100) based on how well it matches the mission's target industries, locations, skills/tech, and roles.\n- 80-100 = strong match (right industry, right location, right signals)\n- 50-79 = partial match (some criteria match)\n- 20-49 = weak match (tangential relation)\n- 0-19 = irrelevant (wrong industry, wrong country, no connection)\n- If the mission specifies a location (e.g. "Ireland"), companies NOT in that country should score below 30.\n- If the mission specifies an industry/service (e.g. "DevOps"), companies in unrelated industries should score below 30.\n- Provide a brief relevanceReason explaining the score.\n`
         : '';
 
       const extraction = await this.extractJSON<PageExtraction>([
@@ -489,7 +581,7 @@ export class DiscoveryAgent extends BaseAgent {
 
 Given a page's content, URL, and title, you must:
 1. Classify the page type
-2. Extract ALL organizations and/or people mentioned
+2. Extract organizations and people mentioned that are relevant to the mission
 ${missionBlock}
 Page types:
 - "company_page" = a single organization's own website/profile (commercial entity)
@@ -500,8 +592,9 @@ Page types:
 - "person_profile" = an individual's profile page
 - "irrelevant" = login pages, generic content, error pages, encyclopedia, event registration, geographic info
 
-For EACH organization found, extract: name, domain (if visible), industry (or academic field/sector), description (1 sentence), size, location (MUST include country — e.g. "Paris, France" or "USA"), funding (use "N/A" for non-commercial entities like universities), entityType ("company", "university", "government", "ngo", "agency", "institution").
+For EACH organization found, extract: name, domain (if visible), industry (or academic field/sector), description (1 sentence), size, location (MUST include country — e.g. "Paris, France" or "USA"), funding (use "N/A" for non-commercial entities like universities), entityType ("company", "university", "government", "ngo", "agency", "institution"), relevanceScore (0-100), relevanceReason (brief explanation).
 ⚠️ The "location" field is CRITICAL. Always include the country. Infer from domain (.fr = France, .de = Germany, .co.uk = UK) or page content if not stated explicitly.
+⚠️ The "relevanceScore" field is CRITICAL. Score each entity based on how well it matches the mission context above.
 For EACH person found, extract: name, title/role, organization they work at.
 
 Return ONLY valid JSON. If the page is irrelevant, return { "type": "irrelevant", "companies": [], "people": [] }.

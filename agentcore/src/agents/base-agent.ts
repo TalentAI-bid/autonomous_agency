@@ -185,6 +185,12 @@ export abstract class BaseAgent {
   protected async saveOrUpdateCompany(
     data: Partial<NewCompany> & { name: string; domain?: string },
   ): Promise<Company> {
+    // Type guard: LLM sometimes returns nested object for name
+    if (typeof data.name === 'object' && data.name !== null) {
+      data.name = (data.name as any).name || JSON.stringify(data.name);
+    }
+    data.name = String(data.name).trim();
+
     // Reject garbage company names
     if (!this.isValidCompanyName(data.name)) {
       throw new Error(`Invalid company name rejected: "${data.name.slice(0, 80)}"`);

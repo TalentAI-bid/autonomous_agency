@@ -14,6 +14,9 @@ const redis: Redis = createRedisConnection();
 
 const RATE_LIMIT_MAX = 2000;
 const DISCOVERY_RATE_LIMIT_MAX = 2000;
+
+/** Effective rate limit — importable by other modules for budget checks */
+export const EFFECTIVE_RATE_LIMIT = RATE_LIMIT_MAX;
 const RATE_LIMIT_WINDOW_SEC = 3600; // 1 hour
 const CACHE_TTL_SEC = 43200; // 12 hours
 const CIRCUIT_BREAKER_THRESHOLD = 5;

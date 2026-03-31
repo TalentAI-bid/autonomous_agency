@@ -103,6 +103,7 @@ export class MasterAgent extends BaseAgent {
         useCase: agent.useCase as 'sales' | 'recruitment',
         masterAgentId,
         tenantId: this.tenantId,
+        missionText: (mission as string) ?? agent.mission ?? undefined,
         targetRoles: (requirements.targetRoles as string[]) ?? [],
         locations: (requirements.locations as string[]) ?? [],
         scoringThreshold: isSales ? 50 : 70,

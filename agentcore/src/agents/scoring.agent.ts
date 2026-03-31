@@ -127,7 +127,7 @@ export class ScoringAgent extends BaseAgent {
       },
     ]);
 
-    let rawScore = scoring.overall;
+    let rawScore = Number(scoring.overall) || 0;
 
     // Opportunity scoring bonus: +10 for contacts linked to high buying-intent opportunities
     if (opportunityData && opportunityData.buyingIntentScore >= 70) {
@@ -135,7 +135,11 @@ export class ScoringAgent extends BaseAgent {
       logger.debug({ contactId, opportunityId: opportunityData.id, bonus: 10 }, 'Applied opportunity scoring bonus');
     }
 
-    const score = Math.round(Math.min(100, Math.max(0, rawScore)));
+    let score = Math.round(Math.min(100, Math.max(0, rawScore)));
+    if (!Number.isFinite(score)) {
+      logger.warn({ contactId, rawScore: scoring.overall }, 'Non-numeric score from LLM — defaulting to 0');
+      score = 0;
+    }
     const passed = score >= threshold;
     const newStatus = passed ? 'scored' : 'rejected';
 
@@ -154,9 +158,8 @@ export class ScoringAgent extends BaseAgent {
     // 5b. Save score to company (keep max across contacts)
     if (companyRecord) {
       const companyFitKey = useCase === 'sales' ? 'companyFit' : 'companyBackground';
-      const companyScore = typeof scoring.breakdown[companyFitKey] === 'number'
-        ? Math.round(scoring.breakdown[companyFitKey])
-        : score;
+      const companyFitRaw = Number(scoring.breakdown[companyFitKey]);
+      const companyScore = Number.isFinite(companyFitRaw) ? Math.round(Math.min(100, Math.max(0, companyFitRaw))) : score;
       if (!companyRecord.score || companyScore > companyRecord.score) {
         await withTenant(this.tenantId, async (tx) => {
           await tx.update(companies)

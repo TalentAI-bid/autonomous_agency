@@ -18,6 +18,7 @@ import {
   buildUserPrompt as searchKeywordsUserPrompt,
   type GeneratedSearchQueries,
 } from '../prompts/search-keywords.prompt.js';
+import { EFFECTIVE_RATE_LIMIT } from '../tools/searxng.tool.js';
 import logger from '../utils/logger.js';
 
 export class EnrichmentAgent extends BaseAgent {
@@ -38,13 +39,20 @@ export class EnrichmentAgent extends BaseAgent {
 
     logger.info({ tenantId: this.tenantId, contactId }, 'EnrichmentAgent starting');
 
-    // Check SearXNG budget — warn if nearly exhausted but don't block enrichment
+    // Check SearXNG budget — skip enrichment if exhausted
     try {
       const searchCount = await this.redis.get(`tenant:${this.tenantId}:ratelimit:search`);
-      const remaining = 500 - (searchCount ? parseInt(searchCount, 10) : 0);
-      if (remaining < 5) {
+      const count = searchCount ? parseInt(searchCount, 10) : 0;
+      const remaining = EFFECTIVE_RATE_LIMIT - count;
+      if (remaining < 50) {
         const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
-        logger.warn({ tenantId: this.tenantId, contactId, remaining, ttl }, 'SearXNG budget nearly exhausted — enrichment will proceed with limited searches');
+        logger.warn({ tenantId: this.tenantId, contactId, remaining, count, ttl }, 'SearXNG budget exhausted — skipping enrichment');
+        await this.clearCurrentAction();
+        return { enriched: false, reason: 'search_budget_exhausted', remaining };
+      }
+      if (remaining < 200) {
+        const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
+        logger.warn({ tenantId: this.tenantId, contactId, remaining, ttl }, 'SearXNG budget low');
       }
     } catch {
       // Redis check failure is non-critical, continue
@@ -65,6 +73,17 @@ export class EnrichmentAgent extends BaseAgent {
         .limit(1);
     });
     if (!contact) throw new Error(`Contact ${contactId} not found`);
+
+    // Hard cap on retries to prevent queue explosion
+    const retryCount = (input.retryCount as number) ?? 0;
+    if (retryCount > 3) {
+      logger.warn({ contactId, retryCount }, 'Enrichment max retries exceeded — archiving');
+      await withTenant(this.tenantId, async (tx) => {
+        await tx.update(contacts).set({ status: 'archived', updatedAt: new Date() }).where(eq(contacts.id, contactId));
+      });
+      await this.clearCurrentAction();
+      return { contactId, status: 'max_retries_exceeded' };
+    }
 
     const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(' ');
     const contactTitle = contact.title ?? '';
@@ -131,12 +150,12 @@ export class EnrichmentAgent extends BaseAgent {
 
     if (contactCompanyName) {
       try {
-        // Search for company website using LLM-generated smart queries
+        // Search for company website using LLM-generated smart queries (max 2)
         let companySearchResults: Awaited<ReturnType<typeof this.searchWeb>> = [];
-        for (const query of smartQueries.companyWebsiteQueries) {
+        for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
           const results = await this.searchWeb(query, 10);
           companySearchResults.push(...results);
-          if (results.some((r) => r.url.startsWith('https://'))) break;
+          if (results.length > 0) break;
         }
         // Fallback to hardcoded query if smart queries returned nothing
         if (companySearchResults.length === 0) {
@@ -144,7 +163,7 @@ export class EnrichmentAgent extends BaseAgent {
             `${contactCompanyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
           );
           if (companySearchResults.length === 0) {
-            logger.warn({ companyName: contactCompanyName, queriesAttempted: smartQueries.companyWebsiteQueries.length + 1 }, 'All company website search queries returned 0 results');
+            logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
           }
         }
         const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
@@ -265,9 +284,12 @@ export class EnrichmentAgent extends BaseAgent {
         const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
         const companyDataCompleteness = Math.round((companyFilledFields / companyFields.length) * 100);
 
-        // Save company with deep data
+        // Save company with deep data (type guard: LLM may return object for name)
+        const resolvedCompanyName = typeof deepCompany.name === 'object'
+          ? (deepCompany.name as any).name || contactCompanyName
+          : (deepCompany.name || contactCompanyName);
         const company = await this.saveOrUpdateCompany({
-          name: deepCompany.name || contactCompanyName,
+          name: resolvedCompanyName,
           domain: deepCompany.domain || companyDomain || undefined,
           industry: deepCompany.industry || undefined,
           size: deepCompany.size || undefined,
@@ -536,8 +558,8 @@ export class EnrichmentAgent extends BaseAgent {
 
     const dataCompleteness = profile?.dataCompleteness ?? 0;
 
-    // Save data completeness to contact record
-    updateData.dataCompleteness = dataCompleteness;
+    // Save data completeness to contact record (integer column — must round)
+    updateData.dataCompleteness = Math.round(dataCompleteness);
 
     const qualityDecision = dataCompleteness >= 40 ? 'pass' : (dataCompleteness >= 25 ? 'retry' : 'archive');
     this.sendMessage(null, 'reasoning', {
@@ -721,6 +743,21 @@ export class EnrichmentAgent extends BaseAgent {
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     logger.info({ tenantId: this.tenantId, companyId }, 'EnrichmentAgent starting (company-only)');
+
+    // Check SearXNG budget — skip enrichment if exhausted
+    try {
+      const searchCount = await this.redis.get(`tenant:${this.tenantId}:ratelimit:search`);
+      const count = searchCount ? parseInt(searchCount, 10) : 0;
+      const remaining = EFFECTIVE_RATE_LIMIT - count;
+      if (remaining < 50) {
+        const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
+        logger.warn({ tenantId: this.tenantId, companyId, remaining, count, ttl }, 'SearXNG budget exhausted — skipping company enrichment');
+        return { enriched: false, reason: 'search_budget_exhausted', remaining };
+      }
+    } catch {
+      // Redis check failure is non-critical, continue
+    }
+
     await this.setCurrentAction('company_enrichment', `Enriching company ${companyId.slice(0, 8)}`);
 
     // Load company
@@ -760,7 +797,7 @@ export class EnrichmentAgent extends BaseAgent {
     // If no domain, try to resolve it using LLM-generated queries first
     if (!companyDomain) {
       const noiseDomains = ['linkedin.com', 'glassdoor.com', 'indeed.com', 'crunchbase.com', 'wikipedia.org', 'twitter.com', 'facebook.com'];
-      for (const query of smartQueries.domainResolutionQueries) {
+      for (const query of smartQueries.domainResolutionQueries.slice(0, 2)) {
         const results = await this.searchWeb(query, 5);
         for (const r of results) {
           try {
@@ -783,10 +820,10 @@ export class EnrichmentAgent extends BaseAgent {
     try {
       // Search for company website using LLM-generated smart queries
       let companySearchResults: Awaited<ReturnType<typeof this.searchWeb>> = [];
-      for (const query of smartQueries.companyWebsiteQueries) {
+      for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
         const results = await this.searchWeb(query, 10);
         companySearchResults.push(...results);
-        if (results.some((r) => r.url.startsWith('https://'))) break;
+        if (results.length > 0) break;
       }
       // Fallback to hardcoded query if smart queries returned nothing
       if (companySearchResults.length === 0) {
@@ -794,7 +831,7 @@ export class EnrichmentAgent extends BaseAgent {
           `${companyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
         );
         if (companySearchResults.length === 0) {
-          logger.warn({ companyName, queriesAttempted: smartQueries.companyWebsiteQueries.length + 1 }, 'All company website search queries returned 0 results');
+          logger.warn({ companyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
         }
       }
       const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
@@ -881,9 +918,12 @@ export class EnrichmentAgent extends BaseAgent {
       const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
       const companyDataCompleteness = Math.round((companyFilledFields / companyFields.length) * 100);
 
-      // Save enriched company data
+      // Save enriched company data (type guard: LLM may return object for name)
+      const resolvedName = typeof deepCompany.name === 'object'
+        ? (deepCompany.name as any).name || companyName
+        : (deepCompany.name || companyName);
       await this.saveOrUpdateCompany({
-        name: deepCompany.name || companyName,
+        name: resolvedName,
         domain: deepCompany.domain || companyDomain || undefined,
         industry: deepCompany.industry || undefined,
         size: deepCompany.size || undefined,

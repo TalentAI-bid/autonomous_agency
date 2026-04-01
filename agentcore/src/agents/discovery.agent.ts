@@ -23,15 +23,45 @@ function isMegaCorp(domain: string): boolean {
 
 /** Low-value domains — never scrape, skip entirely */
 const SKIP_DOMAINS = new Set([
+  // Social media & forums
   'youtube.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
   'tiktok.com', 'pinterest.com', 'reddit.com', 'quora.com',
+  'discord.com', 'app.slack.com', 'zoom.us', 'telegram.org',
+  // Reference / encyclopedias
   'wikipedia.org', 'en.wikipedia.org', 'britannica.com', 'worldhistory.org',
-  'goodreads.com', 'amazon.com', 'ebay.com',
-  'stackoverflow.com', 'stackexchange.com',
+  'merriam-webster.com', 'dictionary.com',
+  // E-commerce / consumer
+  'amazon.com', 'ebay.com', 'walmart.com', 'target.com', 'bestbuy.com',
+  'aliexpress.com', 'wish.com', 'goodreads.com', 'carfax.com',
+  // Q&A / developer forums
+  'stackoverflow.com', 'stackexchange.com', 'serverfault.com',
+  'superuser.com', 'askubuntu.com', 'stackinfra.com',
+  // Developer tools / code hosting
+  'github.com', 'gitlab.com', 'bitbucket.org',
+  'npmjs.com', 'pypi.org', 'rubygems.org',
+  // Tutorial / learning sites
+  'cplusplus.com', 'geeksforgeeks.org', 'w3schools.com', 'tutorialspoint.com',
+  'freecodecamp.org', 'codecademy.com', 'openstax.org',
+  // Developer blogs / content
+  'medium.com', 'dev.to', 'news.ycombinator.com', 'hackernews.com',
+  // Academic / research
+  'arxiv.org', 'researchgate.net', 'scholar.google.com',
+  'collegeconfidential.com', 'talk.collegeconfidential.com',
+  // Google services
+  'docs.google.com', 'drive.google.com', 'sheets.google.com',
+  // News / media
   'investopedia.com', 'hbr.org', 'store.hbr.org',
   'nytimes.com', 'wsj.com', 'bbc.com', 'cnn.com',
+  'forbes.com', 'businessinsider.com', 'techcrunch.com',
+  // Events / misc
   'eventbrite.com', 'meetup.com', 'gisgeography.com',
   'ficoforums.myfico.com',
+  // Adult
+  'pornhub.com', 'xvideos.com',
+  // Job boards (not target companies)
+  'indeed.com', 'glassdoor.com', 'monster.com', 'ziprecruiter.com',
+  // Community sub-domains
+  'community.shopify.com',
 ]);
 
 function shouldSkipDomain(domain: string): boolean {
@@ -428,7 +458,7 @@ export class DiscoveryAgent extends BaseAgent {
             try {
               const saved = await this.saveOrUpdateCompany({
                 name: co.name,
-                domain: co.domain || (hostname && !shouldSkipDomain(hostname) ? hostname : undefined),
+                domain: co.domain || undefined,
                 industry: co.industry || undefined,
                 size: co.size || undefined,
                 description: co.description || undefined,
@@ -452,9 +482,22 @@ export class DiscoveryAgent extends BaseAgent {
             }
           }
 
-          // ── Save extracted people ──
+          // ── Save extracted people (only those with a valid company) ──
           for (const person of extraction.people.slice(0, 10)) {
-            if (!person.name) continue;
+            if (!person.name || !person.company) continue;
+
+            // Skip people from junk/non-company domains
+            const personCompanyLower = person.company.toLowerCase();
+            const isJunkCompany = [...SKIP_DOMAINS].some(d => {
+              const shortName = d.replace('.com', '').replace('.org', '').replace('.net', '');
+              return personCompanyLower === shortName || personCompanyLower === d || personCompanyLower.includes(shortName);
+            });
+            if (isJunkCompany) {
+              logger.debug({ name: person.name, company: person.company }, 'Skipping person: junk company');
+              skipped++;
+              continue;
+            }
+
             const nameParts = person.name.trim().split(/\s+/);
             try {
               const contact = await this.saveOrUpdateContact({

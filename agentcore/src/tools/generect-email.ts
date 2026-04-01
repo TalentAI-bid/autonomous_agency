@@ -44,6 +44,8 @@ const API_BASE = 'https://api.generect.com/api/linkedin';
 const redis: Redis = createRedisConnection();
 
 class GenerectEmailTool {
+  private static billingCircuitOpen = false;
+
   isConfigured(): boolean {
     return !!env.GENERECT_API_KEY;
   }
@@ -62,6 +64,11 @@ class GenerectEmailTool {
   // ── Find single email ───────────────────────────────────────────────────
 
   async findEmail(firstName: string, lastName: string, domain: string): Promise<GenerectEmailResult> {
+    // Circuit breaker: stop calling if billing credits exhausted
+    if (GenerectEmailTool.billingCircuitOpen) {
+      return { email: null, confidence: 0, catchAll: false, emailFormat: null, mxDomain: null, error: 'Generect credits exhausted — circuit breaker open' };
+    }
+
     const first = firstName.trim().toLowerCase();
     const last = lastName.trim().toLowerCase();
     const cacheKey = `generect:find:${domain}:${first}:${last}`;
@@ -91,6 +98,12 @@ class GenerectEmailTool {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
+        // Circuit breaker: 402 = credits exhausted, stop calling
+        if (res.status === 402) {
+          GenerectEmailTool.billingCircuitOpen = true;
+          logger.error('Generect credits exhausted (402) — all email lookups disabled. Auto-reset in 1 hour.');
+          setTimeout(() => { GenerectEmailTool.billingCircuitOpen = false; }, 3600000);
+        }
         throw new Error(`Generect API ${res.status}: ${text}`);
       }
 

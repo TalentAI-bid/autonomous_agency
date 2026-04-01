@@ -59,7 +59,7 @@ class EmailIntelligenceEngine {
     this.redis = createRedisConnection();
 
     if (!env.GENERECT_API_KEY) {
-      throw new Error('GENERECT_API_KEY is required. Email intelligence cannot operate without Generect API.');
+      logger.warn('GENERECT_API_KEY is not set — email discovery will return null for all lookups');
     }
   }
 
@@ -71,6 +71,10 @@ class EmailIntelligenceEngine {
     companyNameOrDomain: string,
     tenantId?: string,
   ): Promise<EmailResult> {
+    if (!env.GENERECT_API_KEY) {
+      return { email: null, confidence: 0, method: null, source: null };
+    }
+
     const first = firstName.trim();
     const last = lastName.trim();
     if (!first || !last || !companyNameOrDomain.trim()) {

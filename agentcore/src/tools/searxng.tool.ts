@@ -12,15 +12,19 @@ export interface SearchResult {
 
 const redis: Redis = createRedisConnection();
 
-const RATE_LIMIT_MAX = 2000;
-const DISCOVERY_RATE_LIMIT_MAX = 2000;
+const RATE_LIMIT_MAX = 10000;
+const DISCOVERY_RATE_LIMIT_MAX = 10000;
 
 /** Effective rate limit — importable by other modules for budget checks */
 export const EFFECTIVE_RATE_LIMIT = RATE_LIMIT_MAX;
 const RATE_LIMIT_WINDOW_SEC = 3600; // 1 hour
 const CACHE_TTL_SEC = 43200; // 12 hours
-const CIRCUIT_BREAKER_THRESHOLD = 5;
-const CIRCUIT_BREAKER_TTL = 300; // 5 minutes
+const CIRCUIT_BREAKER_THRESHOLD = 15;
+const CIRCUIT_BREAKER_TTL = 60; // 1 minute
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** Track whether we've already warned about SearXNG being unreachable */
 let searxngDownWarned = false;
@@ -40,7 +44,7 @@ async function recordCircuitFailure(tenantId: string): Promise<void> {
     await redis.expire(failKey, CIRCUIT_BREAKER_TTL);
     if (failures >= CIRCUIT_BREAKER_THRESHOLD) {
       await redis.setex('circuit:searxng:open', CIRCUIT_BREAKER_TTL, 'true');
-      logger.error({ tenantId, failures }, 'Circuit breaker OPEN for SearXNG — skipping all searches for 5 minutes');
+      logger.error({ tenantId, failures }, 'Circuit breaker OPEN for SearXNG — skipping all searches for 1 minute');
       pubRedis.publish(
         `agent-events:${tenantId}`,
         JSON.stringify({ event: 'pipeline:service_down', data: { service: 'searxng' }, timestamp: new Date().toISOString() }),
@@ -118,6 +122,9 @@ export async function search(
   }
 
   try {
+    // Random delay 1-3 seconds between queries to avoid rate limiting
+    await sleep(1000 + Math.random() * 2000);
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -207,6 +214,9 @@ export async function searchDiscovery(
   }
 
   try {
+    // Random delay 1-3 seconds between queries to avoid rate limiting
+    await sleep(1000 + Math.random() * 2000);
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 

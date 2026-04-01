@@ -1,11 +1,10 @@
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { db } from '../config/database.js';
 import { env } from '../config/env.js';
 import { createRedisConnection } from '../queues/setup.js';
 import { emailIntelligence, domainPatterns, deliverySignals } from '../db/schema/index.js';
 import { search } from './searxng.tool.js';
-import { scrape } from './crawl4ai.tool.js';
 import { generectEmailTool } from './generect-email.js';
 import logger from '../utils/logger.js';
 
@@ -21,14 +20,7 @@ export interface EmailResult {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CACHE_TTL_30D = 30 * 24 * 3600;
-const CACHE_TTL_90D = 90 * 24 * 3600;
-const CACHE_TTL_7D = 7 * 24 * 3600;
 const CACHE_TTL_1H = 3600;
-
-const SEARXNG_DELAY_MS = 500;
-const SEARXNG_MAX_QUERIES = 6;
-const CRAWL4AI_MAX_PAGES = 2;
-const GITHUB_RATE_LIMIT_FLOOR = 10;
 
 // ── Helper functions ─────────────────────────────────────────────────────────
 
@@ -58,20 +50,6 @@ function reverseEngineerPattern(email: string, first: string, last: string, doma
   return null;
 }
 
-function extractEmailsFromText(text: string, domain?: string): string[] {
-  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const matches = text.match(emailRegex) ?? [];
-  const unique = [...new Set(matches.map((e) => e.toLowerCase()))];
-  if (domain) {
-    return unique.filter((e) => e.endsWith(`@${domain.toLowerCase()}`));
-  }
-  return unique;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // ── EmailIntelligenceEngine ──────────────────────────────────────────────────
 
 class EmailIntelligenceEngine {
@@ -79,6 +57,10 @@ class EmailIntelligenceEngine {
 
   constructor() {
     this.redis = createRedisConnection();
+
+    if (!env.GENERECT_API_KEY) {
+      throw new Error('GENERECT_API_KEY is required. Email intelligence cannot operate without Generect API.');
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -103,7 +85,7 @@ class EmailIntelligenceEngine {
 
     const cacheKey = `email:intel:${domain}:${first.toLowerCase()}:${last.toLowerCase()}`;
 
-    // ── Layer 1: Redis cache ─────────────────────────────────────────────────
+    // Check Redis cache for previous Generect result
     try {
       const cached = await this.redis.get(cacheKey);
       if (cached) {
@@ -114,85 +96,25 @@ class EmailIntelligenceEngine {
       logger.debug({ err }, 'Redis cache read failed');
     }
 
-    // ── Layer 2: DB cache ────────────────────────────────────────────────────
+    // Call Generect API (sole source of truth)
     try {
-      const [record] = await db
-        .select()
-        .from(emailIntelligence)
-        .where(
-          and(
-            eq(emailIntelligence.firstName, first.toLowerCase()),
-            eq(emailIntelligence.lastName, last.toLowerCase()),
-            eq(emailIntelligence.domain, domain),
-          ),
-        )
-        .limit(1);
-
-      if (record && record.confidence > 80 && !record.invalidated) {
+      const generectResult = await generectEmailTool.findEmail(first, last, domain);
+      if (generectResult.email && generectResult.confidence >= 70) {
         const result: EmailResult = {
-          email: record.email,
-          confidence: record.confidence,
-          method: record.method,
-          source: record.source,
+          email: generectResult.email,
+          confidence: generectResult.confidence,
+          method: 'generect',
+          source: `generect api (format: ${generectResult.emailFormat ?? 'unknown'})`,
         };
+        await this.persistDiscovery(first, last, domain, result);
         await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-        logger.debug({ first, last, domain }, 'Email found in DB cache');
         return result;
       }
     } catch (err) {
-      logger.debug({ err }, 'DB cache read failed');
+      logger.debug({ err, first, last, domain }, 'Generect discovery failed');
     }
 
-    // ── Layer 3: Generect API (primary source) ──────────────────────────────
-    if (generectEmailTool.isConfigured()) {
-      try {
-        const generectResult = await generectEmailTool.findEmail(first, last, domain);
-        if (generectResult.email && generectResult.confidence >= 70) {
-          const result: EmailResult = {
-            email: generectResult.email,
-            confidence: generectResult.confidence,
-            method: 'generect',
-            source: `generect api (format: ${generectResult.emailFormat ?? 'unknown'})`,
-          };
-          await this.persistDiscovery(first, last, domain, result);
-          await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-          return result;
-        }
-      } catch (err) {
-        logger.debug({ err, first, last, domain }, 'Generect discovery failed');
-      }
-    }
-
-    // ── Layer 4: SearXNG dorking (fallback for devs/researchers) ────────────
-    try {
-      const searxResult = await this.searxngDiscovery(first, last, domain, tenantId);
-      if (searxResult?.email) {
-        const validated = await this.validateViaGenerect(searxResult.email, searxResult);
-        if (validated) {
-          await this.persistDiscovery(first, last, domain, validated);
-          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
-          return validated;
-        }
-      }
-    } catch (err) {
-      logger.debug({ err, first, last, domain }, 'SearXNG discovery failed');
-    }
-
-    // ── Layer 5: GitHub commit mining (fallback for developers) ─────────────
-    try {
-      const ghResult = await this.githubDiscovery(first, last, domain, companyNameOrDomain);
-      if (ghResult?.email) {
-        const validated = await this.validateViaGenerect(ghResult.email, ghResult);
-        if (validated) {
-          await this.persistDiscovery(first, last, domain, validated);
-          await this.cacheResult(cacheKey, validated, CACHE_TTL_30D);
-          return validated;
-        }
-      }
-    } catch (err) {
-      logger.debug({ err, first, last, domain }, 'GitHub discovery failed');
-    }
-
+    // No fallback — return null
     return { email: null, confidence: 0, method: null, source: null };
   }
 
@@ -283,229 +205,6 @@ class EmailIntelligenceEngine {
     }
   }
 
-  // ── Generect validation for fallback layers ──────────────────────────────
-
-  private async validateViaGenerect(email: string, result: EmailResult): Promise<EmailResult | null> {
-    if (!generectEmailTool.isConfigured()) {
-      // Without Generect, reject low-confidence guesses
-      if (result.confidence < 70) return null;
-      return result;
-    }
-    try {
-      const validation = await generectEmailTool.validateEmail(email);
-      if (validation.valid) {
-        return { ...result, confidence: Math.max(result.confidence, 85) };
-      }
-      if (validation.catchAll) {
-        return { ...result, confidence: Math.min(result.confidence, 60) };
-      }
-      // Invalid — reject
-      logger.debug({ email, method: result.method }, 'Email rejected by Generect validation');
-      return null;
-    } catch (err) {
-      logger.debug({ err, email }, 'Generect validation failed, keeping original confidence');
-      return result;
-    }
-  }
-
-  // ── Discovery layers ───────────────────────────────────────────────────────
-
-  private async searxngDiscovery(
-    first: string,
-    last: string,
-    domain: string,
-    tenantId?: string,
-  ): Promise<EmailResult | null> {
-    const tid = tenantId ?? 'global';
-
-    const queries = [
-      `"${first}.${last}@${domain}"`,
-      `"${first} ${last}" "@${domain}" email`,
-      `"${first[0]?.toLowerCase() ?? ''}${last.toLowerCase()}@${domain}"`,
-      `"${first} ${last}" email ${domain}`,
-      `"${first} ${last}" "${domain}" contact`,
-      `"${first}.${last}" "${domain}"`,
-    ];
-
-    let pagesScraped = 0;
-
-    for (let i = 0; i < Math.min(queries.length, SEARXNG_MAX_QUERIES); i++) {
-      if (i > 0) await sleep(SEARXNG_DELAY_MS);
-
-      const results = await search(tid, queries[i]!, 5);
-
-      // Check snippets first (cheap)
-      for (const r of results) {
-        const emails = extractEmailsFromText(r.snippet, domain);
-        const match = this.findBestMatch(emails, first, last, domain);
-        if (match) {
-          return {
-            email: match,
-            confidence: 90,
-            method: 'searxng',
-            source: `search snippet: ${r.url}`,
-          };
-        }
-      }
-
-      // Scrape top pages if budget allows
-      if (pagesScraped < CRAWL4AI_MAX_PAGES) {
-        for (const r of results.slice(0, 2)) {
-          if (pagesScraped >= CRAWL4AI_MAX_PAGES) break;
-          try {
-            const pageContent = await scrape(tid, r.url);
-            pagesScraped++;
-            const emails = extractEmailsFromText(pageContent, domain);
-            const match = this.findBestMatch(emails, first, last, domain);
-            if (match) {
-              return {
-                email: match,
-                confidence: 90,
-                method: 'searxng',
-                source: `scraped page: ${r.url}`,
-              };
-            }
-          } catch {
-            // continue
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  private async githubDiscovery(
-    first: string,
-    last: string,
-    domain: string,
-    company: string,
-  ): Promise<EmailResult | null> {
-    if (!env.GITHUB_TOKEN) return null;
-
-    // Check cached result
-    const ghCacheKey = `github:search:${first.toLowerCase()}:${last.toLowerCase()}:${company.toLowerCase()}`;
-    try {
-      const cached = await this.redis.get(ghCacheKey);
-      if (cached === '__none__') return null;
-      if (cached) return JSON.parse(cached) as EmailResult;
-    } catch {
-      // continue
-    }
-
-    try {
-      // Check rate limit first
-      const rlCheck = await fetch('https://api.github.com/rate_limit', {
-        headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'agentcore' },
-      });
-      if (rlCheck.ok) {
-        const rlData = await rlCheck.json() as { resources?: { search?: { remaining?: number } } };
-        if ((rlData.resources?.search?.remaining ?? 0) < GITHUB_RATE_LIMIT_FLOOR) {
-          logger.debug('GitHub search rate limit too low, skipping');
-          return null;
-        }
-      }
-
-      // Search for user
-      const userQuery = encodeURIComponent(`${first} ${last} in:name`);
-      const userRes = await fetch(`https://api.github.com/search/users?q=${userQuery}&per_page=5`, {
-        headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'agentcore' },
-      });
-
-      if (!userRes.ok) return null;
-      const userData = await userRes.json() as { items?: Array<{ login: string }> };
-      const users = userData.items ?? [];
-
-      for (const user of users.slice(0, 3)) {
-        // Check public events for PushEvent commits
-        try {
-          const eventsRes = await fetch(`https://api.github.com/users/${user.login}/events/public?per_page=30`, {
-            headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'agentcore' },
-          });
-
-          if (!eventsRes.ok) continue;
-          const events = await eventsRes.json() as Array<{
-            type?: string;
-            payload?: { commits?: Array<{ author?: { email?: string; name?: string } }> };
-          }>;
-
-          for (const event of events) {
-            if (event.type !== 'PushEvent') continue;
-            for (const commit of event.payload?.commits ?? []) {
-              const email = commit.author?.email;
-              if (!email) continue;
-              if (email.includes('noreply')) continue;
-              if (email.endsWith(`@${domain}`)) {
-                const result: EmailResult = {
-                  email,
-                  confidence: 88,
-                  method: 'github',
-                  source: `github events: ${user.login}`,
-                };
-                await this.redis.setex(ghCacheKey, CACHE_TTL_7D, JSON.stringify(result));
-                return result;
-              }
-            }
-          }
-        } catch {
-          // continue to next user
-        }
-
-        // Check recent repos for commits
-        try {
-          const reposRes = await fetch(`https://api.github.com/users/${user.login}/repos?sort=updated&per_page=5`, {
-            headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'agentcore' },
-          });
-
-          if (!reposRes.ok) continue;
-          const repos = await reposRes.json() as Array<{ full_name?: string }>;
-
-          for (const repo of repos.slice(0, 3)) {
-            if (!repo.full_name) continue;
-            try {
-              const commitsRes = await fetch(
-                `https://api.github.com/repos/${repo.full_name}/commits?author=${user.login}&per_page=5`,
-                { headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'agentcore' } },
-              );
-
-              if (!commitsRes.ok) continue;
-              const commits = await commitsRes.json() as Array<{
-                commit?: { author?: { email?: string } };
-              }>;
-
-              for (const c of commits) {
-                const email = c.commit?.author?.email;
-                if (!email) continue;
-                if (email.includes('noreply')) continue;
-                if (email.endsWith(`@${domain}`)) {
-                  const result: EmailResult = {
-                    email,
-                    confidence: 85,
-                    method: 'github',
-                    source: `github repo: ${repo.full_name}`,
-                  };
-                  await this.redis.setex(ghCacheKey, CACHE_TTL_7D, JSON.stringify(result));
-                  return result;
-                }
-              }
-            } catch {
-              // continue
-            }
-          }
-        } catch {
-          // continue
-        }
-      }
-
-      // Cache negative result
-      await this.redis.setex(ghCacheKey, CACHE_TTL_7D, '__none__');
-    } catch (err) {
-      logger.debug({ err }, 'GitHub discovery error');
-    }
-
-    return null;
-  }
-
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   private async resolveDomain(companyNameOrDomain: string, tenantId?: string): Promise<string | null> {
@@ -552,30 +251,6 @@ class EmailIntelligenceEngine {
 
     await this.redis.setex(cacheKey, CACHE_TTL_1H, '__none__').catch(() => {});
     return null;
-  }
-
-  private findBestMatch(emails: string[], first: string, last: string, domain: string): string | null {
-    if (emails.length === 0) return null;
-    const f = first.toLowerCase();
-    const l = last.toLowerCase();
-
-    // Priority: exact full name match > first initial + last > first only > any domain match
-    for (const email of emails) {
-      const local = email.split('@')[0] ?? '';
-      if (local.includes(f) && local.includes(l)) return email;
-    }
-    for (const email of emails) {
-      const local = email.split('@')[0] ?? '';
-      const fi = f[0] ?? '';
-      if (fi && local.startsWith(fi) && local.includes(l)) return email;
-    }
-    for (const email of emails) {
-      const local = email.split('@')[0] ?? '';
-      if (local.includes(f)) return email;
-    }
-
-    // Return first domain-matching email as fallback
-    return emails.find((e) => e.endsWith(`@${domain}`)) ?? null;
   }
 
   private async persistDiscovery(

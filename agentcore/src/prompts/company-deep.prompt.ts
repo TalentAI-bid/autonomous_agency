@@ -41,10 +41,14 @@ Rules:
 - For funding, use: "Pre-seed", "Seed", "Series A/B/C/D+", "Public", "Bootstrapped", "Unknown".
 - For recentFunding, extract the latest funding round details (e.g. "Series B - $50M led by Acme Ventures, Jan 2026"). Use "" if unknown.
 - For glassdoorRating, extract the overall rating (e.g. "4.2/5"). Use "" if not found.
-- Extract key people ONLY from official team/about/leadership pages or LinkedIn company profile:
-  - ONLY include people who CURRENTLY work at this company in a leadership or key role.
-  - Do NOT include: board advisors, investors, clients, partners, people mentioned in news articles, or former employees.
-  - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive"), linkedinUrl (if visible on team page or LinkedIn), email (if visible on team/contact page).
+- keyPeople extraction — STRICT RULES:
+  - ONLY extract people found on the company's OWN DOMAIN pages (homepage, about page, team page, leadership page). The company domain is provided in the COMPANY header above.
+  - COMPLETELY IGNORE people mentioned in: news articles, Crunchbase, external directories, press releases, partner pages, or any page NOT on the company's own domain.
+  - ONLY include CURRENT employees. Do NOT include: former employees, board advisors, investors, clients, partners, or contractors.
+  - Extract a MAXIMUM of 5 people. No more.
+  - Priority order (extract in this order until you have 5): CEO, CTO, VP Engineering, Head of HR, Hiring Manager, COO, CFO, Head of Sales, Head of Marketing.
+  - If fewer than 5 people are found on the company's own domain, return only those found. Do NOT pad with people from other sources.
+  - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive"), linkedinUrl (if visible on team page), email (if visible on team/contact page).
   - Use empty strings for unknown fields.
 - Extract teamPageUrl: the URL of the team/leadership page if found. Use "" if not found.
 - Extract open positions from careers page if available. For each position extract: title, location, requiredSkills (array), salary (string, use "" if not found), description (brief), and url (if available).

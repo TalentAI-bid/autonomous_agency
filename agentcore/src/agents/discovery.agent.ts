@@ -191,7 +191,7 @@ interface PageExtraction {
   }>;
 }
 
-const FAST_MODEL = 'openai.gpt-oss-20b-1:0';
+const FAST_MODEL = 'openai.gpt-oss-120b-1:0';
 
 export class DiscoveryAgent extends BaseAgent {
   private _ctx: PipelineContext | undefined;
@@ -394,6 +394,26 @@ export class DiscoveryAgent extends BaseAgent {
               logger.debug({ name: co.name, relevanceScore: co.relevanceScore, reason: co.relevanceReason }, 'Skipping company: below relevance threshold');
               skipped++;
               continue;
+            }
+
+            // Industry filter: reject companies whose industry doesn't match target industries
+            const targetIndustries = this._ctx?.sales?.industries;
+            if (targetIndustries?.length && co.industry) {
+              const coIndustry = co.industry.toLowerCase();
+              const industryMatch = targetIndustries.some(target => {
+                const t = target.toLowerCase();
+                // Direct substring match
+                if (coIndustry.includes(t) || t.includes(coIndustry)) return true;
+                // Shared significant word match (words >4 chars)
+                const coWords = coIndustry.split(/[\s,/&-]+/).filter(w => w.length > 4);
+                const tWords = t.split(/[\s,/&-]+/).filter(w => w.length > 4);
+                return coWords.some(cw => tWords.some(tw => cw === tw || cw.includes(tw) || tw.includes(cw)));
+              });
+              if (!industryMatch) {
+                logger.debug({ name: co.name, industry: co.industry, targetIndustries }, 'Skipping company: industry mismatch');
+                skipped++;
+                continue;
+              }
             }
 
             // Skip companies not matching target locations (unknown location → reject when targets set)

@@ -14,64 +14,47 @@ ADAPT ALL your outputs to the specific mission. NEVER default to tech/SaaS patte
 
 Your output must be valid JSON with these fields:
 - marketAnalysis: { customerPersonas: [{ title, painPoints, buyingTriggers, objections }], competitiveLandscape: string }
-- opportunitySearchQueries: [{ type: string, query: string, rationale: string }] — exact search queries to find targets. Types: hiring_signal, direct_request, project_announcement, growth_signal, initiative_signal, tender_rfp, pain_point_expressed, partnership_opportunity, event_conference
+- opportunitySearchQueries: [{ type: string, query: string, rationale: string }] — exact search queries to find targets. Types: linkedin_jobs, indeed_jobs, career_pages
 - companyQualificationCriteria: { sizeRange: { min: number, max: number }, industries: string[], signals: string[], redFlags: string[] }
 - decisionMakerTargeting: { titlePatterns: string[], seniorityLevels: string[], departmentFocus: string[] }
 - emailStrategy: { angles: [{ name: string, description: string, bestFor: string }], subjectPatterns: string[], tone: string, rulesOfEngagement: string[] }
 - successMetrics: { targetOpenRate: number, targetReplyRate: number, targetConversionRate: number }
 
-Generate 15-25 search queries across different opportunity types. Be specific — include industry terms, target descriptors, and location modifiers from the mission.
+CRITICAL QUERY RULES — YOU MUST FOLLOW ALL OF THESE:
 
-CRITICAL QUERY FORMAT RULES:
-- Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results from search engines.
-- Mix quoted exact phrases with unquoted keywords for best coverage.
-- When targeting non-English countries, include queries in BOTH the local language AND English.
-- Each query must be an exact web search string ready for a search engine.
-- Include site operators, location/industry modifiers, and domain-specific terms.
+1. EVERY query MUST contain the EXACT country or city from the mission's target locations. If the mission says "Ireland", every single query must contain "Ireland". No exceptions.
+2. EVERY query MUST contain at least one specific role keyword (e.g. "DevOps engineer", "CTO", "VP Engineering") OR a specific skill/service keyword from the mission (e.g. "DevOps", "Kubernetes", "cloud migration").
+3. NO generic queries without a role or skill keyword. A query like "companies in Ireland" is FORBIDDEN — it must be "DevOps companies Ireland" or "hiring DevOps engineer Ireland".
+4. Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results.
+5. When targeting non-English countries, include queries in BOTH the local language AND English.
 
-BAD examples (too many quoted phrases — will return 0 results):
-- "companies needing solutions" "digital transformation" "looking for partner"
-- "blockchain" "computer science" "research" "university" "partnership"
-- "hiring" "machine learning" "engineer" "startup" "Series A"
-- "universities" (too broad / no context)
+Generate EXACTLY 15 queries in 3 groups of 5:
 
-GOOD examples by industry (max 2 quoted phrases each):
+GROUP 1 — LinkedIn Jobs (type: "linkedin_jobs"):
+Generate 5 queries using site:linkedin.com/jobs/
+Example: site:linkedin.com/jobs/ "DevOps engineer" Ireland
 
-Tech/SaaS sales:
-- "hiring machine learning engineer" site:lever.co London
-- "migrating from Salesforce" OR "replacing CRM" fintech
-- site:linkedin.com/company/ "SaaS" Series A London
+GROUP 2 — Indeed Jobs (type: "indeed_jobs"):
+Generate 5 queries using site:indeed.com OR site:indeed.co.uk (match country domain)
+Example: site:indeed.com "DevOps" Ireland
 
-University/Academic partnerships:
-- "blockchain research" computer science site:.edu
-- "distributed ledger" curriculum university Europe
-- site:linkedin.com/company/ "university" innovation blockchain
-- "academic partnership" industry collaboration blockchain 2025
+GROUP 3 — Company Career Pages (type: "career_pages"):
+Generate 5 queries targeting company career pages, job boards, or hiring signals
+Example: "hiring DevOps engineer" Ireland site:lever.co OR site:greenhouse.io
+Example: "DevOps team" careers Ireland 2025
 
-Consulting/Services sales:
-- "looking for marketing agency" OR "hiring consultancy" site:reddit.com
-- "RFP" marketing services OR consulting services 2025
-- "customer experience transformation" looking for partner
-- site:linkedin.com/in/ "VP Marketing" retail London
+BAD query examples (NEVER generate these):
+- "companies in Ireland" (no role/skill keyword)
+- "hiring engineer" (no location)
+- "DevOps" "cloud" "engineer" "Ireland" "startup" (too many quoted phrases)
+- site:linkedin.com/company/ "technology" (no location, no specific role)
 
-Non-profit/Government:
-- "sustainability initiative" partnership site:.org 2025
-- "digital transformation" public sector RFP Europe
-- site:linkedin.com/company/ "foundation" grant technology
-
-For each opportunity type, generate at least 2-3 queries. Use diverse query patterns adapted to the mission (max 2 quoted phrases per query):
-- Organization discovery: "[target descriptor]" [industry] [location] [year]
-- LinkedIn discovery: site:linkedin.com/company/ "[industry]" [location]
-- LinkedIn people: site:linkedin.com/in/ "[title]" [industry] [location]
-- Academic: site:.edu OR site:.ac.uk "[topic]" [department]
-- Government/NGO: site:.gov OR site:.org "[initiative]" [topic]
-- Pain point/need: "[industry]" looking for OR need OR seeking [service type]
-- RFP/tender: "RFP" [service type] [location] [year]
-- Events: "[industry] conference" speakers [year] [location]
-- News/announcements: "[organization type]" launches OR announces [topic] [year]
-- Reddit/forums: site:reddit.com "[topic]" recommend OR looking for
-
-The queries MUST be diverse — cover different angles, platforms, and signals. Do NOT generate similar queries with minor variations. MATCH the query style to the mission's industry.
+GOOD query examples:
+- site:linkedin.com/jobs/ "DevOps engineer" Ireland
+- site:indeed.com "cloud infrastructure" Ireland
+- "hiring DevOps" Ireland site:lever.co
+- "looking for DevOps partner" Ireland 2025
+- "DevOps services" OR "cloud migration" Ireland careers
 
 IMPORTANT: Output ONLY the JSON object. Do NOT include any reasoning, explanation, or <think> tags. Just the raw JSON.`;
 }

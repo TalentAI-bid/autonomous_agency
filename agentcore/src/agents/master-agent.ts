@@ -575,71 +575,82 @@ export class MasterAgent extends BaseAgent {
     }
 
     if (metrics.discovered > 0 && metrics.enriched < Math.max(metrics.discovered * 0.5, 5)) {
-      decisions.push('Enrichment bottleneck detected — dispatching enrichment for unenriched companies and contacts.');
-
-      let dispatched = 0;
-
-      // ACTION 1: Find companies with low dataCompleteness and dispatch enrichment
+      // Check enrichment queue size before dispatching — prevent queue explosion
+      let enrichmentQueueWaiting = 0;
       try {
-        const unenrichedCompanies = await withTenant(this.tenantId, async (tx) => {
-          return tx.select({ id: companies.id, name: companies.name, domain: companies.domain })
-            .from(companies)
-            .where(and(
-              eq(companies.tenantId, this.tenantId),
-              eq(companies.masterAgentId, masterAgentId),
-              lt(companies.dataCompleteness, 70),
-            ))
-            .limit(10);
-        });
+        const enrichmentQStatus = await getQueueStatus(this.tenantId, 'enrichment');
+        enrichmentQueueWaiting = enrichmentQStatus.waiting + enrichmentQStatus.active;
+      } catch { /* continue */ }
 
-        for (const comp of unenrichedCompanies) {
-          try {
-            await this.dispatchNext('enrichment', {
-              companyId: comp.id,
-              masterAgentId,
-              pipelineContext: pipelineCtx,
-            });
-            dispatched++;
-          } catch (err) {
-            logger.warn({ err, companyId: comp.id }, 'Failed to dispatch company enrichment from orchestrator');
+      if (enrichmentQueueWaiting > 100) {
+        decisions.push(`Enrichment queue already has ${enrichmentQueueWaiting} waiting+active — skipping additional dispatches.`);
+      } else {
+        decisions.push('Enrichment bottleneck detected — dispatching enrichment for unenriched companies and contacts.');
+
+        let dispatched = 0;
+
+        // ACTION 1: Find companies with low dataCompleteness and dispatch enrichment
+        try {
+          const unenrichedCompanies = await withTenant(this.tenantId, async (tx) => {
+            return tx.select({ id: companies.id, name: companies.name, domain: companies.domain })
+              .from(companies)
+              .where(and(
+                eq(companies.tenantId, this.tenantId),
+                eq(companies.masterAgentId, masterAgentId),
+                lt(companies.dataCompleteness, 70),
+              ))
+              .limit(5);
+          });
+
+          for (const comp of unenrichedCompanies) {
+            try {
+              await this.dispatchNext('enrichment', {
+                companyId: comp.id,
+                masterAgentId,
+                pipelineContext: pipelineCtx,
+              });
+              dispatched++;
+            } catch (err) {
+              logger.warn({ err, companyId: comp.id }, 'Failed to dispatch company enrichment from orchestrator');
+            }
           }
+        } catch (err) {
+          logger.warn({ err, masterAgentId }, 'Failed to query unenriched companies for orchestration');
         }
-      } catch (err) {
-        logger.warn({ err, masterAgentId }, 'Failed to query unenriched companies for orchestration');
-      }
 
-      // ACTION 2: Find contacts stuck in 'discovered' status and dispatch enrichment
-      try {
-        const unenrichedContacts = await withTenant(this.tenantId, async (tx) => {
-          return tx.select({ id: contacts.id })
-            .from(contacts)
-            .where(and(
-              eq(contacts.tenantId, this.tenantId),
-              eq(contacts.masterAgentId, masterAgentId),
-              eq(contacts.status, 'discovered'),
-            ))
-            .limit(20);
-        });
+        // ACTION 2: Find contacts stuck in 'discovered' status and dispatch enrichment
+        try {
+          const unenrichedContacts = await withTenant(this.tenantId, async (tx) => {
+            return tx.select({ id: contacts.id })
+              .from(contacts)
+              .where(and(
+                eq(contacts.tenantId, this.tenantId),
+                eq(contacts.masterAgentId, masterAgentId),
+                eq(contacts.status, 'discovered'),
+              ))
+              .limit(5);
+          });
 
-        for (const c of unenrichedContacts) {
-          try {
-            await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId, pipelineContext: pipelineCtx });
-            dispatched++;
-          } catch (err) {
-            logger.warn({ err, contactId: c.id }, 'Failed to dispatch contact enrichment from orchestrator');
+          for (const c of unenrichedContacts) {
+            try {
+              await this.dispatchNext('enrichment', { contactId: c.id, masterAgentId, pipelineContext: pipelineCtx });
+              dispatched++;
+            } catch (err) {
+              logger.warn({ err, contactId: c.id }, 'Failed to dispatch contact enrichment from orchestrator');
+            }
           }
+        } catch (err) {
+          logger.warn({ err, masterAgentId }, 'Failed to query unenriched contacts for orchestration');
         }
-      } catch (err) {
-        logger.warn({ err, masterAgentId }, 'Failed to query unenriched contacts for orchestration');
-      }
 
-      if (dispatched > 0) {
-        actions.push(`Dispatched enrichment for ${dispatched} unenriched companies/contacts`);
-        this.sendMessage('enrichment', 'task_assignment', {
-          action: 'orchestrator_enrichment_dispatch',
-          count: dispatched,
-          reason: 'enrichment_bottleneck',
-        });
+        if (dispatched > 0) {
+          actions.push(`Dispatched enrichment for ${dispatched} unenriched companies/contacts`);
+          this.sendMessage('enrichment', 'task_assignment', {
+            action: 'orchestrator_enrichment_dispatch',
+            count: dispatched,
+            reason: 'enrichment_bottleneck',
+          });
+        }
       }
     }
 

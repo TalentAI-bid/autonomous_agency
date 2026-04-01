@@ -5,69 +5,8 @@ import { masterAgents } from '../db/schema/index.js';
 import { discoveryEngine } from '../tools/discovery-engine.js';
 import type { DiscoveryParams } from '../tools/discovery-sources/types.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
+import { isMegaCorp, shouldSkipDomain, SKIP_DOMAINS } from '../utils/domain-blocklist.js';
 import logger from '../utils/logger.js';
-
-// ── FAANG / mega-corp blocklist ──────────────────────────────────────────────
-const MEGA_CORP_DOMAINS = new Set([
-  'google.com', 'meta.com', 'facebook.com', 'apple.com', 'amazon.com',
-  'aws.amazon.com', 'netflix.com', 'microsoft.com',
-  'oracle.com', 'salesforce.com', 'ibm.com', 'intel.com',
-  'cisco.com', 'adobe.com', 'uber.com', 'airbnb.com', 'stripe.com', 'spotify.com',
-]);
-
-function isMegaCorp(domain: string): boolean {
-  if (!domain) return false;
-  const d = domain.toLowerCase().replace('www.', '');
-  return MEGA_CORP_DOMAINS.has(d);
-}
-
-/** Low-value domains — never scrape, skip entirely */
-const SKIP_DOMAINS = new Set([
-  // Social media & forums
-  'youtube.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
-  'tiktok.com', 'pinterest.com', 'reddit.com', 'quora.com',
-  'discord.com', 'app.slack.com', 'zoom.us', 'telegram.org',
-  // Reference / encyclopedias
-  'wikipedia.org', 'en.wikipedia.org', 'britannica.com', 'worldhistory.org',
-  'merriam-webster.com', 'dictionary.com',
-  // E-commerce / consumer
-  'amazon.com', 'ebay.com', 'walmart.com', 'target.com', 'bestbuy.com',
-  'aliexpress.com', 'wish.com', 'goodreads.com', 'carfax.com',
-  // Q&A / developer forums
-  'stackoverflow.com', 'stackexchange.com', 'serverfault.com',
-  'superuser.com', 'askubuntu.com', 'stackinfra.com',
-  // Developer tools / code hosting
-  'github.com', 'gitlab.com', 'bitbucket.org',
-  'npmjs.com', 'pypi.org', 'rubygems.org',
-  // Tutorial / learning sites
-  'cplusplus.com', 'geeksforgeeks.org', 'w3schools.com', 'tutorialspoint.com',
-  'freecodecamp.org', 'codecademy.com', 'openstax.org',
-  // Developer blogs / content
-  'medium.com', 'dev.to', 'news.ycombinator.com', 'hackernews.com',
-  // Academic / research
-  'arxiv.org', 'researchgate.net', 'scholar.google.com',
-  'collegeconfidential.com', 'talk.collegeconfidential.com',
-  // Google services
-  'docs.google.com', 'drive.google.com', 'sheets.google.com',
-  // News / media
-  'investopedia.com', 'hbr.org', 'store.hbr.org',
-  'nytimes.com', 'wsj.com', 'bbc.com', 'cnn.com',
-  'forbes.com', 'businessinsider.com', 'techcrunch.com',
-  // Events / misc
-  'eventbrite.com', 'meetup.com', 'gisgeography.com',
-  'ficoforums.myfico.com',
-  // Adult
-  'pornhub.com', 'xvideos.com',
-  // Job boards (not target companies)
-  'indeed.com', 'glassdoor.com', 'monster.com', 'ziprecruiter.com',
-  // Community sub-domains
-  'community.shopify.com',
-]);
-
-function shouldSkipDomain(domain: string): boolean {
-  const d = domain.toLowerCase().replace('www.', '');
-  return SKIP_DOMAINS.has(d) || [...SKIP_DOMAINS].some(p => d.endsWith(`.${p}`));
-}
 
 /** Detect dead/invalid LinkedIn profile URLs from search result metadata */
 function isDeadLinkedInProfile(title: string, snippet: string, url: string): boolean {

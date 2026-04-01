@@ -3,6 +3,8 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
+import { isMegaCorp, shouldSkipDomain, isJunkUrl } from '../utils/domain-blocklist.js';
+import { type SearchResult } from '../tools/searxng.tool.js';
 import {
   buildSystemPrompt as candidateSystemPrompt,
   buildUserPrompt as candidateUserPrompt,
@@ -85,9 +87,27 @@ export class EnrichmentAgent extends BaseAgent {
       return { contactId, status: 'max_retries_exceeded' };
     }
 
+    // Skip contacts with non-Latin names (SearXNG can't search Chinese/Arabic/etc.)
+    const fullNameCheck = `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim();
+    if (fullNameCheck && !/[a-zA-Z]/.test(fullNameCheck)) {
+      logger.info({ contactId, name: fullNameCheck }, 'Skipping enrichment: non-Latin name (SearXNG cannot search)');
+      await withTenant(this.tenantId, async (tx) => {
+        await tx.update(contacts).set({ status: 'archived', updatedAt: new Date() }).where(eq(contacts.id, contactId));
+      });
+      await this.clearCurrentAction();
+      return { contactId, status: 'archived', reason: 'non_latin_name' };
+    }
+
     const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(' ');
     const contactTitle = contact.title ?? '';
-    const contactCompanyName = contact.companyName ?? '';
+    let contactCompanyName = contact.companyName ?? '';
+    // Type guard: company name may be stored as JSON object string
+    if (contactCompanyName.startsWith('{') && contactCompanyName.includes('"name"')) {
+      try {
+        const parsed = JSON.parse(contactCompanyName);
+        contactCompanyName = parsed.name || contactCompanyName;
+      } catch { /* keep original */ }
+    }
     const raw = (contact.rawData as Record<string, unknown>) ?? {};
 
     // Get useCase from PipelineContext or fall back to DB
@@ -128,9 +148,22 @@ export class EnrichmentAgent extends BaseAgent {
     let stackOverflowContent = '';
     let devCommunityContent = '';
 
+    // Quick company domain lookup for URL validation in source searches
+    let knownCompanyDomain: string | undefined;
+    if (contact.companyId) {
+      try {
+        const [comp] = await withTenant(this.tenantId, async (tx) => {
+          return tx.select({ domain: companies.domain }).from(companies)
+            .where(eq(companies.id, contact.companyId!))
+            .limit(1);
+        });
+        if (comp?.domain) knownCompanyDomain = comp.domain.toLowerCase().replace(/^www\./, '');
+      } catch { /* non-critical */ }
+    }
+
     // Branch sources by use case
     const sourceResults = useCase === 'sales'
-      ? await this.runSalesSourceSearches(contactId, contactName, contactTitle, contactCompanyName, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { twitterContent = content; }, (content) => { personalSiteContent = content; })
+      ? await this.runSalesSourceSearches(contactId, contactName, contactTitle, contactCompanyName, knownCompanyDomain, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { twitterContent = content; }, (content) => { personalSiteContent = content; })
       : await this.runRecruitmentSourceSearches(contactId, contactName, contactTitle, contactCompanyName, skillsStr, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { githubContent = content; }, (content) => { githubReposContent = content; }, (content) => { twitterContent = content; }, (content) => { stackOverflowContent = content; }, (content) => { personalSiteContent = content; }, (content) => { devCommunityContent = content; });
 
     // Log any failures from parallel sources
@@ -151,7 +184,7 @@ export class EnrichmentAgent extends BaseAgent {
     if (contactCompanyName) {
       try {
         // Search for company website using LLM-generated smart queries (max 2)
-        let companySearchResults: Awaited<ReturnType<typeof this.searchWeb>> = [];
+        let companySearchResults: SearchResult[] = [];
         for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
           const results = await this.searchWeb(query, 10);
           companySearchResults.push(...results);
@@ -166,7 +199,7 @@ export class EnrichmentAgent extends BaseAgent {
             logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
           }
         }
-        const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
+        const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://') && !isJunkUrl(r.url))?.url;
 
         let homepageContent = '';
         let aboutPageContent = '';
@@ -768,8 +801,24 @@ export class EnrichmentAgent extends BaseAgent {
     });
     if (!company) throw new Error(`Company ${companyId} not found`);
 
+    // Type guard: company name may be stored as JSON object string
+    let companyName = company.name;
+    if (companyName && companyName.startsWith('{') && companyName.includes('"name"')) {
+      try {
+        const parsed = JSON.parse(companyName);
+        companyName = parsed.name || companyName;
+      } catch { /* keep original */ }
+    }
+
+    // Skip mega-corps and junk domains
+    const companyDomainCheck = (company.domain ?? '').toLowerCase().replace('www.', '');
+    if (companyDomainCheck && (isMegaCorp(companyDomainCheck) || shouldSkipDomain(companyDomainCheck))) {
+      logger.info({ companyId, companyName, domain: companyDomainCheck }, 'Skipping enrichment for mega-corp/junk domain');
+      await this.clearCurrentAction();
+      return { companyId, companyName, status: 'skipped', reason: 'mega_corp_or_junk_domain' };
+    }
+
     // Skip enrichment for companies with garbage/generic names
-    const companyName = company.name;
     if (!companyName || companyName.length < 2 || companyName === 'Unknown' ||
         /^(meet\s+the|top\s+\d+|best\s+\d+)\s/i.test(companyName) ||
         companyName.split(/\s+/).length > 8) {
@@ -819,7 +868,7 @@ export class EnrichmentAgent extends BaseAgent {
 
     try {
       // Search for company website using LLM-generated smart queries
-      let companySearchResults: Awaited<ReturnType<typeof this.searchWeb>> = [];
+      let companySearchResults: SearchResult[] = [];
       for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
         const results = await this.searchWeb(query, 10);
         companySearchResults.push(...results);
@@ -834,7 +883,7 @@ export class EnrichmentAgent extends BaseAgent {
           logger.warn({ companyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
         }
       }
-      const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://'))?.url;
+      const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://') && !isJunkUrl(r.url))?.url;
 
       let homepageContent = '';
       let aboutPageContent = '';
@@ -1201,7 +1250,7 @@ export class EnrichmentAgent extends BaseAgent {
         const queries = smartQueries.contactGithubQueries.length > 0
           ? smartQueries.contactGithubQueries
           : [`${contactName} github ${skillsStr}`.trim()];
-        let githubResults: Awaited<ReturnType<typeof this.searchWeb>> = [];
+        let githubResults: SearchResult[] = [];
         for (const q of queries) {
           githubResults = await this.searchWeb(q, 5);
           if (githubResults.length > 0) break;
@@ -1300,6 +1349,7 @@ export class EnrichmentAgent extends BaseAgent {
     contactName: string,
     contactTitle: string,
     contactCompanyName: string,
+    companyDomain: string | undefined,
     contact: { linkedinUrl: string | null; skills: unknown; experience: unknown },
     smartQueries: GeneratedSearchQueries,
     setLinkedinContent: (s: string) => void,
@@ -1329,16 +1379,21 @@ export class EnrichmentAgent extends BaseAgent {
         }
       })(),
 
-      // Source 2: Company team page
+      // Source 2: Company team page (must be on company's own domain)
       (async () => {
         if (!contactCompanyName) return;
         const query = `"${contactCompanyName}" team OR leadership OR about-us`;
         const results = await this.searchWeb(query, 5);
-        const teamUrl = results.find((r) =>
-          !r.url.includes('linkedin.com') &&
-          !r.url.includes('glassdoor.com') &&
-          r.url.startsWith('https://'),
-        )?.url;
+        const teamUrl = results.find((r) => {
+          if (!r.url.startsWith('https://')) return false;
+          if (isJunkUrl(r.url)) return false;
+          try {
+            const urlHost = new URL(r.url).hostname.replace(/^www\./, '').toLowerCase();
+            // If we know the company domain, URL must be on it
+            if (companyDomain && !urlHost.endsWith(companyDomain)) return false;
+          } catch { return false; }
+          return true;
+        })?.url;
         if (teamUrl) {
           const content = await this.scrapeUrl(teamUrl);
           setPersonalSiteContent(content); // reuse personalSiteContent slot for team page data

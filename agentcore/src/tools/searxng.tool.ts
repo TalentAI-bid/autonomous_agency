@@ -40,21 +40,33 @@ function stripSearchOperators(query: string): string | null {
 /** Track whether we've already warned about SearXNG being unreachable */
 let searxngDownWarned = false;
 
-/** In-process request counter for cross-tenant volume monitoring (10-min window) */
-const requestTracker = { count: 0, windowStart: Date.now(), WINDOW_MS: 600_000, WARN_THRESHOLD: 100, LOG_EVERY: 10 };
-function trackRequest(): void {
+/** In-process request counter — returns adaptive delay based on 10-min volume */
+const requestTracker = { count: 0, windowStart: Date.now(), WINDOW_MS: 600_000 };
+function getAdaptiveDelay(): number {
   const now = Date.now();
   if (now - requestTracker.windowStart > requestTracker.WINDOW_MS) {
     requestTracker.count = 0;
     requestTracker.windowStart = now;
   }
   requestTracker.count++;
-  if (requestTracker.count % requestTracker.LOG_EVERY === 0) {
-    logger.info({ requestCount: requestTracker.count, windowMinutes: 10 }, `SearXNG request count: ${requestTracker.count} in 10-min window`);
+  const count = requestTracker.count;
+
+  if (count % 10 === 0) {
+    logger.info({ requestCount: count, windowMinutes: 10 }, `SearXNG request count: ${count} in 10-min window`);
   }
-  if (requestTracker.count === requestTracker.WARN_THRESHOLD) {
-    logger.warn({ requestCount: requestTracker.count }, 'SearXNG: >100 requests in 10-minute window');
+
+  // >100 requests in 10 min → pause 60 seconds to protect proxy IPs
+  if (count > 100) {
+    logger.warn({ requestCount: count }, 'SearXNG: >100 requests in 10min — pausing 60s to protect proxy IPs');
+    return 60_000;
   }
+  // >50 requests in 10 min → slow to 8-12 seconds
+  if (count > 50) {
+    if (count === 51) logger.warn({ requestCount: count }, 'SearXNG: >50 requests in 10min — increasing delay to 8-12s');
+    return 8000 + Math.random() * 4000;
+  }
+  // Normal: 3-5 seconds
+  return 3000 + Math.random() * 2000;
 }
 
 /** Circuit breaker: check if SearXNG circuit is open */
@@ -150,10 +162,10 @@ export async function search(
   }
 
   try {
-    // Random delay 3-5 seconds between queries to avoid IP bans
-    trackRequest();
-    await sleep(3000 + Math.random() * 2000);
+    // Adaptive delay: 3-5s normal, 8-12s at >50 req/10min, 60s pause at >100
+    await sleep(getAdaptiveDelay());
 
+    const startMs = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -162,7 +174,8 @@ export async function search(
     clearTimeout(timeout);
 
     if (!response.ok) {
-      logger.error({ status: response.status, query }, 'SearXNG search failed');
+      const elapsedMs = Date.now() - startMs;
+      logger.error({ status: response.status, query, elapsedMs }, 'SearXNG search failed');
       return [];
     }
 
@@ -175,15 +188,17 @@ export async function search(
         snippet: r.content ?? '',
       }));
 
+    const elapsedMs = Date.now() - startMs;
+
     if (results.length === 0) {
-      logger.warn({ tenantId, query, rawResultCount: data.results?.length ?? 0 }, 'SearXNG returned 0 usable results');
+      logger.warn({ tenantId, query, rawResultCount: data.results?.length ?? 0, elapsedMs }, 'SearXNG returned 0 usable results');
 
       // Retry once with stripped operators (remove quotes, site:, -site:)
       const strippedQuery = stripSearchOperators(query);
       if (strippedQuery) {
         logger.info({ tenantId, original: query, stripped: strippedQuery }, 'Retrying with stripped operators');
-        trackRequest();
-        await sleep(3000 + Math.random() * 2000);
+        await sleep(getAdaptiveDelay());
+        const retryStartMs = Date.now();
         const rc = new AbortController();
         const rt = setTimeout(() => rc.abort(), 15000);
         const rr = await fetch(`${env.SEARXNG_URL}/search?q=${encodeURIComponent(strippedQuery)}&format=json`, { signal: rc.signal });
@@ -193,17 +208,18 @@ export async function search(
           const retryResults: SearchResult[] = (rd.results ?? []).slice(0, maxResults).map((r) => ({
             title: r.title ?? '', url: r.url ?? '', snippet: r.content ?? '',
           }));
+          const retryElapsedMs = Date.now() - retryStartMs;
           if (retryResults.length > 0) {
-            logger.info({ tenantId, strippedQuery, resultCount: retryResults.length }, 'Stripped-operator retry succeeded');
+            logger.info({ tenantId, query: strippedQuery, resultCount: retryResults.length, elapsedMs: retryElapsedMs, retry: true }, 'SearXNG search completed');
             await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(retryResults));
             await recordCircuitSuccess();
             return retryResults;
           }
+          logger.warn({ tenantId, query: strippedQuery, elapsedMs: retryElapsedMs }, 'Stripped-operator retry also returned 0 results');
         }
-        logger.warn({ tenantId, strippedQuery }, 'Stripped-operator retry also returned 0 results');
       }
     } else {
-      logger.info({ tenantId, query, resultCount: results.length }, 'SearXNG search returned results');
+      logger.info({ tenantId, query, resultCount: results.length, elapsedMs }, 'SearXNG search completed');
     }
 
     if (results.length > 0) {
@@ -268,10 +284,10 @@ export async function searchDiscovery(
   }
 
   try {
-    // Random delay 3-5 seconds between queries to avoid IP bans
-    trackRequest();
-    await sleep(3000 + Math.random() * 2000);
+    // Adaptive delay: 3-5s normal, 8-12s at >50 req/10min, 60s pause at >100
+    await sleep(getAdaptiveDelay());
 
+    const startMs = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -280,7 +296,8 @@ export async function searchDiscovery(
     clearTimeout(timeout);
 
     if (!response.ok) {
-      logger.error({ status: response.status, query }, 'SearXNG discovery search failed');
+      const elapsedMs = Date.now() - startMs;
+      logger.error({ status: response.status, query, elapsedMs }, 'SearXNG discovery search failed');
       return [];
     }
 
@@ -293,15 +310,17 @@ export async function searchDiscovery(
         snippet: r.content ?? '',
       }));
 
+    const elapsedMs = Date.now() - startMs;
+
     if (results.length === 0) {
-      logger.warn({ tenantId, query, rawResultCount: data.results?.length ?? 0 }, 'SearXNG returned 0 usable results (discovery)');
+      logger.warn({ tenantId, query, rawResultCount: data.results?.length ?? 0, elapsedMs }, 'SearXNG returned 0 usable results (discovery)');
 
       // Retry once with stripped operators (remove quotes, site:, -site:)
       const strippedQuery = stripSearchOperators(query);
       if (strippedQuery) {
         logger.info({ tenantId, original: query, stripped: strippedQuery }, 'Retrying with stripped operators (discovery)');
-        trackRequest();
-        await sleep(3000 + Math.random() * 2000);
+        await sleep(getAdaptiveDelay());
+        const retryStartMs = Date.now();
         const rc = new AbortController();
         const rt = setTimeout(() => rc.abort(), 15000);
         const rr = await fetch(`${env.SEARXNG_URL}/search?q=${encodeURIComponent(strippedQuery)}&format=json`, { signal: rc.signal });
@@ -311,17 +330,18 @@ export async function searchDiscovery(
           const retryResults: SearchResult[] = (rd.results ?? []).slice(0, maxResults).map((r) => ({
             title: r.title ?? '', url: r.url ?? '', snippet: r.content ?? '',
           }));
+          const retryElapsedMs = Date.now() - retryStartMs;
           if (retryResults.length > 0) {
-            logger.info({ tenantId, strippedQuery, resultCount: retryResults.length }, 'Stripped-operator retry succeeded (discovery)');
+            logger.info({ tenantId, query: strippedQuery, resultCount: retryResults.length, elapsedMs: retryElapsedMs, retry: true }, 'SearXNG search completed (discovery)');
             await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(retryResults));
             await recordCircuitSuccess();
             return retryResults;
           }
+          logger.warn({ tenantId, query: strippedQuery, elapsedMs: retryElapsedMs }, 'Stripped-operator retry also returned 0 results (discovery)');
         }
-        logger.warn({ tenantId, strippedQuery }, 'Stripped-operator retry also returned 0 results (discovery)');
       }
     } else {
-      logger.info({ tenantId, query, resultCount: results.length }, 'SearXNG discovery search returned results');
+      logger.info({ tenantId, query, resultCount: results.length, elapsedMs }, 'SearXNG search completed (discovery)');
     }
 
     if (results.length > 0) {

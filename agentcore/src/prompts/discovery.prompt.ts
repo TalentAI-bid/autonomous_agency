@@ -4,8 +4,8 @@ export function buildSystemPrompt(useCase?: string): string {
 
 Adapt your search strategy to the TARGET TYPE described in the requirements:
 - For companies/startups: LinkedIn company pages, team pages, funding news
-- For universities/academic: site:.edu, site:.ac.uk, department pages, research groups
-- For government/NGO: site:.gov, site:.org, program pages, initiative announcements
+- For universities/academic: department pages, research groups, faculty directories
+- For government/NGO: program pages, initiative announcements, agency directories
 - For consulting targets: pain-point discussions, RFP listings, industry forums
 
 CRITICAL RULE — Location enforcement:
@@ -14,10 +14,12 @@ If locations are specified, EVERY query MUST include the location as a required 
 Always respond with valid JSON. Generate diverse queries to maximize coverage.
 
 CRITICAL QUERY FORMAT RULES:
-- Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results from search engines.
+- Use AT MOST 1 quoted phrase per query. Too many quoted terms returns zero results from search engines.
 - Good: "DevOps companies" France infrastructure
 - Bad: "société" "ESN" "DevOps" "services" "France" "recrutement"
-- Mix quoted exact phrases with unquoted keywords for best coverage.
+- Mix one quoted exact phrase with unquoted keywords for best coverage.
+- NO site: directives. Keep queries simple and natural. Domain filtering is done in code.
+- NO -site: exclusions. Unwanted domains are filtered programmatically.
 - When targeting non-English countries, generate queries in BOTH the local language AND English for broader coverage.`;
   }
 
@@ -29,8 +31,9 @@ If locations are specified, EVERY query MUST include the location as a required 
 Always respond with valid JSON. Generate diverse queries to maximize coverage.
 
 CRITICAL QUERY FORMAT RULES:
-- Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results from search engines.
-- Mix quoted exact phrases with unquoted keywords for best coverage.
+- Use AT MOST 1 quoted phrase per query. Too many quoted terms returns zero results from search engines.
+- Mix one quoted exact phrase with unquoted keywords for best coverage.
+- NO site: directives. Keep queries simple and natural. Domain filtering is done in code.
 - When targeting non-English countries, generate queries in BOTH the local language AND English.`;
 }
 
@@ -55,26 +58,27 @@ TARGET ORGANIZATION ATTRIBUTES: ${data.requiredSkills.join(', ')}
 ${locationBlock}${!locationBlock ? `LOCATIONS: ${data.locations.join(', ')}\n` : ''}${data.industries?.length ? `INDUSTRIES / SECTORS: ${data.industries.join(', ')}` : ''}
 ${data.keywords?.length ? `KEYWORDS: ${data.keywords.join(', ')}` : ''}
 
-Generate queries for LinkedIn and web search. IMPORTANT: Use at most 2 quoted phrases per query — combine with unquoted keywords.
+Generate queries for LinkedIn and web search. IMPORTANT: Use at most 1 quoted phrase per query — combine with unquoted keywords. NO site: directives — keep queries natural.
 
 Strategy by target type:
-- LinkedIn profiles: site:linkedin.com/in/ "[role]" [industry] [location]
-- LinkedIn companies: site:linkedin.com/company/ [descriptor] [location]
+- LinkedIn profiles: "[role]" [industry] [location] LinkedIn
+- LinkedIn companies: [descriptor] [location] company LinkedIn
 - Team/leadership pages: "[org type]" team OR leadership [location]
 - Industry directories and association lists
-- Academic: site:.edu OR site:.ac.uk OR site:.ac.fr [topic] [department]
-- Government/NGO: site:.gov OR site:.org [initiative] [topic]
+- Academic: [topic] [department] [location] university OR faculty
+- Government/NGO: [initiative] [topic] [location] government OR agency
 - News: "[organization type]" funding OR launches [topic] [year]
 
-Examples of GOOD queries (max 2 quoted phrases):
-- site:linkedin.com/company/ "DevOps" France
+Examples of GOOD queries (max 1 quoted phrase, no site:):
+- "DevOps" France company LinkedIn
 - "infrastructure companies" France cloud services
 - ESN DevOps consulting France
 - top DevOps firms Paris infrastructure
 
-Examples of BAD queries (too many quotes — will return 0 results):
+Examples of BAD queries (too many quotes or using site: — will return 0 results):
 - "société" "ESN" "DevOps" "services" "France" "recrutement"
 - "enterprise" "consulting" "cloud" "infrastructure" "Paris"
+- site:linkedin.com/company/ "DevOps" France
 
 Do NOT include:
 - Generic blog or tutorial searches
@@ -83,8 +87,8 @@ Do NOT include:
 Return JSON:
 {
   "queries": [
-    "site:linkedin.com/in/ \\"[target role]\\" [industry] [location]",
-    "site:linkedin.com/company/ [descriptor] [location]",
+    "\\"[target role]\\" [industry] [location] LinkedIn",
+    "[descriptor] [location] company LinkedIn",
     "\\"[industry] companies\\" [location] [keyword]",
     "[industry] [keyword] firms [location]",
     ...
@@ -102,8 +106,10 @@ REQUIRED SKILLS: ${data.requiredSkills.join(', ')}
 ${locationBlock}${!locationBlock ? `LOCATIONS: ${data.locations.join(', ')}\n` : ''}${data.industries?.length ? `INDUSTRIES: ${data.industries.join(', ')}` : ''}
 ${data.keywords?.length ? `KEYWORDS: ${data.keywords.join(', ')}` : ''}
 
-Generate queries for LinkedIn and web search. Include:
-- LinkedIn profile searches (site:linkedin.com/in/)
+Generate queries for LinkedIn and web search. IMPORTANT: No site: directives — keep queries natural. Max 1 quoted phrase per query.
+
+Include:
+- LinkedIn profile searches (use "LinkedIn" as keyword, not site:)
 - Professional directory searches
 - GitHub/portfolio searches for technical roles
 - Company page searches
@@ -111,11 +117,11 @@ Generate queries for LinkedIn and web search. Include:
 Return JSON:
 {
   "queries": [
-    "site:linkedin.com/in/ (senior react developer OR \\"react engineer\\") (London OR Remote)",
-    "site:linkedin.com/in/ typescript nodejs 5 years experience",
+    "\\"senior react developer\\" London LinkedIn",
+    "typescript nodejs engineer London portfolio",
     ...
   ]
 }
 
-Make queries specific and varied. Use different keyword combinations, boolean operators (AND, OR, NOT), and quotation marks for exact phrases.`;
+Make queries specific and varied. Use different keyword combinations, boolean operators (AND, OR, NOT). Keep queries simple and natural.`;
 }

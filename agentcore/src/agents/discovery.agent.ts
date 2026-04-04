@@ -208,6 +208,7 @@ export class DiscoveryAgent extends BaseAgent {
     let candidatesFound = 0;
     let pagesScraped = 0;
     let skipped = 0;
+    let domainFiltered = 0;
     let enrichmentDispatched = 0;
     let queriesWithResults = 0;
     let queriesEmpty = 0;
@@ -317,13 +318,15 @@ export class DiscoveryAgent extends BaseAgent {
           let hostname = '';
           try { hostname = new URL(result.url).hostname.replace('www.', ''); } catch { /* skip */ }
           if (hostname && shouldSkipDomain(hostname)) {
-            skipped++;
+            domainFiltered++;
+            logger.debug({ url: result.url, hostname }, 'Filtered result: blocked domain');
             continue;
           }
 
           // ── Skip mega-corps in sales mode ──
           if (useCase === 'sales' && hostname && isMegaCorp(hostname)) {
-            skipped++;
+            domainFiltered++;
+            logger.debug({ url: result.url, hostname }, 'Filtered result: mega-corp domain');
             continue;
           }
 
@@ -470,7 +473,7 @@ export class DiscoveryAgent extends BaseAgent {
       logger.info({
         query,
         resultCount: results.length,
-        processed: { companies: companiesFound, candidates: candidatesFound, pagesScraped, skipped },
+        processed: { companies: companiesFound, candidates: candidatesFound, pagesScraped, skipped, domainFiltered },
       }, 'Discovery query processed');
     }
 
@@ -495,16 +498,16 @@ export class DiscoveryAgent extends BaseAgent {
     });
 
     this.logActivity('discovery_completed', 'completed', {
-      details: { companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped },
+      details: { companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped, domainFiltered },
     });
     await this.clearCurrentAction();
 
     logger.info(
-      { tenantId: this.tenantId, totalQueries: searchQueries.length, queriesWithResults, queriesEmpty, companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped },
+      { tenantId: this.tenantId, totalQueries: searchQueries.length, queriesWithResults, queriesEmpty, companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped, domainFiltered },
       'DiscoveryAgent completed',
     );
 
-    return { companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped };
+    return { companiesFound, candidatesFound, pagesScraped, enrichmentDispatched, skipped, domainFiltered };
   }
 
   // ── Prioritize which results to scrape (budget: top 5 per query) ──────────

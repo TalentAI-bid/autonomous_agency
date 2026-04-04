@@ -31,7 +31,7 @@ export const SKIP_DOMAINS = new Set([
   'superuser.com', 'askubuntu.com', 'stackinfra.com',
   // Developer tools / code hosting
   'github.com', 'gitlab.com', 'bitbucket.org',
-  'npmjs.com', 'pypi.org', 'rubygems.org',
+  'npmjs.com', 'pypi.org', 'rubygems.org', 'atlassian.com',
   // Tutorial / learning sites
   'cplusplus.com', 'geeksforgeeks.org', 'w3schools.com', 'tutorialspoint.com',
   'freecodecamp.org', 'codecademy.com', 'openstax.org',
@@ -55,6 +55,8 @@ export const SKIP_DOMAINS = new Set([
   'indeed.com', 'glassdoor.com', 'monster.com', 'ziprecruiter.com',
   // Community sub-domains
   'community.shopify.com',
+  // Cloud vendor marketing / docs
+  'azure.microsoft.com',
   // Misc non-companies from logs
   'scratch.mit.edu', 'names.org', 'planetkitesurfholidays.com',
 ]);

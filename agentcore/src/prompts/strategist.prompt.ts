@@ -25,36 +25,38 @@ CRITICAL QUERY RULES — YOU MUST FOLLOW ALL OF THESE:
 1. EVERY query MUST contain the EXACT country or city from the mission's target locations. If the mission says "Ireland", every single query must contain "Ireland". No exceptions.
 2. EVERY query MUST contain at least one specific role keyword (e.g. "DevOps engineer", "CTO", "VP Engineering") OR a specific skill/service keyword from the mission (e.g. "DevOps", "Kubernetes", "cloud migration").
 3. NO generic queries without a role or skill keyword. A query like "companies in Ireland" is FORBIDDEN — it must be "DevOps companies Ireland" or "hiring DevOps engineer Ireland".
-4. Use AT MOST 2 quoted phrases per query. Too many quoted terms returns zero results.
+4. Use AT MOST 1 quoted phrase per query. Too many quoted terms returns zero results.
 5. When targeting non-English countries, include queries in BOTH the local language AND English.
+6. NO site: directives in queries. Keep queries simple and natural like a human would type. Unwanted domains are filtered in code after results come back.
+7. NO -site: exclusions in queries. Domain filtering is handled programmatically.
 
 Generate EXACTLY 15 queries in 3 groups of 5:
 
 GROUP 1 — LinkedIn Jobs (type: "linkedin_jobs"):
-Generate 5 queries using site:linkedin.com/jobs/
-Example: site:linkedin.com/jobs/ "DevOps engineer" Ireland
+Generate 5 queries to find LinkedIn job listings as hiring signals
+Example: LinkedIn jobs "DevOps engineer" Ireland
 
-GROUP 2 — Indeed Jobs (type: "indeed_jobs"):
-Generate 5 queries using site:indeed.com OR site:indeed.co.uk (match country domain)
-Example: site:indeed.com "DevOps" Ireland
+GROUP 2 — Indeed / Job Board (type: "indeed_jobs"):
+Generate 5 queries to find companies actively hiring on job boards
+Example: Indeed "DevOps" Ireland hiring 2025
 
 GROUP 3 — Company Career Pages (type: "career_pages"):
-Generate 5 queries targeting company career pages, job boards, or hiring signals
-Example: "hiring DevOps engineer" Ireland site:lever.co OR site:greenhouse.io
-Example: "DevOps team" careers Ireland 2025
+Generate 5 queries targeting company career pages and hiring signals
+Example: "hiring DevOps engineer" Ireland careers
+Example: DevOps team careers Ireland 2025
 
 BAD query examples (NEVER generate these):
 - "companies in Ireland" (no role/skill keyword)
 - "hiring engineer" (no location)
 - "DevOps" "cloud" "engineer" "Ireland" "startup" (too many quoted phrases)
-- site:linkedin.com/company/ "technology" (no location, no specific role)
+- site:linkedin.com/jobs/ "DevOps" Ireland (site: operators reduce result diversity)
 
 GOOD query examples:
-- site:linkedin.com/jobs/ "DevOps engineer" Ireland
-- site:indeed.com "cloud infrastructure" Ireland
-- "hiring DevOps" Ireland site:lever.co
-- "looking for DevOps partner" Ireland 2025
-- "DevOps services" OR "cloud migration" Ireland careers
+- LinkedIn jobs "DevOps engineer" Ireland
+- Indeed "cloud infrastructure" Ireland
+- "hiring DevOps" Ireland careers
+- looking for DevOps partner Ireland 2025
+- DevOps services OR cloud migration Ireland careers
 
 IMPORTANT: Output ONLY the JSON object. Do NOT include any reasoning, explanation, or <think> tags. Just the raw JSON.`;
 }

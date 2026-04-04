@@ -24,39 +24,54 @@ CRITICAL QUERY RULES — YOU MUST FOLLOW ALL OF THESE:
 
 1. EVERY query MUST contain the EXACT country or city from the mission's target locations. If the mission says "Ireland", every single query must contain "Ireland". No exceptions.
 2. EVERY query MUST contain at least one specific role keyword (e.g. "DevOps engineer", "CTO", "VP Engineering") OR a specific skill/service keyword from the mission (e.g. "DevOps", "Kubernetes", "cloud migration").
-3. NO generic queries without a role or skill keyword. A query like "companies in Ireland" is FORBIDDEN — it must be "DevOps companies Ireland" or "hiring DevOps engineer Ireland".
-4. Use AT MOST 1 quoted phrase per query. Too many quoted terms returns zero results.
-5. When targeting non-English countries, include queries in BOTH the local language AND English.
-6. NO site: directives in queries. Keep queries simple and natural like a human would type. Unwanted domains are filtered in code after results come back.
-7. NO -site: exclusions in queries. Domain filtering is handled programmatically.
+3. EVERY query MUST contain at least one HIRING INTENT keyword: "hiring", "job", "career", "careers", "recrutement", "offre emploi", "poste", "CDI", "CDD", "nous recrutons", "rejoignez-nous", "join our team", "we are hiring", "open position", "job opening".
+4. NO generic queries without hiring intent. A query like "DevOps companies Ireland" is FORBIDDEN — it must be "DevOps engineer hiring Ireland" or "DevOps careers Ireland".
+5. Use AT MOST 1 quoted phrase per query. Too many quoted terms returns zero results.
+6. When targeting non-English countries, generate at least HALF the queries in the LOCAL LANGUAGE.
+   For France: use "recrutement", "offre emploi", "CDI", "poste", "nous recrutons", "rejoignez-nous", "ingénieur".
+7. NO site: directives in queries. Keep queries simple and natural. Unwanted domains are filtered in code.
+8. NO -site: exclusions in queries. Domain filtering is handled programmatically.
 
 Generate EXACTLY 15 queries in 3 groups of 5:
 
-GROUP 1 — LinkedIn Jobs (type: "linkedin_jobs"):
-Generate 5 queries to find LinkedIn job listings as hiring signals
+GROUP 1 — LinkedIn Jobs & Major Job Boards (type: "linkedin_jobs"):
+Generate 5 queries to find job listings on LinkedIn, Indeed, Glassdoor, and country-specific job boards.
+For France: target Welcome to the Jungle, Free-Work, APEC, Indeed.fr, LinkedIn France.
 Example: LinkedIn jobs "DevOps engineer" Ireland
+Example: Welcome to the Jungle "ingénieur DevOps" France
+Example: offre emploi DevOps Paris CDI
 
-GROUP 2 — Indeed / Job Board (type: "indeed_jobs"):
-Generate 5 queries to find companies actively hiring on job boards
-Example: Indeed "DevOps" Ireland hiring 2025
+GROUP 2 — Local Job Boards & French-language (type: "indeed_jobs"):
+Generate 5 queries targeting local/regional job boards and local-language postings.
+For France: use French keywords — recrutement, offre emploi, CDI, poste, ingénieur.
+Example: Indeed "DevOps" Ireland hiring
+Example: APEC "ingénieur DevOps" recrutement France
+Example: Free-Work DevOps freelance France poste
 
-GROUP 3 — Company Career Pages (type: "career_pages"):
-Generate 5 queries targeting company career pages and hiring signals
+GROUP 3 — Company Career Pages & Hiring Announcements (type: "career_pages"):
+Generate 5 queries targeting company career pages and direct hiring signals.
+For France: include "nous recrutons", "rejoignez-nous", "on recrute".
 Example: "hiring DevOps engineer" Ireland careers
-Example: DevOps team careers Ireland 2025
+Example: "nous recrutons" DevOps France
+Example: DevOps engineer "join our team" Ireland
 
 BAD query examples (NEVER generate these):
-- "companies in Ireland" (no role/skill keyword)
+- "companies in Ireland" (no role keyword, no hiring intent)
+- "DevOps companies France" (no hiring intent — add "hiring" or "recrutement")
 - "hiring engineer" (no location)
 - "DevOps" "cloud" "engineer" "Ireland" "startup" (too many quoted phrases)
 - site:linkedin.com/jobs/ "DevOps" Ireland (site: operators reduce result diversity)
 
 GOOD query examples:
 - LinkedIn jobs "DevOps engineer" Ireland
-- Indeed "cloud infrastructure" Ireland
+- Indeed "cloud infrastructure" Ireland hiring
 - "hiring DevOps" Ireland careers
-- looking for DevOps partner Ireland 2025
-- DevOps services OR cloud migration Ireland careers
+- "offre emploi DevOps" Paris CDI
+- "ingénieur DevOps" recrutement France
+- nous recrutons DevOps France
+- Welcome to the Jungle DevOps France
+- Free-Work "DevOps" France poste
+- APEC DevOps recrutement Paris
 
 IMPORTANT: Output ONLY the JSON object. Do NOT include any reasoning, explanation, or <think> tags. Just the raw JSON.`;
 }

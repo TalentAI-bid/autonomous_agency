@@ -1,26 +1,26 @@
 export function buildSystemPrompt(useCase?: string): string {
   if (useCase === 'sales') {
-    return `You are a business development and prospect intelligence expert. Generate targeted search queries to find decision-makers and key contacts at organizations matching the target profile.
+    return `You are a business development expert specialized in finding companies that are ACTIVELY HIRING for specific roles. Your queries must target JOB POSTINGS, CAREER PAGES, and HIRING ANNOUNCEMENTS — not general company pages.
 
-Adapt your search strategy to the TARGET TYPE described in the requirements:
-- For companies/startups: LinkedIn company pages, team pages, funding news
-- For universities/academic: department pages, research groups, faculty directories
-- For government/NGO: program pages, initiative announcements, agency directories
-- For consulting targets: pain-point discussions, RFP listings, industry forums
+CRITICAL RULE — Every query must have ALL THREE:
+1. LOCATION: The exact country or city from the target locations. No exceptions.
+2. ROLE/SKILL: At least one specific role or skill keyword from the mission.
+3. HIRING INTENT: At least one hiring keyword: "hiring", "job", "jobs", "career", "careers", "recrutement", "offre emploi", "poste", "CDI", "nous recrutons", "rejoignez-nous", "join our team", "we are hiring".
 
-CRITICAL RULE — Location enforcement:
-If locations are specified, EVERY query MUST include the location as a required term (not optional, not in parentheses with OR alternatives that omit it). Do not generate any query without the target location.
+A query like "DevOps companies France" is FORBIDDEN — it must be "DevOps hiring France" or "offre emploi DevOps France".
 
 Always respond with valid JSON. Generate diverse queries to maximize coverage.
 
 CRITICAL QUERY FORMAT RULES:
 - Use AT MOST 1 quoted phrase per query. Too many quoted terms returns zero results from search engines.
-- Good: "DevOps companies" France infrastructure
+- Good: "offre emploi DevOps" France CDI
 - Bad: "société" "ESN" "DevOps" "services" "France" "recrutement"
 - Mix one quoted exact phrase with unquoted keywords for best coverage.
 - NO site: directives. Keep queries simple and natural. Domain filtering is done in code.
 - NO -site: exclusions. Unwanted domains are filtered programmatically.
-- When targeting non-English countries, generate queries in BOTH the local language AND English for broader coverage.`;
+- When targeting non-English countries, generate at LEAST HALF the queries in the LOCAL LANGUAGE.
+  For France: use "recrutement", "offre emploi", "CDI", "poste", "nous recrutons", "ingénieur".
+- Target country-specific job boards by name: Welcome to the Jungle, Free-Work, APEC, Indeed.fr for France.`;
   }
 
   return `You are a Boolean search and LinkedIn sourcing expert. Generate highly targeted search queries to find candidates matching specific requirements. Focus on queries that will return relevant LinkedIn profiles and professional pages.
@@ -51,51 +51,54 @@ export function buildUserPrompt(data: {
     : '';
 
   if (data.useCase === 'sales') {
-    return `Generate 10-15 targeted search queries to find decision-makers and organizations matching these requirements:
+    return `Generate 10-15 targeted search queries to find COMPANIES ACTIVELY HIRING for roles matching these requirements:
 
 TARGET ROLES / CONTACTS: ${data.targetRoles.join(', ')}
 TARGET ORGANIZATION ATTRIBUTES: ${data.requiredSkills.join(', ')}
 ${locationBlock}${!locationBlock ? `LOCATIONS: ${data.locations.join(', ')}\n` : ''}${data.industries?.length ? `INDUSTRIES / SECTORS: ${data.industries.join(', ')}` : ''}
 ${data.keywords?.length ? `KEYWORDS: ${data.keywords.join(', ')}` : ''}
 
-Generate queries for LinkedIn and web search. IMPORTANT: Use at most 1 quoted phrase per query — combine with unquoted keywords. NO site: directives — keep queries natural.
+CRITICAL: Every query MUST contain a HIRING INTENT keyword ("hiring", "job", "careers", "recrutement", "offre emploi", "CDI", "poste", "nous recrutons"). We want companies with OPEN POSITIONS, not just companies that exist.
 
-Strategy by target type:
-- LinkedIn profiles: "[role]" [industry] [location] LinkedIn
-- LinkedIn companies: [descriptor] [location] company LinkedIn
-- Team/leadership pages: "[org type]" team OR leadership [location]
-- Industry directories and association lists
-- Academic: [topic] [department] [location] university OR faculty
-- Government/NGO: [initiative] [topic] [location] government OR agency
-- News: "[organization type]" funding OR launches [topic] [year]
+Generate queries targeting job postings and career pages. IMPORTANT: Use at most 1 quoted phrase per query. NO site: directives.
 
-Examples of GOOD queries (max 1 quoted phrase, no site:):
-- "DevOps" France company LinkedIn
-- "infrastructure companies" France cloud services
-- ESN DevOps consulting France
-- top DevOps firms Paris infrastructure
+Strategy — focus on HIRING SIGNALS:
+- Job board searches: "[role]" hiring [location] LinkedIn jobs
+- Career pages: "[role]" careers [location]
+- French job boards: "offre emploi [role]" [location] (for French markets)
+- Hiring announcements: "[role]" "we are hiring" OR "join our team" [location]
+- Local language: "recrutement [role]" [location] CDI (for French markets)
 
-Examples of BAD queries (too many quotes or using site: — will return 0 results):
-- "société" "ESN" "DevOps" "services" "France" "recrutement"
-- "enterprise" "consulting" "cloud" "infrastructure" "Paris"
-- site:linkedin.com/company/ "DevOps" France
+Examples of GOOD queries (hiring intent + location + role):
+- "DevOps engineer" hiring France LinkedIn jobs
+- "offre emploi DevOps" Paris CDI
+- Welcome to the Jungle DevOps France
+- "ingénieur DevOps" recrutement France
+- DevOps careers France "join our team"
+- Free-Work DevOps France poste
+
+Examples of BAD queries (NO hiring intent — will find generic company pages):
+- "DevOps" France company LinkedIn (no hiring keyword)
+- "infrastructure companies" France cloud services (no hiring keyword)
+- ESN DevOps consulting France (no hiring keyword)
+- site:linkedin.com/company/ "DevOps" France (site: directive)
 
 Do NOT include:
 - Generic blog or tutorial searches
-- Job posting searches (unless looking for hiring signals)
+- Company directory searches without hiring intent
+- Queries without a hiring keyword
 
 Return JSON:
 {
   "queries": [
-    "\\"[target role]\\" [industry] [location] LinkedIn",
-    "[descriptor] [location] company LinkedIn",
-    "\\"[industry] companies\\" [location] [keyword]",
-    "[industry] [keyword] firms [location]",
+    "\\"[role]\\" hiring [location] LinkedIn jobs",
+    "\\"offre emploi [role]\\" [location] CDI",
+    "[role] careers [location] \\"join our team\\"",
     ...
   ]
 }
 
-Make queries specific and varied. Use different keyword combinations and boolean operators. MATCH query style to the actual target type. For non-English countries, include queries in both the local language and English.`;
+Make queries specific and varied. For non-English countries, generate at LEAST HALF the queries in the local language. For France specifically: use recrutement, offre emploi, CDI, poste, ingénieur, nous recrutons.`;
   }
 
   // Default: recruitment

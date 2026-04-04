@@ -33,7 +33,7 @@ function isDeadLinkedInProfile(title: string, snippet: string, url: string): boo
 const CITY_TO_COUNTRY: Record<string, string> = {
   dublin: 'ireland', cork: 'ireland', galway: 'ireland', limerick: 'ireland',
   london: 'uk', manchester: 'uk', birmingham: 'uk', edinburgh: 'uk', glasgow: 'uk', bristol: 'uk', leeds: 'uk', cambridge: 'uk', oxford: 'uk',
-  paris: 'france', lyon: 'france', marseille: 'france', toulouse: 'france', nantes: 'france',
+  paris: 'france', lyon: 'france', marseille: 'france', toulouse: 'france', nantes: 'france', bordeaux: 'france', lille: 'france', strasbourg: 'france', nice: 'france', rennes: 'france', montpellier: 'france', grenoble: 'france', rouen: 'france', toulon: 'france', dijon: 'france', angers: 'france', brest: 'france', 'clermont-ferrand': 'france', 'aix-en-provence': 'france', metz: 'france', tours: 'france', amiens: 'france', limoges: 'france', perpignan: 'france', orléans: 'france',
   berlin: 'germany', munich: 'germany', hamburg: 'germany', frankfurt: 'germany', cologne: 'germany', stuttgart: 'germany',
   amsterdam: 'netherlands', rotterdam: 'netherlands', 'the hague': 'netherlands', utrecht: 'netherlands',
   madrid: 'spain', barcelona: 'spain', valencia: 'spain', seville: 'spain',
@@ -152,6 +152,11 @@ interface PageExtraction {
     entityType?: string; // 'company' | 'university' | 'government' | 'ngo' | 'agency' | 'institution'
     relevanceScore?: number; // 0-100: how relevant to mission
     relevanceReason?: string;
+    hiringSignal?: 'job_posting' | 'career_page' | 'hiring_text' | 'growth_signal' | 'none';
+    jobTitle?: string;
+    jobLocation?: string;
+    jobSource?: string;
+    jobUrl?: string;
   }>;
   people: Array<{
     name: string;
@@ -361,9 +366,23 @@ export class DiscoveryAgent extends BaseAgent {
             if (!co.name || co.name.length < 2) continue;
             if (useCase === 'sales' && co.domain && isMegaCorp(co.domain)) continue;
 
-            // Relevance gate: skip companies below threshold when mission context is active
-            if (missionContext && typeof co.relevanceScore === 'number' && co.relevanceScore < 40) {
-              logger.debug({ name: co.name, relevanceScore: co.relevanceScore, reason: co.relevanceReason }, 'Skipping company: below relevance threshold');
+            // ── Hiring signal filter: reject companies with no hiring signals ──
+            const hiringSignal = co.hiringSignal || 'none';
+            if (hiringSignal === 'none') {
+              logger.debug({ name: co.name, hiringSignal }, 'Skipping company: no hiring signal');
+              skipped++;
+              continue;
+            }
+
+            // Bonus for strong hiring signals
+            if ((hiringSignal === 'job_posting' || hiringSignal === 'career_page') && typeof co.relevanceScore === 'number') {
+              co.relevanceScore = Math.min(100, co.relevanceScore + 10);
+            }
+
+            // Relevance gate: higher threshold for weak hiring signals
+            const relevanceThreshold = (hiringSignal === 'job_posting' || hiringSignal === 'career_page') ? 40 : 55;
+            if (missionContext && typeof co.relevanceScore === 'number' && co.relevanceScore < relevanceThreshold) {
+              logger.debug({ name: co.name, relevanceScore: co.relevanceScore, hiringSignal, threshold: relevanceThreshold, reason: co.relevanceReason }, 'Skipping company: below relevance threshold');
               skipped++;
               continue;
             }
@@ -397,6 +416,37 @@ export class DiscoveryAgent extends BaseAgent {
               }
             }
 
+            // ── Company relevance validation ──
+            const coIndustryLower = (co.industry || '').toLowerCase();
+            const coEntityType = (co.entityType || '').toLowerCase();
+            const coNameLower = co.name.toLowerCase();
+
+            // Skip recruitment agencies — we want companies HIRING, not agencies
+            const recruitmentKeywords = ['recruitment', 'staffing', 'recrutement', 'hr services', 'human resources services', 'talent acquisition', 'executive search', 'headhunting', 'interim', 'travail temporaire', 'intérim'];
+            if (recruitmentKeywords.some(kw => coIndustryLower.includes(kw) || coNameLower.includes(kw))) {
+              logger.debug({ name: co.name, industry: co.industry }, 'Skipping company: recruitment agency');
+              skipped++;
+              continue;
+            }
+
+            // Skip government entities unless mission targets government
+            const targetGov = this._ctx?.sales?.industries?.some(i => /government|public|gouv/i.test(i));
+            const govKeywords = ['government', 'public administration', 'ville de', 'mairie', 'communauté', 'département', 'préfecture', 'ministère', 'collectivité', 'municipalit'];
+            if (!targetGov && (coEntityType === 'government' || govKeywords.some(kw => coIndustryLower.includes(kw) || coNameLower.includes(kw)))) {
+              logger.debug({ name: co.name, entityType: co.entityType, industry: co.industry }, 'Skipping company: government entity');
+              skipped++;
+              continue;
+            }
+
+            // Skip mega-corps (10000+ employees) unless mission targets enterprise
+            const sizeNum = parseInt(co.size || '', 10);
+            const targetEnterprise = this._ctx?.sales?.companySizes?.some(s => /enterprise|10000|large/i.test(s));
+            if (!targetEnterprise && (sizeNum >= 10000 || isMegaCorp(co.domain || ''))) {
+              logger.debug({ name: co.name, size: co.size, domain: co.domain }, 'Skipping company: mega-corp');
+              skipped++;
+              continue;
+            }
+
             try {
               const saved = await this.saveOrUpdateCompany({
                 name: co.name,
@@ -411,6 +461,11 @@ export class DiscoveryAgent extends BaseAgent {
                   extractedFrom: extraction.type,
                   location: co.location || undefined,
                   entityType: co.entityType || 'company',
+                  hiringSignal,
+                  ...(co.jobTitle && { job_title: co.jobTitle }),
+                  ...(co.jobLocation && { job_location: co.jobLocation }),
+                  ...(co.jobSource && { job_source: co.jobSource }),
+                  ...(co.jobUrl && { job_url: co.jobUrl }),
                 },
               });
 
@@ -526,13 +581,24 @@ export class DiscoveryAgent extends BaseAgent {
       if (url.includes('linkedin.com/in/')) score += 10;
       if (url.includes('linkedin.com/company/')) score += 8;
 
-      // High value: Company homepages (short paths)
+      // Highest value: Job boards and career pages (hiring signals)
+      if (url.includes('indeed.com') || url.includes('indeed.fr')) score += 10;
+      if (url.includes('welcometothejungle.com') || url.includes('welcome-to-the-jungle.com')) score += 10;
+      if (url.includes('free-work.com')) score += 10;
+      if (url.includes('apec.fr')) score += 10;
+      if (url.includes('glassdoor.com') || url.includes('glassdoor.fr')) score += 9;
+      if (url.includes('linkedin.com/jobs/')) score += 10;
+
+      // High value: Career/jobs paths on company sites
       try {
         const pathname = new URL(r.url).pathname;
-        if (pathname === '/' || pathname === '') score += 7;
-        if (/^\/(about|team|leadership|our-team|people)\/?$/i.test(pathname)) score += 9;
-        if (/^\/(careers|jobs)\/?$/i.test(pathname)) score += 5;
+        if (/\/(careers|jobs|join-us|recrutement|nous-rejoindre|emploi)/i.test(pathname)) score += 11;
+        if (pathname === '/' || pathname === '') score += 4;
+        if (/^\/(about|team|leadership|our-team|people)\/?$/i.test(pathname)) score += 6;
       } catch { /* skip */ }
+
+      // Title signals: hiring intent
+      if (/\b(hiring|job|jobs|career|careers|recrutement|offre|emploi|recrut|poste|CDI|CDD)\b/i.test(title)) score += 6;
 
       // Medium: Crunchbase, Wellfound, directory sites
       if (url.includes('crunchbase.com/organization/')) score += 6;
@@ -582,27 +648,50 @@ export class DiscoveryAgent extends BaseAgent {
       const extraction = await this.extractJSON<PageExtraction>([
         {
           role: 'system',
-          content: `You analyze web page content and extract organizational and people data.
-
-Given a page's content, URL, and title, you must:
-1. Classify the page type
-2. Extract organizations and people mentioned that are relevant to the mission
+          content: `You are analyzing web pages to find COMPANIES THAT ARE ACTIVELY HIRING for a specific role.
 ${missionBlock}
+CRITICAL RULES:
+- You are looking for JOB POSTINGS, CAREER PAGES, and HIRING ANNOUNCEMENTS — not general company information.
+- For job board pages (Indeed, LinkedIn Jobs, Glassdoor, Welcome to the Jungle, Free-Work, APEC, IrishJobs, Monster, SimplyHired):
+  Extract EACH individual job listing as a separate company entry. The company is the EMPLOYER listed in the job posting, NOT the job board itself.
+  Extract: company name (the employer), the job title posted, location from the posting, industry of the employer.
+  The domain should be the EMPLOYER's website domain, NOT the job board URL (not indeed.com, not linkedin.com, not welcometothejungle.com).
+  Set hiringSignal to "job_posting". Set jobTitle to the role being hired. Set jobLocation to the location in the posting. Set jobSource to the job board name.
+- For company career pages (URLs containing /careers, /jobs, /join-us, /recrutement, /nous-rejoindre):
+  Extract the company that owns the career page and the specific roles they are hiring for.
+  Set hiringSignal to "career_page". Set jobTitle to the most relevant open role found.
+- For pages with hiring language ("We are hiring", "Join our team", "Nous recrutons", "Rejoignez-nous", "Postuler"):
+  Extract the company and set hiringSignal to "hiring_text".
+- For pages about company growth, funding, or expansion (but no specific job postings):
+  Set hiringSignal to "growth_signal".
+- For generic company pages with NO job postings or hiring signals whatsoever:
+  Set hiringSignal to "none" and relevanceScore to maximum 15. We do NOT want companies that merely exist — we want companies that are HIRING.
+
+HIRING SIGNAL SCORING — relevanceScore must reflect hiring intent:
+- Job posting found for a matching role = base 70, up to 95 if role+location match mission perfectly
+- Career page with open roles matching mission = base 60, up to 85
+- "We are hiring" / "Join our team" text = base 45, up to 65
+- Recent funding/growth news (likely to hire) = base 30, up to 45
+- No hiring signal at all = maximum 15, mark as irrelevant
+
 Page types:
-- "company_page" = a single organization's own website/profile (commercial entity)
+- "job_listing" = a job board page or career page with specific job postings
+- "company_page" = a single organization's own website/profile
 - "institution_page" = a university, research institution, or government agency page
 - "directory" = a list/article mentioning multiple organizations
 - "team_page" = an organization page showing team members/faculty/staff
-- "job_listing" = a job/position posting (the hiring organization is valuable data)
 - "person_profile" = an individual's profile page
-- "irrelevant" = login pages, generic content, error pages, encyclopedia, event registration, geographic info
+- "irrelevant" = login pages, generic content, error pages, encyclopedia, event registration, geographic info, pages with no hiring signals
 
-For EACH organization found, extract: name, domain (if visible), industry (or academic field/sector), description (1 sentence), size, location (MUST include country — e.g. "Paris, France" or "USA"), funding (use "N/A" for non-commercial entities like universities), entityType ("company", "university", "government", "ngo", "agency", "institution"), relevanceScore (0-100), relevanceReason (brief explanation).
+For EACH organization found, extract: name, domain (the EMPLOYER's actual website domain — NOT the job board domain), industry, description (1 sentence), size, location (MUST include country — e.g. "Paris, France" or "Lyon, France"), funding, entityType ("company", "university", "government", "ngo", "agency", "institution"), relevanceScore (0-100), relevanceReason, hiringSignal ("job_posting", "career_page", "hiring_text", "growth_signal", or "none"), jobTitle (the specific role being hired if found), jobLocation (location from the job posting), jobSource (job board name if applicable), jobUrl (URL of the specific posting if available).
+
+⚠️ DOMAIN RULE: The "domain" field must be the EMPLOYER's own website (e.g. "acme.com"), NEVER the domain of the page you are reading (e.g. never "indeed.com", "linkedin.com", "welcometothejungle.com", "glassdoor.com", "free-work.com"). If you cannot determine the employer's domain, leave it empty.
 ⚠️ The "location" field is CRITICAL. Always include the country. Infer from domain (.fr = France, .de = Germany, .co.uk = UK) or page content if not stated explicitly.
-⚠️ The "relevanceScore" field is CRITICAL. Score each entity based on how well it matches the mission context above.
+⚠️ NAME RULE: The "name" must be the EMPLOYER company name. Never use person names, job board names, "Self-employed", "Unknown", "N/A", or SEC filing formats as company names.
+
 For EACH person found, extract: name, title/role, organization they work at.
 
-Return ONLY valid JSON. If the page is irrelevant, return { "type": "irrelevant", "companies": [], "people": [] }.
+Return ONLY valid JSON. If the page is irrelevant or has no hiring signals, return { "type": "irrelevant", "companies": [], "people": [] }.
 Do NOT invent data — only extract what is clearly stated on the page.`,
         },
         {

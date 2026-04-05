@@ -100,7 +100,10 @@ export function buildUserPrompt(data: {
     return total + (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365);
   }, 0);
 
-  const skillLevelsStr = (data.contact.skillLevels ?? [])
+  const skillLevelsArr = Array.isArray(data.contact.skillLevels)
+    ? data.contact.skillLevels
+    : Object.entries(data.contact.skillLevels || {}).map(([skill, level]) => ({ skill, level }));
+  const skillLevelsStr = skillLevelsArr
     .map((s) => `${s.skill} (${s.level})`)
     .join(', ');
 

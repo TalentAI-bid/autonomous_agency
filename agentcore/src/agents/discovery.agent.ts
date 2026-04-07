@@ -740,7 +740,27 @@ Page types:
 
 For EACH organization found, extract: name, domain (the EMPLOYER's actual website domain — NOT the job board domain), industry, description (1 sentence), size, location (MUST include country — e.g. "Paris, France" or "Lyon, France"), funding, entityType ("company", "university", "government", "ngo", "agency", "institution"), relevanceScore (0-100), relevanceReason, hiringSignal ("job_posting", "career_page", "hiring_text", "growth_signal", or "none"), jobTitle (the specific role being hired if found), jobLocation (location from the job posting), jobSource (job board name if applicable), jobUrl (URL of the specific posting if available).
 
-⚠️ DOMAIN RULE: The "domain" field must be the EMPLOYER's own website (e.g. "acme.com"), NEVER the domain of the page you are reading (e.g. never "indeed.com", "linkedin.com", "welcometothejungle.com", "glassdoor.com", "free-work.com"). If you cannot determine the employer's domain, leave it empty.
+⚠️ DOMAIN RULE — READ CAREFULLY:
+The domain field must be the company's ACTUAL website. NOT the URL of the page you are reading.
+
+Example: If you are reading glassdoor.com/Jobs/Doctolib and see a job from Doctolib, the domain is "doctolib.com" NOT "glassdoor.com".
+Example: If you are reading linkedin.com/jobs/view/... posted by Acme Corp, the domain is "acme.com" (or empty if not stated in the content), NOT "linkedin.com".
+Example: If you are reading indeed.fr/jobs?... posted by BlaBlaCar, the domain is "blablacar.com", NOT "indeed.fr".
+Example: If you are reading welcometothejungle.com/fr/companies/criteo, the domain is "criteo.com", NOT "welcometothejungle.com".
+
+If you cannot determine the company's real domain from the page content, set domain to empty string. An empty domain is better than a wrong domain.
+
+⚠️ JOB BOARD RULE:
+For job board pages, the company is the EMPLOYER, not the job board.
+- Indeed is NOT a company to extract.
+- LinkedIn is NOT a company to extract.
+- Glassdoor is NOT a company to extract.
+- Welcome to the Jungle is NOT a company to extract.
+- Free-Work is NOT a company to extract.
+- APEC is NOT a company to extract.
+- Monster is NOT a company to extract.
+Extract the companies whose jobs are LISTED on the board.
+
 ⚠️ The "location" field is CRITICAL. Always include the country. Infer from domain (.fr = France, .de = Germany, .co.uk = UK) or page content if not stated explicitly.
 ⚠️ NAME RULE: The "name" must be the EMPLOYER company name. Never use person names, job board names, "Self-employed", "Unknown", "N/A", or SEC filing formats as company names.
 

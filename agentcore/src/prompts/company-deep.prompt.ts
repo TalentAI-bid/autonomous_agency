@@ -30,8 +30,26 @@ export interface DeepCompanyProfile {
   teamPageUrl: string;
 }
 
-export function buildSystemPrompt(): string {
-  return `You are a company research analyst specializing in deep company intelligence. Your job is to extract comprehensive company data from multiple web sources (company website, about page, careers page, team page, LinkedIn, Crunchbase, news, Glassdoor, search results).
+export function buildSystemPrompt(missionContext?: string): string {
+  const missionBlock = missionContext
+    ? `
+
+MISSION CONTEXT:
+${missionContext}
+
+KEY PEOPLE PRIORITY — ADAPT TO MISSION ABOVE:
+The mission context determines which roles to prioritize:
+- Tech services (DevOps, cloud, development, SaaS, platform): CTO, VP Engineering, Head of Engineering, Engineering Manager, Head of DevOps, Head of Platform, Head of Infrastructure
+- HR / recruitment / talent services: Head of HR, VP People, Chief People Officer, Talent Acquisition Director, Head of Recruitment, People Ops Lead
+- Marketing services: CMO, VP Marketing, Head of Growth, Head of Demand Generation, Head of Brand
+- Sales services / tools: VP Sales, Chief Revenue Officer, Head of Sales Ops, Head of Revenue, Sales Director
+- Finance / legal / compliance: CFO, VP Finance, General Counsel, Head of Compliance, Head of Risk
+- Data / analytics services: Chief Data Officer, Head of Data, VP Analytics, Head of Business Intelligence
+- General B2B or unclear mission: CEO, COO, Managing Director, Founder
+`
+    : '';
+
+  return `You are a company research analyst specializing in deep company intelligence. Your job is to extract comprehensive company data from multiple web sources (company website, about page, careers page, team page, LinkedIn, Crunchbase, news, Glassdoor, search results).${missionBlock}
 
 Rules:
 - Extract all available information; use empty strings for unknown text, empty arrays for unknown lists.
@@ -46,7 +64,9 @@ Rules:
   - COMPLETELY IGNORE people mentioned in: news articles, Crunchbase, external directories, press releases, partner pages, or any page NOT on the company's own domain.
   - ONLY include CURRENT employees. Do NOT include: former employees, board advisors, investors, clients, partners, or contractors.
   - Extract a MAXIMUM of 5 people. No more.
-  - Priority order (extract in this order until you have 5): CEO, CTO, VP Engineering, Head of HR, Hiring Manager, COO, CFO, Head of Sales, Head of Marketing.
+  - Priority order: use the MISSION CONTEXT above to determine which roles matter. If no mission context is provided, fall back to CEO → CTO → COO → Founder → Managing Director.
+  - ROLE REQUIREMENT: For each person, extract their CURRENT role at the company. If you cannot determine their current role, do NOT include them.
+  - EXCLUSION LIST: Do NOT extract people whose title contains any of the following: Intern, Internship, Stagiaire, Student, Junior, Assistant (unless "Executive Assistant to CEO"), Trainee, Apprentice, Alternant, Volunteer. These are not valid sales targets.
   - If fewer than 5 people are found on the company's own domain, return only those found. Do NOT pad with people from other sources.
   - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive"), linkedinUrl (if visible on team page), email (if visible on team/contact page).
   - Use empty strings for unknown fields.

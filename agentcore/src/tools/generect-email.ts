@@ -84,47 +84,71 @@ class GenerectEmailTool {
       // continue
     }
 
-    // Call Generect API
-    try {
-      const res = await fetch(`${API_BASE}/email_finder/`, {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify({
-          first_name: firstName.trim(),
-          last_name: lastName.trim(),
-          domain,
-        }),
-      });
+    // Call Generect API with 10s timeout and 1 retry on failure
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      try {
+        const res = await fetch(`${API_BASE}/email_finder/`, {
+          method: 'POST',
+          headers: this.buildHeaders(),
+          body: JSON.stringify({
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            domain,
+          }),
+          signal: controller.signal,
+        });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        // Circuit breaker: 402 = credits exhausted, stop calling
-        if (res.status === 402) {
-          GenerectEmailTool.billingCircuitOpen = true;
-          logger.error('Generect credits exhausted (402) — all email lookups disabled. Auto-reset in 1 hour.');
-          setTimeout(() => { GenerectEmailTool.billingCircuitOpen = false; }, 3600000);
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          // Circuit breaker: 402 = credits exhausted, do NOT retry
+          if (res.status === 402) {
+            clearTimeout(timeoutId);
+            GenerectEmailTool.billingCircuitOpen = true;
+            logger.error('Generect credits exhausted (402) — all email lookups disabled. Auto-reset in 1 hour.');
+            setTimeout(() => { GenerectEmailTool.billingCircuitOpen = false; }, 3600000);
+            return {
+              email: null,
+              confidence: 0,
+              catchAll: false,
+              emailFormat: null,
+              mxDomain: null,
+              error: `Generect API 402: ${text}`,
+            };
+          }
+          throw new Error(`Generect API ${res.status}: ${text}`);
         }
-        throw new Error(`Generect API ${res.status}: ${text}`);
+
+        const data = await res.json() as GenerectFindResponse;
+        clearTimeout(timeoutId);
+        const result = this.mapFindResult(data);
+
+        // Cache result (including negatives to avoid re-paying)
+        await redis.setex(cacheKey, CACHE_TTL_30D, JSON.stringify(result)).catch(() => {});
+
+        return result;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        lastError = err;
+        if (attempt === 0) {
+          logger.debug({ err, first, last, domain }, 'Generect findEmail attempt 1 failed, retrying in 5s');
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          continue;
+        }
       }
-
-      const data = await res.json() as GenerectFindResponse;
-      const result = this.mapFindResult(data);
-
-      // Cache result (including negatives to avoid re-paying)
-      await redis.setex(cacheKey, CACHE_TTL_30D, JSON.stringify(result)).catch(() => {});
-
-      return result;
-    } catch (err) {
-      logger.warn({ err, first, last, domain }, 'Generect findEmail failed');
-      return {
-        email: null,
-        confidence: 0,
-        catchAll: false,
-        emailFormat: null,
-        mxDomain: null,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      };
     }
+
+    logger.warn({ err: lastError, first, last, domain }, 'Generect findEmail failed after retry');
+    return {
+      email: null,
+      confidence: 0,
+      catchAll: false,
+      emailFormat: null,
+      mxDomain: null,
+      error: lastError instanceof Error ? lastError.message : 'Unknown error',
+    };
   }
 
   // ── Find emails batch ───────────────────────────────────────────────────

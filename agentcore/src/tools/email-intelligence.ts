@@ -1,9 +1,9 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { Redis } from 'ioredis';
-import { db } from '../config/database.js';
+import { db, withTenant } from '../config/database.js';
 import { env } from '../config/env.js';
 import { createRedisConnection } from '../queues/setup.js';
-import { emailIntelligence, domainPatterns, deliverySignals } from '../db/schema/index.js';
+import { emailIntelligence, domainPatterns, deliverySignals, companies } from '../db/schema/index.js';
 import { search } from './searxng.tool.js';
 import { generectEmailTool } from './generect-email.js';
 import logger from '../utils/logger.js';
@@ -70,6 +70,7 @@ class EmailIntelligenceEngine {
     lastName: string,
     companyNameOrDomain: string,
     tenantId?: string,
+    companyId?: string,
   ): Promise<EmailResult> {
     if (!env.GENERECT_API_KEY) {
       return { email: null, confidence: 0, method: null, source: null };
@@ -82,7 +83,7 @@ class EmailIntelligenceEngine {
     }
 
     // Resolve domain from company name if needed
-    const domain = await this.resolveDomain(companyNameOrDomain, tenantId);
+    const domain = await this.resolveDomain(companyNameOrDomain, tenantId, companyId);
     if (!domain) {
       return { email: null, confidence: 0, method: null, source: null };
     }
@@ -211,7 +212,11 @@ class EmailIntelligenceEngine {
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
-  private async resolveDomain(companyNameOrDomain: string, tenantId?: string): Promise<string | null> {
+  private async resolveDomain(
+    companyNameOrDomain: string,
+    tenantId?: string,
+    companyId?: string,
+  ): Promise<string | null> {
     // If it looks like a domain already, use it
     if (companyNameOrDomain.includes('.') && !companyNameOrDomain.includes(' ')) {
       return companyNameOrDomain.toLowerCase().replace(/^www\./, '');
@@ -244,6 +249,23 @@ class EmailIntelligenceEngine {
         try {
           const domain = new URL(url).hostname.replace(/^www\./, '');
           await this.redis.setex(cacheKey, CACHE_TTL_30D, domain);
+
+          // Persist resolved domain back to companies table when missing,
+          // so subsequent contacts at the same company skip SearXNG resolution.
+          if (companyId && tenantId) {
+            try {
+              await withTenant(tenantId, async (tx) => {
+                await tx
+                  .update(companies)
+                  .set({ domain, updatedAt: new Date() })
+                  .where(and(eq(companies.id, companyId), isNull(companies.domain)));
+              });
+              logger.debug({ companyId, domain }, 'Persisted resolved company domain');
+            } catch (err) {
+              logger.debug({ err, companyId, domain }, 'Failed to persist resolved company domain (non-critical)');
+            }
+          }
+
           return domain;
         } catch {
           // invalid URL

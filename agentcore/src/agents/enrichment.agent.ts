@@ -23,6 +23,32 @@ import {
 import { EFFECTIVE_RATE_LIMIT } from '../tools/searxng.tool.js';
 import logger from '../utils/logger.js';
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildMissionContextString(ctx: unknown): string | undefined {
+  const c = ctx as
+    | {
+        missionText?: string;
+        useCase?: string;
+        sales?: { services?: string[]; valueProposition?: string; industries?: string[] };
+        recruitment?: { requiredSkills?: string[]; experienceLevel?: string };
+        targetRoles?: string[];
+      }
+    | undefined;
+  if (!c) return undefined;
+  const parts: string[] = [];
+  if (c.missionText) parts.push(`Mission: ${c.missionText}`);
+  if (c.useCase) parts.push(`Use case: ${c.useCase}`);
+  if (c.sales?.services?.length) parts.push(`Services being sold: ${c.sales.services.join(', ')}`);
+  if (c.sales?.valueProposition) parts.push(`Value proposition: ${c.sales.valueProposition}`);
+  if (c.sales?.industries?.length) parts.push(`Target industries: ${c.sales.industries.join(', ')}`);
+  if (c.recruitment?.requiredSkills?.length) parts.push(`Skills sought: ${c.recruitment.requiredSkills.join(', ')}`);
+  if (c.targetRoles?.length) parts.push(`Target roles: ${c.targetRoles.join(', ')}`);
+  return parts.length ? parts.join('\n') : undefined;
+}
+
 export class EnrichmentAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { contactId, companyId: inputCompanyId, masterAgentId, dryRun } = input as {
@@ -295,7 +321,7 @@ export class EnrichmentAgent extends BaseAgent {
 
         // Deep company enrichment via LLM
         const deepCompany = await this.extractJSON<DeepCompanyProfile>([
-          { role: 'system', content: companyDeepSystemPrompt() },
+          { role: 'system', content: companyDeepSystemPrompt(buildMissionContextString(ctx)) },
           {
             role: 'user',
             content: companyDeepUserPrompt({
@@ -392,7 +418,7 @@ export class EnrichmentAgent extends BaseAgent {
                   const firstName = nameParts[0] ?? '';
                   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1]! : '';
                   if (firstName && lastName) {
-                    const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId);
+                    const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId, companyId ?? undefined);
                     if (emailResult.email) {
                       personEmail = emailResult.email;
                       logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found');
@@ -499,7 +525,7 @@ export class EnrichmentAgent extends BaseAgent {
         }
 
         if (domain) {
-          const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId);
+          const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId, companyId ?? undefined);
           if (result.email && result.confidence >= 50) {
             emailFound = result.email;
             emailVerified = result.confidence >= 80;
@@ -946,7 +972,7 @@ export class EnrichmentAgent extends BaseAgent {
       const searchSnippets = companySearchResults.map((r) => `${r.title}: ${r.snippet}`).join('\n');
 
       const deepCompany = await this.extractJSON<DeepCompanyProfile>([
-        { role: 'system', content: companyDeepSystemPrompt() },
+        { role: 'system', content: companyDeepSystemPrompt(buildMissionContextString(ctx)) },
         {
           role: 'user',
           content: companyDeepUserPrompt({
@@ -1053,7 +1079,7 @@ export class EnrichmentAgent extends BaseAgent {
           if (!personEmail) {
             const emailDomain = companyDomain || companyName;
             try {
-              const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId);
+              const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
               if (emailResult.email) {
                 personEmail = emailResult.email;
                 logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member');
@@ -1198,7 +1224,7 @@ export class EnrichmentAgent extends BaseAgent {
         `${cn} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
       ],
       linkedinCompanyQueries: [`site:linkedin.com/company/ "${cn}"`],
-      contactLinkedinQueries: ct ? [`site:linkedin.com/in/ "${ct}" "${title}"`.trim()] : [],
+      contactLinkedinQueries: ct && cn ? [`"${ct}" "${cn}" site:linkedin.com/in`.trim()] : (ct ? [`"${ct}" "${title}" site:linkedin.com/in`.trim()] : []),
       contactGithubQueries: ct ? [`${ct} github`.trim()] : [],
       contactSocialQueries: ct ? [`site:twitter.com OR site:x.com "${ct}" ${title}`.trim()] : [],
       domainResolutionQueries: [`"${cn}" official website`],
@@ -1235,9 +1261,10 @@ export class EnrichmentAgent extends BaseAgent {
         } else if (!contact.linkedinUrl && contactName) {
           const queries = smartQueries.contactLinkedinQueries.length > 0
             ? smartQueries.contactLinkedinQueries
-            : [`site:linkedin.com/in/ "${contactName}" "${contactTitle}"`.trim()];
+            : [`"${contactName}" "${contactCompanyName}" site:linkedin.com/in`.trim()];
           let found = false;
           for (const query of queries) {
+            await sleep(3000);
             const results = await this.searchWeb(query, 5);
             const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
             if (linkedinUrl) {
@@ -1249,6 +1276,8 @@ export class EnrichmentAgent extends BaseAgent {
             }
           }
           if (!found) {
+            // NOTE: do not overwrite an existing linkedinUrl with empty string;
+            // setFoundLinkedinUrl is only invoked on hit so contact.linkedinUrl is preserved.
             logger.info({ contactId, contactName }, 'LinkedIn not found via search');
           }
         }
@@ -1377,9 +1406,10 @@ export class EnrichmentAgent extends BaseAgent {
         } else if (!contact.linkedinUrl && contactName) {
           const queries = smartQueries.contactLinkedinQueries.length > 0
             ? smartQueries.contactLinkedinQueries
-            : [`site:linkedin.com/in/ "${contactName}" "${contactTitle}"`.trim()];
+            : [`"${contactName}" "${contactCompanyName}" site:linkedin.com/in`.trim()];
           let found = false;
           for (const query of queries) {
+            await sleep(3000);
             const results = await this.searchWeb(query, 5);
             const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
             if (linkedinUrl) {
@@ -1391,6 +1421,8 @@ export class EnrichmentAgent extends BaseAgent {
             }
           }
           if (!found) {
+            // NOTE: do not overwrite an existing linkedinUrl with empty string;
+            // setFoundLinkedinUrl is only invoked on hit so contact.linkedinUrl is preserved.
             logger.info({ contactId, contactName }, 'LinkedIn not found via search');
           }
         }

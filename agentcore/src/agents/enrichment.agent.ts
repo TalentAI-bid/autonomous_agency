@@ -147,6 +147,7 @@ export class EnrichmentAgent extends BaseAgent {
     let twitterContent = '';
     let stackOverflowContent = '';
     let devCommunityContent = '';
+    let foundLinkedinUrl: string | null = null;
 
     // Quick company domain lookup for URL validation in source searches
     let knownCompanyDomain: string | undefined;
@@ -162,9 +163,10 @@ export class EnrichmentAgent extends BaseAgent {
     }
 
     // Branch sources by use case
+    const setFoundLinkedinUrl = (url: string) => { foundLinkedinUrl = url; };
     const sourceResults = useCase === 'sales'
-      ? await this.runSalesSourceSearches(contactId, contactName, contactTitle, contactCompanyName, knownCompanyDomain, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { twitterContent = content; }, (content) => { personalSiteContent = content; })
-      : await this.runRecruitmentSourceSearches(contactId, contactName, contactTitle, contactCompanyName, skillsStr, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { githubContent = content; }, (content) => { githubReposContent = content; }, (content) => { twitterContent = content; }, (content) => { stackOverflowContent = content; }, (content) => { personalSiteContent = content; }, (content) => { devCommunityContent = content; });
+      ? await this.runSalesSourceSearches(contactId, contactName, contactTitle, contactCompanyName, knownCompanyDomain, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { twitterContent = content; }, (content) => { personalSiteContent = content; }, setFoundLinkedinUrl)
+      : await this.runRecruitmentSourceSearches(contactId, contactName, contactTitle, contactCompanyName, skillsStr, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { githubContent = content; }, (content) => { githubReposContent = content; }, (content) => { twitterContent = content; }, (content) => { stackOverflowContent = content; }, (content) => { personalSiteContent = content; }, (content) => { devCommunityContent = content; }, setFoundLinkedinUrl);
 
     // Log any failures from parallel sources
     sourceResults.forEach((result, i) => {
@@ -555,6 +557,7 @@ export class EnrichmentAgent extends BaseAgent {
       email: emailFound ?? undefined,
       emailVerified,
       companyId: companyId ?? undefined,
+      linkedinUrl: foundLinkedinUrl ?? contact.linkedinUrl ?? undefined,
       updatedAt: new Date(),
     };
 
@@ -1221,6 +1224,7 @@ export class EnrichmentAgent extends BaseAgent {
     setStackOverflowContent: (s: string) => void,
     setPersonalSiteContent: (s: string) => void,
     setDevCommunityContent: (s: string) => void,
+    setFoundLinkedinUrl: (s: string) => void,
   ): Promise<PromiseSettledResult<void>[]> {
     return Promise.allSettled([
       // Source 1: LinkedIn (using smart queries)
@@ -1232,14 +1236,20 @@ export class EnrichmentAgent extends BaseAgent {
           const queries = smartQueries.contactLinkedinQueries.length > 0
             ? smartQueries.contactLinkedinQueries
             : [`site:linkedin.com/in/ "${contactName}" "${contactTitle}"`.trim()];
+          let found = false;
           for (const query of queries) {
             const results = await this.searchWeb(query, 5);
             const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
             if (linkedinUrl) {
               setLinkedinSearchContent(await this.scrapeUrl(linkedinUrl));
+              setFoundLinkedinUrl(linkedinUrl);
               logger.info({ contactId, linkedinUrl }, 'LinkedIn profile found via smart search');
+              found = true;
               break;
             }
+          }
+          if (!found) {
+            logger.info({ contactId, contactName }, 'LinkedIn not found via search');
           }
         }
       })(),
@@ -1356,6 +1366,7 @@ export class EnrichmentAgent extends BaseAgent {
     setLinkedinSearchContent: (s: string) => void,
     setTwitterContent: (s: string) => void,
     setPersonalSiteContent: (s: string) => void,
+    setFoundLinkedinUrl: (s: string) => void,
   ): Promise<PromiseSettledResult<void>[]> {
     return Promise.allSettled([
       // Source 1: LinkedIn profile (using smart queries)
@@ -1367,14 +1378,20 @@ export class EnrichmentAgent extends BaseAgent {
           const queries = smartQueries.contactLinkedinQueries.length > 0
             ? smartQueries.contactLinkedinQueries
             : [`site:linkedin.com/in/ "${contactName}" "${contactTitle}"`.trim()];
+          let found = false;
           for (const query of queries) {
             const results = await this.searchWeb(query, 5);
             const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
             if (linkedinUrl) {
               setLinkedinSearchContent(await this.scrapeUrl(linkedinUrl));
+              setFoundLinkedinUrl(linkedinUrl);
               logger.info({ contactId, linkedinUrl }, 'LinkedIn profile found via smart search (sales)');
+              found = true;
               break;
             }
+          }
+          if (!found) {
+            logger.info({ contactId, contactName }, 'LinkedIn not found via search');
           }
         }
       })(),

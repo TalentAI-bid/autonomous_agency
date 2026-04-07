@@ -72,12 +72,21 @@ const COUNTRY_ALIASES: Record<string, string[]> = {
   uae: ['united arab emirates'],
 };
 
+/** TLD → country mapping for domain-based location fallback */
+const TLD_TO_COUNTRY: Record<string, string> = {
+  fr: 'france', de: 'germany', es: 'spain', it: 'italy', nl: 'netherlands',
+  be: 'belgium', ch: 'switzerland', at: 'austria', pt: 'portugal',
+  ie: 'ireland', uk: 'uk', 'co.uk': 'uk',
+};
+
 /** Check if a company's extracted location matches any target location */
 function matchesTargetLocation(companyLocation: string | undefined, targetLocations: string[]): boolean {
   if (!targetLocations.length) return true; // no filter active
   if (!companyLocation) return false; // unknown location + targets set → reject
 
   const loc = companyLocation.toLowerCase().trim();
+  // Reject sentinel/placeholder strings the LLM sometimes emits
+  if (!loc || loc === 'unknown' || loc === 'n/a' || loc === 'none' || loc === 'null') return false;
 
   return targetLocations.some(target => {
     const t = target.toLowerCase().trim();
@@ -407,10 +416,55 @@ export class DiscoveryAgent extends BaseAgent {
               }
             }
 
+            // ── Hiring verification: independent SearXNG query ──
+            const verifyTargetRole = this._ctx?.targetRoles?.[0] || this._ctx?.recruitment?.requiredSkills?.[0] || '';
+            const verifyTargetLocation = this._ctx?.locations?.[0] || '';
+            const verifyQuery = `"${co.name}" ${verifyTargetRole} hiring ${verifyTargetLocation}`.trim();
+            let hiringVerified = false;
+            try {
+              const verifyResults = await this.searchWeb(verifyQuery, 5);
+              const HIRING_KEYWORDS = /\b(hiring|jobs?|careers?|recrut|offre.{0,5}emploi|cdi|nous recrutons|join our team|we are hiring|poste)\b/i;
+              hiringVerified = verifyResults.some(r =>
+                HIRING_KEYWORDS.test(r.title || '') || HIRING_KEYWORDS.test(r.snippet || ''),
+              );
+            } catch (err) {
+              logger.debug({ err, name: co.name }, 'Hiring verification query failed');
+            }
+            logger.info({ name: co.name, hiringVerified, query: verifyQuery }, `Hiring verified for ${co.name}: ${hiringVerified}`);
+
+            // Apply -30 score penalty if not independently verified
+            if (!hiringVerified && typeof co.relevanceScore === 'number') {
+              co.relevanceScore = Math.max(0, co.relevanceScore - 30);
+            }
+
+            // Reject if not verified AND final score below 50
+            if (!hiringVerified && (typeof co.relevanceScore !== 'number' || co.relevanceScore < 50)) {
+              logger.debug({ name: co.name, relevanceScore: co.relevanceScore }, 'Skipping company: hiring not verified and score too low');
+              skipped++;
+              continue;
+            }
+
             // Skip companies not matching target locations (unknown location → reject when targets set)
             if (this._ctx?.locations?.length) {
-              if (!matchesTargetLocation(co.location, this._ctx.locations)) {
-                logger.debug({ name: co.name, location: co.location ?? 'unknown', targets: this._ctx.locations }, 'Skipping company: location mismatch');
+              let locationMatch = matchesTargetLocation(co.location, this._ctx.locations);
+
+              // Domain TLD fallback: if location missing/wrong but TLD matches a target country, accept
+              if (!locationMatch && co.domain) {
+                const parts = co.domain.toLowerCase().split('.');
+                const tldShort = parts[parts.length - 1] || '';
+                const tldLong = parts.slice(-2).join('.');
+                const country = TLD_TO_COUNTRY[tldLong] || TLD_TO_COUNTRY[tldShort];
+                if (country && this._ctx.locations.some(t => t.toLowerCase().includes(country))) {
+                  locationMatch = true;
+                  logger.debug({ name: co.name, domain: co.domain, country }, 'Location accepted via TLD fallback');
+                }
+              }
+
+              if (!locationMatch) {
+                logger.info(
+                  { name: co.name, location: co.location ?? 'unknown', domain: co.domain, targets: this._ctx.locations },
+                  `Location rejected: ${co.name} location=${co.location ?? 'unknown'} not in ${this._ctx.locations.join(',')}`,
+                );
                 skipped++;
                 continue;
               }
@@ -462,6 +516,7 @@ export class DiscoveryAgent extends BaseAgent {
                   location: co.location || undefined,
                   entityType: co.entityType || 'company',
                   hiringSignal,
+                  hiringVerified,
                   ...(co.jobTitle && { job_title: co.jobTitle }),
                   ...(co.jobLocation && { job_location: co.jobLocation }),
                   ...(co.jobSource && { job_source: co.jobSource }),

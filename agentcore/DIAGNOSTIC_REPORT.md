@@ -6,6 +6,7 @@
 
 ---
 
+
 ## Table of Contents
 
 1. [Strategist Prompt Analysis](#1-strategist-prompt-analysis)

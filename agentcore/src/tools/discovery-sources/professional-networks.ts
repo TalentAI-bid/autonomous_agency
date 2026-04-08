@@ -23,7 +23,7 @@ async function searchLinkedInCompanies(
     await sleep(SEARCH_DELAY_MS);
     const results = await searchDiscovery(
       tenantId,
-      `site:linkedin.com/company/ "${query}"${locationPart}`,
+      `"${query}"${locationPart} linkedin company`,
       5,
     );
 
@@ -110,12 +110,12 @@ async function searchLinkedInPeople(
 
   // Role-specific queries
   for (const role of targetRoles.slice(0, 3)) {
-    queries.push(`site:linkedin.com/in/ "${role}" "${companyName}"`);
+    queries.push(`"${role}" "${companyName}" linkedin profile`);
   }
 
   // Leadership queries
-  queries.push(`site:linkedin.com/in/ "CEO" OR "CTO" OR "VP" "${companyName}"`);
-  queries.push(`site:linkedin.com/in/ "founder" "${companyName}"`);
+  queries.push(`"${companyName}" CEO CTO VP linkedin profile`);
+  queries.push(`"founder" "${companyName}" linkedin profile`);
 
   const tasks = queries.map((query) =>
     searchLimit(async () => {
@@ -152,7 +152,7 @@ async function searchTwitter(query: string, tenantId: string): Promise<RawCompan
     await sleep(SEARCH_DELAY_MS);
     const results = await searchDiscovery(
       tenantId,
-      `site:twitter.com OR site:x.com "${query}"`,
+      `"${query}" twitter x.com profile`,
       3,
     );
 

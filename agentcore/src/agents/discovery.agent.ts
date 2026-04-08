@@ -250,10 +250,11 @@ export class DiscoveryAgent extends BaseAgent {
 
     for (const query of searchQueries) {
       // ── Route Reddit queries to specialized Reddit intelligence handler ──
-      if (query.includes('site:reddit.com')) {
+      const lowerQ = query.toLowerCase();
+      if (lowerQ.includes('reddit.com') || lowerQ.includes(' reddit ') || lowerQ.startsWith('reddit ')) {
         try {
           const { searchRedditIntelligence } = await import('../tools/discovery-sources/reddit-intelligence.js');
-          const cleanQuery = query.replace(/site:reddit\.com\S*/gi, '').trim();
+          const cleanQuery = query.replace(/\breddit(?:\.com)?\b/gi, '').replace(/\s+/g, ' ').trim();
           const redditCompanies = await searchRedditIntelligence(
             { keywords: [cleanQuery], useCase: useCase as 'sales' | 'recruitment' | undefined, maxResults },
             this.tenantId,

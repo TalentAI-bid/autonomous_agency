@@ -221,7 +221,7 @@ export class EnrichmentAgent extends BaseAgent {
         // Fallback to hardcoded query if smart queries returned nothing
         if (companySearchResults.length === 0) {
           companySearchResults = await this.searchWeb(
-            `${contactCompanyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
+            `${contactCompanyName} company official website`,
           );
           if (companySearchResults.length === 0) {
             logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
@@ -400,7 +400,7 @@ export class EnrichmentAgent extends BaseAgent {
               // Search LinkedIn for this person if no URL yet
               if (!personLinkedinUrl) {
                 try {
-                  const query = `site:linkedin.com/in/ "${person.name}" "${contactCompanyName}"`;
+                  const query = `"${person.name}" "${contactCompanyName}" linkedin profile`;
                   const results = await this.searchWeb(query, 3);
                   personLinkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url ?? '';
                   if (personLinkedinUrl) {
@@ -906,7 +906,7 @@ export class EnrichmentAgent extends BaseAgent {
       // Fallback to hardcoded query if smart queries returned nothing
       if (companySearchResults.length === 0) {
         companySearchResults = await this.searchWeb(
-          `${companyName} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
+          `${companyName} company official website`,
         );
         if (companySearchResults.length === 0) {
           logger.warn({ companyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
@@ -1068,7 +1068,7 @@ export class EnrichmentAgent extends BaseAgent {
           let personLinkedinUrl = person.linkedinUrl || '';
           if (!personLinkedinUrl) {
             try {
-              const liQuery = `site:linkedin.com/in/ "${person.name}" "${companyName}"`;
+              const liQuery = `"${person.name}" "${companyName}" linkedin profile`;
               const liResults = await this.searchWeb(liQuery, 3);
               personLinkedinUrl = liResults.find(r => r.url.includes('linkedin.com/in/'))?.url ?? '';
             } catch { /* continue */ }
@@ -1221,12 +1221,12 @@ export class EnrichmentAgent extends BaseAgent {
     const title = params.contactTitle ?? '';
     return {
       companyWebsiteQueries: [
-        `${cn} company official website -site:linkedin.com -site:indeed.com -site:glassdoor.com`,
+        `${cn} company official website`,
       ],
-      linkedinCompanyQueries: [`site:linkedin.com/company/ "${cn}"`],
-      contactLinkedinQueries: ct && cn ? [`"${ct}" "${cn}" site:linkedin.com/in`.trim()] : (ct ? [`"${ct}" "${title}" site:linkedin.com/in`.trim()] : []),
+      linkedinCompanyQueries: [`"${cn}" linkedin company`],
+      contactLinkedinQueries: ct && cn ? [`"${ct}" "${cn}" linkedin profile`.trim()] : (ct ? [`"${ct}" "${title}" linkedin profile`.trim()] : []),
       contactGithubQueries: ct ? [`${ct} github`.trim()] : [],
-      contactSocialQueries: ct ? [`site:twitter.com OR site:x.com "${ct}" ${title}`.trim()] : [],
+      contactSocialQueries: ct ? [`"${ct}" ${title} twitter profile`.trim()] : [],
       domainResolutionQueries: [`"${cn}" official website`],
       reasoning: 'Fallback to hardcoded templates',
     };
@@ -1261,7 +1261,7 @@ export class EnrichmentAgent extends BaseAgent {
         } else if (!contact.linkedinUrl && contactName) {
           const queries = smartQueries.contactLinkedinQueries.length > 0
             ? smartQueries.contactLinkedinQueries
-            : [`"${contactName}" "${contactCompanyName}" site:linkedin.com/in`.trim()];
+            : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
           for (const query of queries) {
             await sleep(3000);
@@ -1319,7 +1319,7 @@ export class EnrichmentAgent extends BaseAgent {
         if (!contactName) return;
         const queries = smartQueries.contactSocialQueries.length > 0
           ? smartQueries.contactSocialQueries
-          : [`site:twitter.com OR site:x.com "${contactName}" ${contactTitle || skillsStr}`.trim()];
+          : [`"${contactName}" ${contactTitle || skillsStr} twitter profile`.trim()];
         for (const query of queries) {
           const results = await this.searchWeb(query, 5);
           const twitterUrl = results.find((r) =>
@@ -1338,7 +1338,7 @@ export class EnrichmentAgent extends BaseAgent {
       // Source 4: Stack Overflow
       (async () => {
         if (!contactName) return;
-        const query = `site:stackoverflow.com/users "${contactName}" ${skillsStr}`.trim();
+        const query = `"${contactName}" ${skillsStr} stackoverflow user`.trim();
         const results = await this.searchWeb(query, 5);
         const soUrl = results.find((r) => r.url.includes('stackoverflow.com/users/'))?.url;
         if (soUrl) {
@@ -1370,7 +1370,7 @@ export class EnrichmentAgent extends BaseAgent {
       // Source 6: Dev Community (Medium / dev.to)
       (async () => {
         if (!contactName) return;
-        const query = `site:medium.com OR site:dev.to "${contactName}" ${skillsStr}`.trim();
+        const query = `"${contactName}" ${skillsStr} medium dev.to author`.trim();
         const results = await this.searchWeb(query, 5);
         const devUrl = results.find((r) =>
           r.url.includes('medium.com/') || r.url.includes('dev.to/'),
@@ -1406,7 +1406,7 @@ export class EnrichmentAgent extends BaseAgent {
         } else if (!contact.linkedinUrl && contactName) {
           const queries = smartQueries.contactLinkedinQueries.length > 0
             ? smartQueries.contactLinkedinQueries
-            : [`"${contactName}" "${contactCompanyName}" site:linkedin.com/in`.trim()];
+            : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
           for (const query of queries) {
             await sleep(3000);

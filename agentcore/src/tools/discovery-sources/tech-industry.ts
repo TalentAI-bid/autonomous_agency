@@ -212,7 +212,7 @@ async function searchHackerNews(query: string): Promise<RawCompanyResult[]> {
 async function searchStackShare(query: string, tenantId: string): Promise<RawCompanyResult[]> {
   try {
     await sleep(SEARCH_DELAY_MS);
-    const results = await searchDiscovery(tenantId, `site:stackshare.io "${query}"`, 5);
+    const results = await searchDiscovery(tenantId, `"${query}" stackshare`, 5);
     return results
       .filter((r) => r.url.includes('stackshare.io'))
       .map((r) => ({
@@ -231,7 +231,7 @@ async function searchStackShare(query: string, tenantId: string): Promise<RawCom
 async function searchBuiltWith(domain: string, tenantId: string): Promise<RawCompanyResult[]> {
   try {
     await sleep(SEARCH_DELAY_MS);
-    const results = await searchDiscovery(tenantId, `site:builtwith.com "${domain}"`, 3);
+    const results = await searchDiscovery(tenantId, `"${domain}" builtwith`, 3);
     const techStack: string[] = [];
 
     for (const r of results) {
@@ -261,7 +261,7 @@ async function searchBuiltWith(domain: string, tenantId: string): Promise<RawCom
 async function searchDevTo(query: string, tenantId: string): Promise<RawCompanyResult[]> {
   try {
     await sleep(SEARCH_DELAY_MS);
-    const results = await searchDiscovery(tenantId, `site:dev.to "${query}"`, 3);
+    const results = await searchDiscovery(tenantId, `"${query}" dev.to`, 3);
     return results
       .filter((r) => r.url.includes('dev.to'))
       .slice(0, 2)

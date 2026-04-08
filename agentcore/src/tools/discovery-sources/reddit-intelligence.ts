@@ -202,7 +202,7 @@ export async function searchRedditViaSearXNG(
   tenantId: string,
 ): Promise<RedditPost[]> {
   try {
-    const results = await searchDiscovery(tenantId, `site:reddit.com ${query}`, 10);
+    const results = await searchDiscovery(tenantId, `${query} reddit.com`, 10);
     return results
       .filter((r) => r.url.includes('reddit.com/r/'))
       .map((r) => {

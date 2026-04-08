@@ -37,6 +37,15 @@ function stripSearchOperators(query: string): string | null {
   return stripped;
 }
 
+/** Safety-net: strip any site: / -site: operator from a query before sending. */
+function sanitizeQuery(query: string): string {
+  return query
+    .replace(/-site:\S+/gi, '')
+    .replace(/\bsite:\S+/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Track whether we've already warned about SearXNG being unreachable */
 let searxngDownWarned = false;
 
@@ -55,18 +64,18 @@ function getAdaptiveDelay(): number {
     logger.info({ requestCount: count, windowMinutes: 10 }, `SearXNG request count: ${count} in 10-min window`);
   }
 
-  // >100 requests in 10 min → pause 60 seconds to protect proxy IPs
+  // >100 requests in 10 min → pause 90 seconds to protect proxy IPs
   if (count > 100) {
-    logger.warn({ requestCount: count }, 'SearXNG: >100 requests in 10min — pausing 60s to protect proxy IPs');
-    return 60_000;
+    logger.warn({ requestCount: count }, 'SearXNG: >100 requests in 10min — pausing 90s to protect proxy IPs');
+    return 90_000;
   }
-  // >50 requests in 10 min → slow to 8-12 seconds
+  // >50 requests in 10 min → slow to 12-18 seconds
   if (count > 50) {
-    if (count === 51) logger.warn({ requestCount: count }, 'SearXNG: >50 requests in 10min — increasing delay to 8-12s');
-    return 8000 + Math.random() * 4000;
+    if (count === 51) logger.warn({ requestCount: count }, 'SearXNG: >50 requests in 10min — increasing delay to 12-18s');
+    return 12000 + Math.random() * 6000;
   }
-  // Normal: 3-5 seconds
-  return 3000 + Math.random() * 2000;
+  // Normal: 5-8 seconds
+  return 5000 + Math.random() * 3000;
 }
 
 /** Circuit breaker: check if SearXNG circuit is open */
@@ -120,6 +129,16 @@ export async function search(
   query: string,
   maxResults = 10,
 ): Promise<SearchResult[]> {
+  // Safety net: strip any site: / -site: operators before doing anything else.
+  // The cache key is computed on the sanitized query so we don't waste budget
+  // on duplicate sanitized variants.
+  const originalQuery = query;
+  query = sanitizeQuery(query);
+  if (query !== originalQuery) {
+    logger.debug({ tenantId, originalQuery, sanitizedQuery: query }, 'Stripped site: operators from query');
+  }
+  if (query.length < 3) return [];
+
   // Circuit breaker check
   if (await isCircuitOpen()) {
     logger.warn({ tenantId, query }, 'SearXNG circuit breaker OPEN — returning empty results');
@@ -162,7 +181,7 @@ export async function search(
   }
 
   try {
-    // Adaptive delay: 3-5s normal, 8-12s at >50 req/10min, 60s pause at >100
+    // Adaptive delay: 5-8s normal, 12-18s at >50 req/10min, 90s pause at >100
     await sleep(getAdaptiveDelay());
 
     const startMs = Date.now();
@@ -252,6 +271,16 @@ export async function searchDiscovery(
   query: string,
   maxResults = 10,
 ): Promise<SearchResult[]> {
+  // Safety net: strip any site: / -site: operators before doing anything else.
+  // The cache key is computed on the sanitized query so we don't waste budget
+  // on duplicate sanitized variants.
+  const originalQuery = query;
+  query = sanitizeQuery(query);
+  if (query !== originalQuery) {
+    logger.debug({ tenantId, originalQuery, sanitizedQuery: query }, 'Stripped site: operators from query (discovery)');
+  }
+  if (query.length < 3) return [];
+
   // Circuit breaker check
   if (await isCircuitOpen()) {
     logger.warn({ tenantId, query }, 'SearXNG circuit breaker OPEN — returning empty results (discovery)');
@@ -284,7 +313,7 @@ export async function searchDiscovery(
   }
 
   try {
-    // Adaptive delay: 3-5s normal, 8-12s at >50 req/10min, 60s pause at >100
+    // Adaptive delay: 5-8s normal, 12-18s at >50 req/10min, 90s pause at >100
     await sleep(getAdaptiveDelay());
 
     const startMs = Date.now();

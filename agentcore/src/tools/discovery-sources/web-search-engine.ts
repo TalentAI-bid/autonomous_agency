@@ -33,8 +33,8 @@ function generateCompanyQueries(params: DiscoveryParams): string[] {
   // 2. Hiring signals
   if (keywords) {
     queries.push(`"${keywords}" hiring ${location}`.trim());
-    queries.push(`site:jobs.lever.co "${keywords}"`);
-    queries.push(`site:boards.greenhouse.io "${keywords}"`);
+    queries.push(`"${keywords}" jobs.lever.co`);
+    queries.push(`"${keywords}" boards.greenhouse.io`);
   }
 
   // 3. Funding/news

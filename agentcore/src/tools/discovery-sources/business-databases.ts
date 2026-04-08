@@ -24,51 +24,51 @@ interface SiteSearchConfig {
 const SITES: SiteSearchConfig[] = [
   {
     site: 'crunchbase.com/organization',
-    queryTemplate: (name) => `site:crunchbase.com/organization "${name}"`,
+    queryTemplate: (name) => `"${name}" crunchbase`,
     confidence: 75,
     source: 'crunchbase',
     scrapeTop: 1,
   },
   {
     site: 'wellfound.com/company',
-    queryTemplate: (name) => `site:wellfound.com/company "${name}"`,
+    queryTemplate: (name) => `"${name}" wellfound`,
     confidence: 65,
     source: 'wellfound',
     scrapeTop: 1,
   },
   {
     site: 'g2.com/products',
-    queryTemplate: (name) => `site:g2.com/products "${name}"`,
+    queryTemplate: (name) => `"${name}" g2`,
     confidence: 60,
     source: 'g2',
   },
   {
     site: 'glassdoor.com',
-    queryTemplate: (name) => `site:glassdoor.com "${name}" overview`,
+    queryTemplate: (name) => `"${name}" glassdoor overview`,
     confidence: 55,
     source: 'glassdoor',
   },
   {
     site: 'producthunt.com',
-    queryTemplate: (name) => `site:producthunt.com "${name}"`,
+    queryTemplate: (name) => `"${name}" producthunt`,
     confidence: 55,
     source: 'producthunt',
   },
   {
     site: 'clutch.co',
-    queryTemplate: (name) => `site:clutch.co "${name}"`,
+    queryTemplate: (name) => `"${name}" clutch.co`,
     confidence: 55,
     source: 'clutch',
   },
   {
     site: 'capterra.com',
-    queryTemplate: (name) => `site:capterra.com "${name}"`,
+    queryTemplate: (name) => `"${name}" capterra`,
     confidence: 50,
     source: 'capterra',
   },
   {
     site: 'trustpilot.com',
-    queryTemplate: (name) => `site:trustpilot.com "${name}"`,
+    queryTemplate: (name) => `"${name}" trustpilot`,
     confidence: 45,
     source: 'trustpilot',
   },
@@ -180,7 +180,7 @@ export async function searchBusinessDatabasesPeople(
         await sleep(SEARCH_DELAY_MS);
         const searchResults = await searchDiscovery(
           tenantId,
-          `site:wellfound.com/company "${params.companyName}" team`,
+          `"${params.companyName}" wellfound team`,
           3,
         );
         const urls = searchResults.map((sr) => sr.url).filter((u) => u.includes('wellfound.com'));
@@ -200,7 +200,7 @@ export async function searchBusinessDatabasesPeople(
         await sleep(SEARCH_DELAY_MS);
         const searchResults = await searchDiscovery(
           tenantId,
-          `site:glassdoor.com "${params.companyName}" CEO OR leadership`,
+          `"${params.companyName}" glassdoor CEO leadership`,
           3,
         );
         const people: RawPersonResult[] = [];

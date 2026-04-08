@@ -183,7 +183,7 @@ export abstract class BaseAgent {
   }
 
   protected async saveOrUpdateCompany(
-    data: Partial<NewCompany> & { name: string; domain?: string },
+    data: Partial<NewCompany> & { name: string; domain?: string; id?: string },
   ): Promise<Company> {
     // Type guard: LLM sometimes returns nested object for name
     if (typeof data.name === 'object' && data.name !== null) {
@@ -197,6 +197,34 @@ export abstract class BaseAgent {
     }
     const validMasterAgentId = await this.getValidMasterAgentId();
     return withTenant(this.tenantId, async (tx) => {
+      // ID-pinned update: caller knows the exact row to update (preserves
+      // discovery signals that would otherwise be lost on name-mismatch).
+      if (data.id) {
+        const { id, ...updateData } = data;
+        const existing = await tx
+          .select()
+          .from(companies)
+          .where(and(eq(companies.id, id), eq(companies.tenantId, this.tenantId)))
+          .limit(1);
+        if (existing.length > 0) {
+          const [updated] = await tx
+            .update(companies)
+            .set({
+              ...updateData,
+              masterAgentId: validMasterAgentId,
+              rawData: {
+                ...(existing[0]!.rawData as Record<string, unknown> ?? {}),
+                ...(updateData.rawData as Record<string, unknown> ?? {}),
+              },
+              updatedAt: new Date(),
+            })
+            .where(eq(companies.id, existing[0]!.id))
+            .returning();
+          return updated!;
+        }
+        // ID provided but row not found — fall through to fuzzy match
+      }
+
       // Try to find by domain first (most reliable match)
       if (data.domain) {
         const existing = await tx

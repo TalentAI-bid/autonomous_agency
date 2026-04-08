@@ -12,8 +12,12 @@ export interface SearchResult {
 
 const redis: Redis = createRedisConnection();
 
-const RATE_LIMIT_MAX = 10000;
-const DISCOVERY_RATE_LIMIT_MAX = 10000;
+// When USE_COMPANY_FINDER is true, SearXNG is a last-resort fallback only
+// (enrichment LinkedIn lookups after Google/Brave/DDG all fail). A 200/hr cap
+// provides plenty of headroom for this role while preventing runaway usage.
+// When false (legacy discovery path), the old 10000/hr cap applies.
+const RATE_LIMIT_MAX = env.USE_COMPANY_FINDER ? 200 : 10000;
+const DISCOVERY_RATE_LIMIT_MAX = env.USE_COMPANY_FINDER ? 200 : 10000;
 
 /** Effective rate limit — importable by other modules for budget checks */
 export const EFFECTIVE_RATE_LIMIT = RATE_LIMIT_MAX;

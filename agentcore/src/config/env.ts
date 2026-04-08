@@ -39,6 +39,9 @@ const envSchema = z.object({
   // Email encryption
   EMAIL_ENCRYPTION_KEY: z.string().optional(),
 
+  // Feature flags
+  USE_COMPANY_FINDER: z.coerce.boolean().default(true),
+
   // App
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),

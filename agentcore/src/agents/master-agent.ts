@@ -8,6 +8,8 @@ import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserP
 import { buildSystemPrompt as discoverySystemPrompt, buildUserPrompt as discoveryUserPrompt } from '../prompts/discovery.prompt.js';
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
 import { checkSearxngHealth } from '../tools/searxng.tool.js';
+import { env } from '../config/env.js';
+import * as agentSelectorPrompt from '../prompts/agent-selector.prompt.js';
 import logger from '../utils/logger.js';
 
 export class MasterAgent extends BaseAgent {
@@ -315,30 +317,132 @@ export class MasterAgent extends BaseAgent {
       }
     }
 
-    // 7. Dispatch discovery jobs in staggered batches of 5 (5-min gaps between batches)
+    // 7. Dispatch discovery jobs — branches on USE_COMPANY_FINDER feature flag.
+    //    When true: single company-finder job reads SITE_CONFIGS directly.
+    //    When false: legacy SearXNG-based discovery batches (preserved for rollback).
     if (hasDiscovery) {
-      let jobIndex = 0;
+      if (env.USE_COMPANY_FINDER) {
+        // New path: LLM-based agent selector picks company-finder and/or candidate-finder.
+        // Keyword hints pulled from requirements + any opportunity-focused strategy queries.
+        const strategyQueries = pipelineContext?.sales?.salesStrategy?.opportunitySearchQueries ?? [];
+        const strategyKeywords = strategyQueries
+          .map((sq) => (typeof sq === 'string' ? sq : sq.query))
+          .filter((s): s is string => Boolean(s));
+        const baseKeywords = (requirements.requiredSkills as string[]) ?? [];
+        const searchCriteriaKeywords =
+          ((requirements.searchCriteria as Record<string, unknown>)?.keywords as string[]) ?? [];
+        const mergedKeywords = Array.from(
+          new Set([...baseKeywords, ...searchCriteriaKeywords, ...strategyKeywords]),
+        ).filter((k) => k && k.trim().length > 0);
 
-      // Helper: batch delay = batchIndex * 5 min + withinBatch * 2s
-      const getBatchDelay = (i: number) => {
-        const batchIndex = Math.floor(i / 5);
-        const withinBatch = i % 5;
-        return batchIndex * 300000 + withinBatch * 2000;
-      };
+        const industries =
+          ((requirements.idealCustomerProfile as Record<string, unknown>)?.industries as string[]) ??
+          ((requirements.searchCriteria as Record<string, unknown>)?.industries as string[]) ??
+          [];
 
-      // 7a. For sales: dispatch opportunity-focused queries FIRST
-      const strategyQueries = pipelineContext?.sales?.salesStrategy?.opportunitySearchQueries;
-      if (strategyQueries && strategyQueries.length > 0) {
-        for (const sq of strategyQueries) {
-          const searchQuery = typeof sq === 'string' ? sq : sq.query;
-          if (!searchQuery) continue;
+        const sharedMissionContext = {
+          mission: agent.mission ?? '',
+          locations: (requirements.locations as string[]) ?? [],
+          industries,
+          targetRoles: (requirements.targetRoles as string[]) ?? [],
+          requiredSkills: (requirements.requiredSkills as string[]) ?? [],
+          experienceLevel: requirements.experienceLevel as string | undefined,
+          keywords: mergedKeywords,
+        };
+
+        // LLM picks one or both finders.
+        let selection: agentSelectorPrompt.AgentSelection;
+        try {
+          selection = await this.extractJSON<agentSelectorPrompt.AgentSelection>(
+            [
+              { role: 'system', content: agentSelectorPrompt.buildAgentSelectorSystemPrompt() },
+              {
+                role: 'user',
+                content: agentSelectorPrompt.buildAgentSelectorUserPrompt({
+                  mission: agent.mission ?? '',
+                  useCase: agent.useCase ?? undefined,
+                  targetRoles: sharedMissionContext.targetRoles,
+                  industries: sharedMissionContext.industries,
+                  locations: sharedMissionContext.locations,
+                }),
+              },
+            ],
+            1,
+          );
+        } catch (err) {
+          logger.warn({ err, masterAgentId }, 'Agent selector failed — defaulting by useCase');
+          selection = {
+            selectedAgents: agent.useCase === 'recruitment' ? ['candidate-finder'] : ['company-finder'],
+            reasoning: 'fallback (LLM error)',
+          };
+        }
+
+        const valid = (Array.isArray(selection.selectedAgents) ? selection.selectedAgents : []).filter(
+          (a): a is 'company-finder' | 'candidate-finder' =>
+            a === 'company-finder' || a === 'candidate-finder',
+        );
+        if (valid.length === 0) {
+          valid.push(agent.useCase === 'recruitment' ? 'candidate-finder' : 'company-finder');
+        }
+
+        logger.info(
+          { masterAgentId, selectedAgents: valid, reasoning: selection.reasoning },
+          'Agent selector decision',
+        );
+
+        for (const agentType of valid) {
+          const jobId = await this.dispatchNext(agentType, {
+            masterAgentId,
+            missionContext: sharedMissionContext,
+            pipelineContext,
+            dryRun: dryRun || undefined,
+          });
+          dispatchedJobIds.push(jobId);
+          logger.info({ masterAgentId, jobId, agentType }, 'Dispatched finder job');
+        }
+      } else {
+        // Legacy path: SearXNG-based discovery batching (kept for rollback).
+        let jobIndex = 0;
+
+        // Helper: batch delay = batchIndex * 5 min + withinBatch * 2s
+        const getBatchDelay = (i: number) => {
+          const batchIndex = Math.floor(i / 5);
+          const withinBatch = i % 5;
+          return batchIndex * 300000 + withinBatch * 2000;
+        };
+
+        // 7a. For sales: dispatch opportunity-focused queries FIRST
+        const strategyQueries = pipelineContext?.sales?.salesStrategy?.opportunitySearchQueries;
+        if (strategyQueries && strategyQueries.length > 0) {
+          for (const sq of strategyQueries) {
+            const searchQuery = typeof sq === 'string' ? sq : sq.query;
+            if (!searchQuery) continue;
+            const jobId = await this.dispatchNext(
+              'discovery',
+              {
+                searchQueries: [searchQuery],
+                maxResults: 10,
+                masterAgentId,
+                opportunityFocused: true,
+                pipelineContext,
+                dryRun: dryRun || undefined,
+              },
+              { delay: getBatchDelay(jobIndex) },
+            );
+            dispatchedJobIds.push(jobId);
+            jobIndex++;
+          }
+          logger.info({ masterAgentId, strategyQueryCount: strategyQueries.length }, 'Dispatched opportunity-focused discovery jobs (Phase 1)');
+        }
+
+        // 7b. Dispatch standard discovery queries in batches of 5
+        for (const q of queries) {
           const jobId = await this.dispatchNext(
             'discovery',
             {
-              searchQueries: [searchQuery],
+              searchQueries: [q!],
               maxResults: 10,
               masterAgentId,
-              opportunityFocused: true,
               pipelineContext,
               dryRun: dryRun || undefined,
             },
@@ -347,47 +451,29 @@ export class MasterAgent extends BaseAgent {
           dispatchedJobIds.push(jobId);
           jobIndex++;
         }
-        logger.info({ masterAgentId, strategyQueryCount: strategyQueries.length }, 'Dispatched opportunity-focused discovery jobs (Phase 1)');
-      }
 
-      // 7b. Dispatch standard discovery queries in batches of 5
-      for (const q of queries) {
-        const jobId = await this.dispatchNext(
+        // 7c. Dispatch deep discovery job 15 minutes after start
+        const deepJobId = await this.dispatchNext(
           'discovery',
           {
-            searchQueries: [q!],
-            maxResults: 10,
+            deepDiscovery: true,
+            discoveryParams: {
+              keywords: queries.slice(0, 5),
+              industry: ((requirements.searchCriteria as Record<string, unknown>)?.industries as string[])?.[0],
+              location: (requirements.locations as string[])?.[0],
+              techStack: requirements.requiredSkills as string[],
+              targetRoles: requirements.targetRoles as string[],
+              useCase: agent.useCase as 'recruitment' | 'sales',
+              targetCountries: (agentConfig.targetCountries as string[]) ?? undefined,
+            },
             masterAgentId,
             pipelineContext,
             dryRun: dryRun || undefined,
           },
-          { delay: getBatchDelay(jobIndex) },
+          { delay: 900000 }, // 15 minutes
         );
-        dispatchedJobIds.push(jobId);
-        jobIndex++;
+        dispatchedJobIds.push(deepJobId);
       }
-
-      // 7c. Dispatch deep discovery job 15 minutes after start
-      const deepJobId = await this.dispatchNext(
-        'discovery',
-        {
-          deepDiscovery: true,
-          discoveryParams: {
-            keywords: queries.slice(0, 5),
-            industry: ((requirements.searchCriteria as Record<string, unknown>)?.industries as string[])?.[0],
-            location: (requirements.locations as string[])?.[0],
-            techStack: requirements.requiredSkills as string[],
-            targetRoles: requirements.targetRoles as string[],
-            useCase: agent.useCase as 'recruitment' | 'sales',
-            targetCountries: (agentConfig.targetCountries as string[]) ?? undefined,
-          },
-          masterAgentId,
-          pipelineContext,
-          dryRun: dryRun || undefined,
-        },
-        { delay: 900000 }, // 15 minutes
-      );
-      dispatchedJobIds.push(deepJobId);
     }
 
     this.sendMessage(null, 'task_assignment', {

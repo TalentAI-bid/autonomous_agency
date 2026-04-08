@@ -1,0 +1,470 @@
+/**
+ * CompanyFinderAgent — the replacement for DiscoveryAgent.
+ *
+ * Pipeline:
+ *   1. Mission analysis → LLM picks sites from SITE_CONFIGS + keyword pool
+ *   2. Site crawl      → smart-crawler.crawlSite for each chosen site
+ *   3. Extraction      → LLM extracts JobListing[] or CompanyEntry[] per page
+ *   4. Dedupe + filter → normalize names, drop job-board self-references,
+ *                        drop mega-corp and skip-domains
+ *   5. Domain backfill → Google-SERP-extract per company missing a domain
+ *   6. Persist + dispatch → saveOrUpdateCompany + dispatchNext('enrichment')
+ *
+ * Gated by env.USE_COMPANY_FINDER in master-agent.ts. When false, master
+ * dispatches the legacy DiscoveryAgent instead.
+ */
+
+import { BaseAgent } from './base-agent.js';
+import type { AgentType } from '../queues/queues.js';
+import { SITE_CONFIGS } from '../config/site-configs.js';
+import { crawlSite, crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
+import * as cfPrompt from '../prompts/company-finder.prompt.js';
+import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
+import type { PipelineContext } from '../types/pipeline-context.js';
+import logger from '../utils/logger.js';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface MissionContext {
+  mission: string;
+  locations?: string[];
+  industries?: string[];
+  targetRoles?: string[];
+  keywords?: string[];
+}
+
+interface CompanyFinderInput {
+  masterAgentId: string;
+  missionContext: MissionContext;
+  pipelineContext?: PipelineContext;
+  dryRun?: boolean;
+}
+
+interface CompanyFinderMetrics {
+  sitesCrawled: number;
+  pagesScraped: number;
+  listingsExtracted: number;
+  uniqueCompanies: number;
+  saved: number;
+  dispatched: number;
+}
+
+interface CompanyFinderOutput {
+  status: 'completed' | 'failed';
+  metrics: CompanyFinderMetrics;
+  error?: string;
+}
+
+// Aggregated record we build during dedupe
+interface AggregatedCompany {
+  displayName: string;
+  domain: string | null;
+  discoveryUrls: string[];
+  discoverySite: string;
+  sourceType: 'job_board' | 'company_database';
+  jobTitles: string[];
+  jobLocations: string[];
+  descriptions: string[];
+  relevanceScore?: number;
+  industry?: string;
+  location?: string;
+  size?: string;
+  revenue?: string;
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+/** Strip common legal suffixes for dedupe (anchored at end, optional period). */
+const LEGAL_SUFFIX_RE = /\s+(SAS|SARL|SA|SRL|Ltd|Inc|GmbH|LLC|BV|AG|Pty|PLC|Corp|Co|Limited|Incorporated|Corporation)\.?$/i;
+
+/** Names that should never be saved as a company (job boards self-referencing). */
+const COMPANY_NAME_BLOCKLIST = new Set([
+  'unknown', 'n/a', 'na',
+  'indeed', 'linkedin', 'glassdoor', 'monster',
+  'welcome to the jungle', 'welcometothejungle',
+  'apec', 'pole emploi', 'pôle emploi', 'france travail',
+  'freework', 'free-work', 'free work',
+  'stepstone', 'step stone', 'dice',
+  'job bank', 'jobbank', 'jobbank canada',
+  'infojobs', 'cvkeskus', 'irishjobs', 'irish jobs',
+  'societe.com', 'societe',
+  'crunchbase', 'bloomberg', 'zoominfo', 'apollo',
+  'rocketreach', 'wikipedia',
+]);
+
+/** Cap on per-company Google domain backfills to avoid SERP blocks on large missions. */
+const MAX_DOMAIN_BACKFILLS = 20;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function normalizeCompanyKey(name: string): string {
+  const stripped = name.trim().replace(LEGAL_SUFFIX_RE, '').trim();
+  return stripped.toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isBlockedCompanyName(name: string): boolean {
+  const key = normalizeCompanyKey(name);
+  if (!key || key.length < 2) return true;
+  return COMPANY_NAME_BLOCKLIST.has(key);
+}
+
+function normalizeDomain(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    if (trimmed.includes('://')) {
+      return new URL(trimmed).hostname.replace(/^www\./, '').toLowerCase();
+    }
+    if (trimmed.includes('.') && !trimmed.includes(' ')) {
+      return trimmed.replace(/^www\./, '').toLowerCase();
+    }
+  } catch {
+    // invalid URL
+  }
+  return null;
+}
+
+// ── Agent ──────────────────────────────────────────────────────────────────
+
+export class CompanyFinderAgent extends BaseAgent {
+  constructor(opts: { tenantId: string; masterAgentId: string }) {
+    super({ ...opts, agentType: 'company-finder' as AgentType });
+  }
+
+  async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const typedInput = input as unknown as CompanyFinderInput;
+    const { masterAgentId, missionContext, pipelineContext, dryRun } = typedInput;
+    const startedAt = Date.now();
+    const metrics: CompanyFinderMetrics = {
+      sitesCrawled: 0,
+      pagesScraped: 0,
+      listingsExtracted: 0,
+      uniqueCompanies: 0,
+      saved: 0,
+      dispatched: 0,
+    };
+
+    const availableSiteKeys = Object.keys(SITE_CONFIGS);
+    if (availableSiteKeys.length === 0) {
+      logger.warn('CompanyFinder: SITE_CONFIGS is empty — nothing to crawl');
+      return { status: 'completed', metrics };
+    }
+
+    // ── Phase 1: Mission analysis ──────────────────────────────────────────
+    let analysis: cfPrompt.MissionAnalysis;
+    try {
+      analysis = await this.extractJSON<cfPrompt.MissionAnalysis>(
+        [
+          { role: 'system', content: cfPrompt.buildMissionAnalyzerSystemPrompt() },
+          {
+            role: 'user',
+            content: cfPrompt.buildMissionAnalyzerUserPrompt(missionContext, availableSiteKeys),
+          },
+        ],
+        2,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err: msg }, 'CompanyFinder: mission analysis failed');
+      return { status: 'failed', metrics, error: `mission analysis: ${msg}` };
+    }
+
+    logger.info(
+      {
+        missionType: analysis.missionType,
+        targetCountry: analysis.targetCountry,
+        sitesRequested: analysis.sitesToCrawl,
+      },
+      'CompanyFinder: mission analyzed',
+    );
+
+    // ── Validate site keys + country filter ───────────────────────────────
+    const targetCountry = (analysis.targetCountry || '').toLowerCase();
+
+    const requestedSites = Array.isArray(analysis.sitesToCrawl) ? analysis.sitesToCrawl : [];
+    const validSites = requestedSites.filter((siteKey) => {
+      const config = SITE_CONFIGS[siteKey];
+      if (!config) {
+        logger.warn({ siteKey }, 'CompanyFinder: LLM returned unknown site key, dropping');
+        return false;
+      }
+      if (!targetCountry) return true;
+      if (config.countries.includes('all')) return true;
+      return config.countries.includes(targetCountry);
+    });
+
+    // Fallback: if nothing passed filter, use 'all'-tagged sites (LinkedIn Jobs etc.)
+    const sitesToCrawl =
+      validSites.length > 0
+        ? validSites
+        : availableSiteKeys.filter((k) => SITE_CONFIGS[k]!.countries.includes('all'));
+
+    if (sitesToCrawl.length === 0) {
+      logger.warn(
+        { targetCountry, requested: requestedSites },
+        'CompanyFinder: no valid sites after country filter',
+      );
+      return { status: 'completed', metrics };
+    }
+
+    // ── Build keyword pool ─────────────────────────────────────────────────
+    const allKeywords = this.pickKeywordPool(analysis.searchKeywords, targetCountry);
+    if (allKeywords.length === 0) {
+      logger.warn('CompanyFinder: empty keyword pool from mission analysis');
+      return { status: 'completed', metrics };
+    }
+
+    const primaryCity = analysis.targetCities?.[0];
+
+    // ── Phase 2+3: Crawl + extract per site ────────────────────────────────
+    type ExtractedListing = cfPrompt.JobListing & { siteKey: string; url: string };
+    type ExtractedCompanyEntry = cfPrompt.CompanyEntry & { siteKey: string; url: string };
+
+    const listings: ExtractedListing[] = [];
+    const companyEntries: ExtractedCompanyEntry[] = [];
+
+    for (const siteKey of sitesToCrawl) {
+      const config = SITE_CONFIGS[siteKey]!;
+      metrics.sitesCrawled++;
+
+      let pages: Array<{ url: string; content: string }>;
+      try {
+        pages = await crawlSite(siteKey, allKeywords, primaryCity);
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), siteKey },
+          'CompanyFinder: crawlSite threw',
+        );
+        continue;
+      }
+      metrics.pagesScraped += pages.length;
+
+      for (const page of pages) {
+        const systemPrompt = cfPrompt.buildExtractionSystemPrompt(config.type, allKeywords, {
+          industries: missionContext.industries,
+          targetCountry,
+        });
+        const userPrompt = cfPrompt.buildExtractionUserPrompt({
+          url: page.url,
+          siteName: config.name,
+          content: page.content,
+        });
+
+        try {
+          if (config.type === 'company_database') {
+            const result = await this.extractJSON<cfPrompt.CompanyDatabaseExtractionResult>(
+              [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              2,
+            );
+            for (const c of result.companies ?? []) {
+              companyEntries.push({ ...c, siteKey, url: page.url });
+            }
+          } else {
+            const result = await this.extractJSON<cfPrompt.JobBoardExtractionResult>(
+              [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              2,
+            );
+            for (const l of result.listings ?? []) {
+              listings.push({ ...l, siteKey, url: page.url });
+            }
+          }
+        } catch (err) {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err), siteKey, url: page.url },
+            'CompanyFinder: extraction failed',
+          );
+        }
+      }
+    }
+
+    metrics.listingsExtracted = listings.length + companyEntries.length;
+
+    // ── Phase 4: Dedupe + filter ──────────────────────────────────────────
+    const companyMap = new Map<string, AggregatedCompany>();
+
+    for (const l of listings) {
+      if (isBlockedCompanyName(l.companyName)) continue;
+      const domain = normalizeDomain(l.companyDomain);
+      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) continue;
+
+      const key = normalizeCompanyKey(l.companyName);
+      const existing = companyMap.get(key);
+      if (existing) {
+        if (!existing.discoveryUrls.includes(l.url)) existing.discoveryUrls.push(l.url);
+        if (l.jobTitle) existing.jobTitles.push(l.jobTitle);
+        if (l.jobLocation) existing.jobLocations.push(l.jobLocation);
+        if (l.description) existing.descriptions.push(l.description);
+        if (!existing.domain && domain) existing.domain = domain;
+      } else {
+        companyMap.set(key, {
+          displayName: l.companyName.trim(),
+          domain,
+          discoveryUrls: [l.url],
+          discoverySite: l.siteKey,
+          sourceType: 'job_board',
+          jobTitles: l.jobTitle ? [l.jobTitle] : [],
+          jobLocations: l.jobLocation ? [l.jobLocation] : [],
+          descriptions: l.description ? [l.description] : [],
+          relevanceScore: l.relevanceScore,
+        });
+      }
+    }
+
+    for (const c of companyEntries) {
+      if (isBlockedCompanyName(c.name)) continue;
+      const domain = normalizeDomain(c.domain);
+      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) continue;
+
+      const key = normalizeCompanyKey(c.name);
+      const existing = companyMap.get(key);
+      if (existing) {
+        if (!existing.domain && domain) existing.domain = domain;
+        if (!existing.industry && c.industry) existing.industry = c.industry;
+        if (!existing.location && c.location) existing.location = c.location;
+        if (!existing.size && c.size) existing.size = c.size;
+        if (!existing.revenue && c.revenue) existing.revenue = c.revenue;
+        if (c.description) existing.descriptions.push(c.description);
+        if (!existing.discoveryUrls.includes(c.url)) existing.discoveryUrls.push(c.url);
+      } else {
+        companyMap.set(key, {
+          displayName: c.name.trim(),
+          domain,
+          discoveryUrls: [c.url],
+          discoverySite: c.siteKey,
+          sourceType: 'company_database',
+          jobTitles: [],
+          jobLocations: c.location ? [c.location] : [],
+          descriptions: c.description ? [c.description] : [],
+          industry: c.industry || undefined,
+          location: c.location || undefined,
+          size: c.size || undefined,
+          revenue: c.revenue || undefined,
+        });
+      }
+    }
+
+    metrics.uniqueCompanies = companyMap.size;
+
+    if (dryRun) {
+      const elapsedMs = Date.now() - startedAt;
+      logger.info({ ...metrics, elapsedMs }, 'CompanyFinder: dry run summary');
+      return { status: 'completed', metrics };
+    }
+
+    // ── Phase 5: Domain backfill (best-effort, capped) ────────────────────
+    const companyList = Array.from(companyMap.values());
+    let backfillsRemaining = MAX_DOMAIN_BACKFILLS;
+    for (const company of companyList) {
+      if (company.domain) continue;
+      if (backfillsRemaining <= 0) break;
+      backfillsRemaining--;
+      try {
+        const { urls } = await crawlGoogleAndExtractUrls(
+          this.tenantId,
+          `${company.displayName} official website`,
+          'company_domain',
+          { companyName: company.displayName },
+        );
+        const firstUrl = urls[0]?.url;
+        if (firstUrl) {
+          try {
+            const d = new URL(firstUrl).hostname.replace(/^www\./, '');
+            if (!shouldSkipDomain(d) && !isMegaCorp(d)) {
+              company.domain = d;
+            }
+          } catch {
+            // invalid URL
+          }
+        }
+      } catch (err) {
+        logger.debug(
+          { err: err instanceof Error ? err.message : String(err), company: company.displayName },
+          'CompanyFinder: domain backfill failed',
+        );
+      }
+    }
+
+    // ── Phase 6: Persist + dispatch enrichment ────────────────────────────
+    for (const company of companyList) {
+      try {
+        const primaryJobTitle = company.jobTitles[0];
+        const primaryJobLocation = company.jobLocations[0];
+        const description = company.descriptions.join(' | ').slice(0, 500);
+
+        const rawData: Record<string, unknown> = {
+          discoverySource: 'company-finder',
+          discoverySite: company.discoverySite,
+          discoveryUrl: company.discoveryUrls[0],
+          discoveryUrls: company.discoveryUrls,
+          sourceType: company.sourceType,
+        };
+        if (company.sourceType === 'job_board') {
+          rawData.hiringSignal = 'job_posting';
+          if (primaryJobTitle) rawData.jobTitle = primaryJobTitle;
+          if (primaryJobLocation) rawData.jobLocation = primaryJobLocation;
+        }
+        if (company.relevanceScore != null) rawData.relevanceScore = company.relevanceScore;
+        if (company.industry) rawData.industry = company.industry;
+        if (company.location) rawData.location = company.location;
+        if (company.size) rawData.size = company.size;
+        if (company.revenue) rawData.revenue = company.revenue;
+
+        const saved = await this.saveOrUpdateCompany({
+          name: company.displayName,
+          domain: company.domain ?? undefined,
+          description: description || undefined,
+          rawData,
+        });
+        metrics.saved++;
+
+        await this.dispatchNext('enrichment', {
+          companyId: saved.id,
+          masterAgentId,
+          pipelineContext,
+          dryRun,
+        });
+        metrics.dispatched++;
+      } catch (err) {
+        logger.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            company: company.displayName,
+          },
+          'CompanyFinder: save/dispatch failed',
+        );
+      }
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    logger.info({ ...metrics, elapsedMs }, 'CompanyFinder summary');
+
+    return { status: 'completed', metrics };
+  }
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+
+  /** Mix EN + local keywords, prefer local for non-English countries. Dedupe + cap at 8. */
+  private pickKeywordPool(
+    searchKeywords: { en: string[]; local: string[] },
+    targetCountry: string,
+  ): string[] {
+    const en = searchKeywords?.en ?? [];
+    const local = searchKeywords?.local ?? [];
+    if (!en.length) return local.slice(0, 8);
+    if (!local.length) return en.slice(0, 8);
+
+    const localFirstCountries = new Set([
+      'fr', 'be', 'lu', 'ch', 'de', 'at', 'es', 'pt', 'it', 'ee',
+      'nl', 'pl', 'ro', 'gr', 'hu', 'cz', 'sk', 'fi', 'se', 'no', 'dk',
+    ]);
+    const ordered = localFirstCountries.has(targetCountry) ? [...local, ...en] : [...en, ...local];
+    return Array.from(new Set(ordered.filter((k) => k && k.trim().length > 0))).slice(0, 8);
+  }
+}

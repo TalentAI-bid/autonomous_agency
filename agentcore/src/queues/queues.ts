@@ -4,6 +4,7 @@ import { queueRedis } from './setup.js';
 export const AGENT_TYPES = [
   'discovery', 'enrichment', 'document', 'scoring', 'outreach', 'reply', 'action',
   'email-listen', 'email-send', 'mailbox', 'reddit-monitor', 'strategy', 'strategist',
+  'company-finder', 'candidate-finder',
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -71,6 +72,14 @@ export const QUEUE_CONFIGS: Record<QueueType, {
   strategist: {
     defaultJobOptions: { attempts: 2, backoff: { type: 'exponential', delay: 30000 } },
     concurrency: 1,
+  },
+  'company-finder': {
+    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 30000 } },
+    concurrency: 2,
+  },
+  'candidate-finder': {
+    defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 30000 } },
+    concurrency: 2,
   },
   'dead-letter': {
     defaultJobOptions: { attempts: 1, backoff: { type: 'fixed', delay: 0 } },

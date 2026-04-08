@@ -5,6 +5,8 @@ import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import { isMegaCorp, shouldSkipDomain, isJunkUrl } from '../utils/domain-blocklist.js';
 import { type SearchResult } from '../tools/searxng.tool.js';
+import { crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
+import type { UrlExtractionIntent } from '../prompts/url-extraction.prompt.js';
 import {
   buildSystemPrompt as candidateSystemPrompt,
   buildUserPrompt as candidateUserPrompt,
@@ -20,11 +22,22 @@ import {
   buildUserPrompt as searchKeywordsUserPrompt,
   type GeneratedSearchQueries,
 } from '../prompts/search-keywords.prompt.js';
-import { EFFECTIVE_RATE_LIMIT } from '../tools/searxng.tool.js';
+import { pickBestLinkedInCompanyUrl } from '../utils/linkedin-match.js';
 import logger from '../utils/logger.js';
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Pull discovery-source signals out of an existing company.rawData so they survive enrichment overwrites. */
+function extractPreservedDiscoveryData(rawData: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!rawData) return {};
+  const preservedKeys = [
+    'discoveryQuery', 'discoveryUrl', 'hiringSignal', 'hiringVerified',
+    'job_title', 'job_url', 'job_source', 'extractedFrom', 'entityType',
+    'discoverySource', 'originalLocation',
+  ];
+  const out: Record<string, unknown> = {};
+  for (const k of preservedKeys) {
+    if (rawData[k] !== undefined) out[k] = rawData[k];
+  }
+  return out;
 }
 
 function buildMissionContextString(ctx: unknown): string | undefined {
@@ -67,24 +80,9 @@ export class EnrichmentAgent extends BaseAgent {
 
     logger.info({ tenantId: this.tenantId, contactId }, 'EnrichmentAgent starting');
 
-    // Check SearXNG budget — skip enrichment if exhausted
-    try {
-      const searchCount = await this.redis.get(`tenant:${this.tenantId}:ratelimit:search`);
-      const count = searchCount ? parseInt(searchCount, 10) : 0;
-      const remaining = EFFECTIVE_RATE_LIMIT - count;
-      if (remaining < 50) {
-        const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
-        logger.warn({ tenantId: this.tenantId, contactId, remaining, count, ttl }, 'SearXNG budget exhausted — skipping enrichment');
-        await this.clearCurrentAction();
-        return { enriched: false, reason: 'search_budget_exhausted', remaining };
-      }
-      if (remaining < 200) {
-        const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
-        logger.warn({ tenantId: this.tenantId, contactId, remaining, ttl }, 'SearXNG budget low');
-      }
-    } catch {
-      // Redis check failure is non-critical, continue
-    }
+    // NOTE: SearXNG budget guard removed — discovery now goes through smart-crawler
+    // (Google/Brave/DDG) with its own in-process rate limiter. SearXNG is only a
+    // last-resort fallback inside specific lookups.
 
     await this.setCurrentAction('enrichment', `Enriching contact ${contactId.slice(0, 8)}`);
 
@@ -198,7 +196,7 @@ export class EnrichmentAgent extends BaseAgent {
     sourceResults.forEach((result, i) => {
       if (result.status === 'rejected') {
         const sourceNames = useCase === 'sales'
-          ? ['LinkedIn', 'CompanyTeamPage', 'CompanyNews', 'IndustryPubs', 'Twitter/X', 'CompanyLinkedIn']
+          ? ['LinkedIn', 'CompanyTeamPage']
           : ['LinkedIn', 'GitHub', 'Twitter/X', 'StackOverflow', 'Blog/Portfolio', 'DevCommunity'];
         logger.warn({ err: result.reason, contactId, source: sourceNames[i] }, 'Source search failed');
       }
@@ -214,14 +212,16 @@ export class EnrichmentAgent extends BaseAgent {
         // Search for company website using LLM-generated smart queries (max 2)
         let companySearchResults: SearchResult[] = [];
         for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
-          const results = await this.searchWeb(query, 10);
+          const results = await this.serpSearch(query, 'company_domain', { companyName: contactCompanyName });
           companySearchResults.push(...results);
           if (results.length > 0) break;
         }
         // Fallback to hardcoded query if smart queries returned nothing
         if (companySearchResults.length === 0) {
-          companySearchResults = await this.searchWeb(
+          companySearchResults = await this.serpSearch(
             `${contactCompanyName} company official website`,
+            'company_domain',
+            { companyName: contactCompanyName },
           );
           if (companySearchResults.length === 0) {
             logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
@@ -278,32 +278,43 @@ export class EnrichmentAgent extends BaseAgent {
             }
           })(),
 
-          // Source 3: LinkedIn + Crunchbase combined (1 SearXNG call instead of 2)
+          // Source 3: LinkedIn company page (intent-filtered) + Crunchbase fallback
           (async () => {
-            const query = `"${contactCompanyName}" LinkedIn OR Crunchbase OR funding`;
-            const results = await this.searchWeb(query, 10);
-            // Extract LinkedIn company URL
-            const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
+            const liResults = await this.serpSearch(
+              `"${contactCompanyName}" linkedin company`,
+              'linkedin_company',
+              { companyName: contactCompanyName },
+            );
+            const liUrl = pickBestLinkedInCompanyUrl(liResults, contactCompanyName);
             if (liUrl) {
               linkedinCompanyContent = await this.scrapeUrl(liUrl);
               logger.info({ contactId, liUrl }, 'LinkedIn company page scraped');
             }
-            // Extract Crunchbase/funding URL
-            const cbUrl = results.find((r) =>
+            // Crunchbase: best-effort generic news lookup that often surfaces it
+            const newsResults = await this.serpSearch(
+              `"${contactCompanyName}" funding crunchbase OR techcrunch`,
+              'news',
+              { companyName: contactCompanyName },
+            );
+            const cbUrl = newsResults.find((r) =>
               r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'),
             )?.url;
             if (cbUrl) {
               crunchbaseContent = await this.scrapeUrl(cbUrl);
               logger.info({ contactId, cbUrl }, 'Crunchbase/funding content scraped');
             } else {
-              crunchbaseContent = results.filter(r => !r.url.includes('linkedin.com')).slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
+              crunchbaseContent = newsResults
+                .filter((r) => !r.url.includes('linkedin.com'))
+                .slice(0, 3)
+                .map((r) => `${r.title}: ${r.snippet}`)
+                .join('\n');
             }
           })(),
 
-          // Source 4: Company news (1 SearXNG call)
+          // Source 4: Company news (LLM URL extraction from SERP, intent='news')
           (async () => {
             const query = `${contactCompanyName} latest news 2026`;
-            const results = await this.searchWeb(query, 5);
+            const results = await this.serpSearch(query, 'news', { companyName: contactCompanyName });
             newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
             logger.info({ contactId, resultsCount: results.length }, 'Company news gathered');
           })(),
@@ -349,7 +360,34 @@ export class EnrichmentAgent extends BaseAgent {
         const resolvedCompanyName = typeof deepCompany.name === 'object'
           ? (deepCompany.name as any).name || contactCompanyName
           : (deepCompany.name || contactCompanyName);
+
+        // Fix A: preserve discovery signals from the existing row pinned by contact.companyId.
+        // Without this, fuzzy name-matching may create a NEW company row and the original
+        // discovery rawData (hiringSignal, job_url, ...) is orphaned on the old row.
+        let preservedDiscoveryData: Record<string, unknown> = {};
+        if (contact.companyId) {
+          try {
+            const [existingCompany] = await withTenant(this.tenantId, async (tx) => {
+              return tx.select({ rawData: companies.rawData }).from(companies)
+                .where(eq(companies.id, contact.companyId!))
+                .limit(1);
+            });
+            preservedDiscoveryData = extractPreservedDiscoveryData(
+              existingCompany?.rawData as Record<string, unknown> | null,
+            );
+          } catch (err) {
+            logger.debug({ err, contactId, companyId: contact.companyId }, 'Failed to fetch existing company for discovery preservation');
+          }
+        }
+
+        // Validate LLM-returned linkedinUrl for the COMPANY — must contain a name token
+        const llmCompanyLinkedinUrl = deepCompany.linkedinUrl || '';
+        const validatedCompanyLinkedinUrl = llmCompanyLinkedinUrl
+          ? (pickBestLinkedInCompanyUrl([{ url: llmCompanyLinkedinUrl, title: resolvedCompanyName, snippet: '' }], resolvedCompanyName) ?? undefined)
+          : undefined;
+
         const company = await this.saveOrUpdateCompany({
+          id: contact.companyId ?? undefined,
           name: resolvedCompanyName,
           domain: deepCompany.domain || companyDomain || undefined,
           industry: deepCompany.industry || undefined,
@@ -357,9 +395,10 @@ export class EnrichmentAgent extends BaseAgent {
           techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,
           funding: deepCompany.funding || undefined,
           description: deepCompany.description || undefined,
-          linkedinUrl: deepCompany.linkedinUrl || undefined,
+          linkedinUrl: validatedCompanyLinkedinUrl,
           dataCompleteness: companyDataCompleteness,
           rawData: {
+            ...preservedDiscoveryData,
             products: deepCompany.products,
             foundedYear: deepCompany.foundedYear,
             headquarters: deepCompany.headquarters,
@@ -401,7 +440,7 @@ export class EnrichmentAgent extends BaseAgent {
               if (!personLinkedinUrl) {
                 try {
                   const query = `"${person.name}" "${contactCompanyName}" linkedin profile`;
-                  const results = await this.searchWeb(query, 3);
+                  const results = await this.serpSearch(query, 'linkedin_person', { companyName: contactCompanyName, personName: person.name });
                   personLinkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url ?? '';
                   if (personLinkedinUrl) {
                     logger.info({ contactId, personName: person.name, personLinkedinUrl }, 'Key person LinkedIn found');
@@ -511,7 +550,11 @@ export class EnrichmentAgent extends BaseAgent {
         }
 
         if (!domain) {
-          const domainResults = await this.searchWeb(`${contactCompanyName} official website`);
+          const domainResults = await this.serpSearch(
+            `${contactCompanyName} official website`,
+            'company_domain',
+            { companyName: contactCompanyName },
+          );
           const domainUrl = domainResults.find((r) =>
             !r.url.includes('linkedin.com') &&
             !r.url.includes('facebook.com') &&
@@ -806,19 +849,8 @@ export class EnrichmentAgent extends BaseAgent {
   ): Promise<Record<string, unknown>> {
     logger.info({ tenantId: this.tenantId, companyId }, 'EnrichmentAgent starting (company-only)');
 
-    // Check SearXNG budget — skip enrichment if exhausted
-    try {
-      const searchCount = await this.redis.get(`tenant:${this.tenantId}:ratelimit:search`);
-      const count = searchCount ? parseInt(searchCount, 10) : 0;
-      const remaining = EFFECTIVE_RATE_LIMIT - count;
-      if (remaining < 50) {
-        const ttl = await this.redis.ttl(`tenant:${this.tenantId}:ratelimit:search`);
-        logger.warn({ tenantId: this.tenantId, companyId, remaining, count, ttl }, 'SearXNG budget exhausted — skipping company enrichment');
-        return { enriched: false, reason: 'search_budget_exhausted', remaining };
-      }
-    } catch {
-      // Redis check failure is non-critical, continue
-    }
+    // NOTE: SearXNG budget guard removed — see contact-path note. Smart-crawler
+    // enforces its own per-domain delay and hourly cap.
 
     await this.setCurrentAction('company_enrichment', `Enriching company ${companyId.slice(0, 8)}`);
 
@@ -876,7 +908,7 @@ export class EnrichmentAgent extends BaseAgent {
     if (!companyDomain) {
       const noiseDomains = ['linkedin.com', 'glassdoor.com', 'indeed.com', 'crunchbase.com', 'wikipedia.org', 'twitter.com', 'facebook.com'];
       for (const query of smartQueries.domainResolutionQueries.slice(0, 2)) {
-        const results = await this.searchWeb(query, 5);
+        const results = await this.serpSearch(query, 'company_domain', { companyName });
         for (const r of results) {
           try {
             const hostname = new URL(r.url).hostname.replace('www.', '');
@@ -899,14 +931,16 @@ export class EnrichmentAgent extends BaseAgent {
       // Search for company website using LLM-generated smart queries
       let companySearchResults: SearchResult[] = [];
       for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
-        const results = await this.searchWeb(query, 10);
+        const results = await this.serpSearch(query, 'company_domain', { companyName });
         companySearchResults.push(...results);
         if (results.length > 0) break;
       }
       // Fallback to hardcoded query if smart queries returned nothing
       if (companySearchResults.length === 0) {
-        companySearchResults = await this.searchWeb(
+        companySearchResults = await this.serpSearch(
           `${companyName} company official website`,
+          'company_domain',
+          { companyName },
         );
         if (companySearchResults.length === 0) {
           logger.warn({ companyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
@@ -944,20 +978,29 @@ export class EnrichmentAgent extends BaseAgent {
             } catch { /* try next path */ }
           }
         })(),
-        // LinkedIn + Crunchbase combined (1 SearXNG call instead of 2)
+        // LinkedIn company page (intent-filtered) + Crunchbase fallback
         (async () => {
-          const query = `"${companyName}" LinkedIn OR Crunchbase OR funding`;
-          const results = await this.searchWeb(query, 10);
-          const liUrl = results.find((r) => r.url.includes('linkedin.com/company/'))?.url;
+          const liResults = await this.serpSearch(
+            `"${companyName}" linkedin company`,
+            'linkedin_company',
+            { companyName },
+          );
+          // Validated by slug-token match (Fix D) — never accept first-match guess
+          const liUrl = pickBestLinkedInCompanyUrl(liResults, companyName);
           if (liUrl) linkedinCompanyContent = await this.scrapeUrl(liUrl);
-          const cbUrl = results.find((r) => r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'))?.url;
+          const newsResults = await this.serpSearch(
+            `"${companyName}" funding crunchbase OR techcrunch`,
+            'news',
+            { companyName },
+          );
+          const cbUrl = newsResults.find((r) => r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'))?.url;
           if (cbUrl) crunchbaseContent = await this.scrapeUrl(cbUrl);
-          else crunchbaseContent = results.filter(r => !r.url.includes('linkedin.com')).slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
+          else crunchbaseContent = newsResults.filter(r => !r.url.includes('linkedin.com')).slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
         })(),
-        // Company news (1 SearXNG call)
+        // Company news (LLM URL extraction from SERP)
         (async () => {
           const query = `${companyName} latest news 2026`;
-          const results = await this.searchWeb(query, 5);
+          const results = await this.serpSearch(query, 'news', { companyName });
           newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
         })(),
       ]);
@@ -1000,7 +1043,22 @@ export class EnrichmentAgent extends BaseAgent {
       const resolvedName = typeof deepCompany.name === 'object'
         ? (deepCompany.name as any).name || companyName
         : (deepCompany.name || companyName);
+
+      // Fix A: pin the row by id so fuzzy name-match cannot create a new row and orphan
+      // discovery signals (hiringSignal, job_url, ...). The full prior rawData is also
+      // spread here for explicit clarity.
+      const preservedDiscoveryDataCO = extractPreservedDiscoveryData(
+        company.rawData as Record<string, unknown> | null,
+      );
+
+      // Validate LLM-returned linkedinUrl for the COMPANY — must contain a name token
+      const llmCompanyLinkedinUrl = deepCompany.linkedinUrl || '';
+      const validatedCompanyLinkedinUrl = llmCompanyLinkedinUrl
+        ? (pickBestLinkedInCompanyUrl([{ url: llmCompanyLinkedinUrl, title: resolvedName, snippet: '' }], resolvedName) ?? undefined)
+        : undefined;
+
       await this.saveOrUpdateCompany({
+        id: companyId,
         name: resolvedName,
         domain: deepCompany.domain || companyDomain || undefined,
         industry: deepCompany.industry || undefined,
@@ -1008,9 +1066,10 @@ export class EnrichmentAgent extends BaseAgent {
         techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,
         funding: deepCompany.funding || undefined,
         description: deepCompany.description || undefined,
-        linkedinUrl: deepCompany.linkedinUrl || undefined,
+        linkedinUrl: validatedCompanyLinkedinUrl,
         dataCompleteness: companyDataCompleteness,
         rawData: {
+          ...preservedDiscoveryDataCO,
           ...(company.rawData as Record<string, unknown> ?? {}),
           products: deepCompany.products,
           foundedYear: deepCompany.foundedYear,
@@ -1069,7 +1128,7 @@ export class EnrichmentAgent extends BaseAgent {
           if (!personLinkedinUrl) {
             try {
               const liQuery = `"${person.name}" "${companyName}" linkedin profile`;
-              const liResults = await this.searchWeb(liQuery, 3);
+              const liResults = await this.serpSearch(liQuery, 'linkedin_person', { companyName, personName: person.name });
               personLinkedinUrl = liResults.find(r => r.url.includes('linkedin.com/in/'))?.url ?? '';
             } catch { /* continue */ }
           }
@@ -1177,6 +1236,31 @@ export class EnrichmentAgent extends BaseAgent {
     }
   }
 
+  // ── SERP search helper (Google → Brave → DuckDuckGo) ────────────────────
+  /**
+   * Replacement for `this.searchWeb()` that goes through smart-crawler:
+   * crawls Google/Brave/DDG, lets the LLM extract URLs matching the given
+   * intent, and returns SearchResult-shaped records so existing post-filter
+   * code (`.find(r => r.url.includes(...))`) keeps working unchanged.
+   */
+  private async serpSearch(
+    query: string,
+    intent: UrlExtractionIntent,
+    hints: { companyName?: string; personName?: string } = {},
+  ): Promise<SearchResult[]> {
+    if (!query || query.trim().length < 3) return [];
+    try {
+      const { urls } = await crawlGoogleAndExtractUrls(this.tenantId, query, intent, hints);
+      return urls.map((u) => ({ url: u.url, title: u.title, snippet: u.snippet }));
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), query, intent },
+        'serpSearch failed — returning empty result list',
+      );
+      return [];
+    }
+  }
+
   // ── LLM-powered smart query generation ──────────────────────────────────
 
   private async generateSmartQueries(params: {
@@ -1264,8 +1348,8 @@ export class EnrichmentAgent extends BaseAgent {
             : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
           for (const query of queries) {
-            await sleep(3000);
-            const results = await this.searchWeb(query, 5);
+            // Per-domain delay is now enforced inside smart-crawler; no manual sleep needed.
+            const results = await this.serpSearch(query, 'linkedin_person', { companyName: contactCompanyName, personName: contactName });
             const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
             if (linkedinUrl) {
               setLinkedinSearchContent(await this.scrapeUrl(linkedinUrl));
@@ -1291,7 +1375,7 @@ export class EnrichmentAgent extends BaseAgent {
           : [`${contactName} github ${skillsStr}`.trim()];
         let githubResults: SearchResult[] = [];
         for (const q of queries) {
-          githubResults = await this.searchWeb(q, 5);
+          githubResults = await this.serpSearch(q, 'github_profile', { personName: contactName });
           if (githubResults.length > 0) break;
         }
         const githubUrl = githubResults.find((r) =>
@@ -1321,7 +1405,7 @@ export class EnrichmentAgent extends BaseAgent {
           ? smartQueries.contactSocialQueries
           : [`"${contactName}" ${contactTitle || skillsStr} twitter profile`.trim()];
         for (const query of queries) {
-          const results = await this.searchWeb(query, 5);
+          const results = await this.serpSearch(query, 'twitter_profile', { personName: contactName });
           const twitterUrl = results.find((r) =>
             (r.url.includes('twitter.com/') || r.url.includes('x.com/')) &&
             !r.url.includes('/status/') &&
@@ -1339,7 +1423,7 @@ export class EnrichmentAgent extends BaseAgent {
       (async () => {
         if (!contactName) return;
         const query = `"${contactName}" ${skillsStr} stackoverflow user`.trim();
-        const results = await this.searchWeb(query, 5);
+        const results = await this.serpSearch(query, 'stackoverflow_profile', { personName: contactName });
         const soUrl = results.find((r) => r.url.includes('stackoverflow.com/users/'))?.url;
         if (soUrl) {
           setStackOverflowContent(await this.scrapeUrl(soUrl));
@@ -1351,7 +1435,7 @@ export class EnrichmentAgent extends BaseAgent {
       (async () => {
         if (!contactName || !contactTitle) return;
         const portfolioQuery = `${contactName} ${contactTitle} portfolio OR blog OR personal site`;
-        const portfolioResults = await this.searchWeb(portfolioQuery, 5);
+        const portfolioResults = await this.serpSearch(portfolioQuery, 'personal_site', { personName: contactName });
         const personalUrl = portfolioResults.find((r) =>
           !r.url.includes('linkedin.com') &&
           !r.url.includes('github.com') &&
@@ -1371,7 +1455,7 @@ export class EnrichmentAgent extends BaseAgent {
       (async () => {
         if (!contactName) return;
         const query = `"${contactName}" ${skillsStr} medium dev.to author`.trim();
-        const results = await this.searchWeb(query, 5);
+        const results = await this.serpSearch(query, 'dev_community', { personName: contactName });
         const devUrl = results.find((r) =>
           r.url.includes('medium.com/') || r.url.includes('dev.to/'),
         )?.url;
@@ -1409,8 +1493,8 @@ export class EnrichmentAgent extends BaseAgent {
             : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
           for (const query of queries) {
-            await sleep(3000);
-            const results = await this.searchWeb(query, 5);
+            // Per-domain delay is now enforced inside smart-crawler; no manual sleep needed.
+            const results = await this.serpSearch(query, 'linkedin_person', { companyName: contactCompanyName, personName: contactName });
             const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
             if (linkedinUrl) {
               setLinkedinSearchContent(await this.scrapeUrl(linkedinUrl));
@@ -1432,7 +1516,7 @@ export class EnrichmentAgent extends BaseAgent {
       (async () => {
         if (!contactCompanyName) return;
         const query = `"${contactCompanyName}" team OR leadership OR about-us`;
-        const results = await this.searchWeb(query, 5);
+        const results = await this.serpSearch(query, 'team_page', { companyName: contactCompanyName });
         const teamUrl = results.find((r) => {
           if (!r.url.startsWith('https://')) return false;
           if (isJunkUrl(r.url)) return false;
@@ -1450,16 +1534,9 @@ export class EnrichmentAgent extends BaseAgent {
         }
       })(),
 
-      // Source 3: Company news
-      (async () => {
-        if (!contactCompanyName) return;
-        const query = `"${contactCompanyName}" funding OR partnership OR announcement`;
-        const results = await this.searchWeb(query, 5);
-        const newsSnippets = results.slice(0, 5).map((r) => `${r.title}: ${r.snippet}`).join('\n');
-        if (newsSnippets) {
-          logger.info({ contactId, resultsCount: results.length }, 'Company news gathered (sales)');
-        }
-      })(),
+      // Source 3: (removed) Company news for sales — output was only logged, never
+      // consumed downstream. Company-deep prompt already pulls news in the company
+      // enrichment phase via 'news' intent.
     ]);
   }
 }

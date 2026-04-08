@@ -248,23 +248,34 @@ export class EnrichmentAgent extends BaseAgent {
           homepageContent = await this.scrapeUrl(companyUrl);
         }
 
+        // Gate the company-website sources on homepage health.
+        // If the homepage is unreachable/empty, scraping /about, /team, /careers
+        // will produce identical 500s and burn ~10 Crawl4AI requests per dead host.
+        const homepageOk = !!homepageContent && homepageContent.length > 200;
+        if (companyUrl && !homepageOk) {
+          logger.warn(
+            { contactId, companyUrl, len: homepageContent?.length ?? 0 },
+            'Enrichment: homepage unreachable/empty — skipping additional company-page scrapes',
+          );
+        }
+
         // Run remaining 5 company sources + about/careers in parallel
         const companySourceResults = await Promise.allSettled([
           // Source 1b: About page
           (async () => {
-            if (!companyUrl) return;
+            if (!companyUrl || !homepageOk) return;
             aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href);
           })(),
 
           // Source 1c: Careers page
           (async () => {
-            if (!companyUrl) return;
+            if (!companyUrl || !homepageOk) return;
             careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href);
           })(),
 
           // Source 2: Team/Leadership page — try multiple paths
           (async () => {
-            if (!companyUrl) return;
+            if (!companyUrl || !homepageOk) return;
             for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
               try {
                 const url = new URL(path, companyUrl).href;
@@ -964,12 +975,21 @@ export class EnrichmentAgent extends BaseAgent {
         homepageContent = await this.scrapeUrl(companyUrl);
       }
 
+      // Gate the company-website sources on homepage health (see contact-path location for rationale).
+      const homepageOk = !!homepageContent && homepageContent.length > 200;
+      if (companyUrl && !homepageOk) {
+        logger.warn(
+          { companyId, companyUrl, len: homepageContent?.length ?? 0 },
+          'Enrichment: homepage unreachable/empty — skipping additional company-page scrapes',
+        );
+      }
+
       const companySourceResults = await Promise.allSettled([
-        (async () => { if (!companyUrl) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
-        (async () => { if (!companyUrl) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
+        (async () => { if (!companyUrl || !homepageOk) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
+        (async () => { if (!companyUrl || !homepageOk) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
         // Team page — try multiple paths
         (async () => {
-          if (!companyUrl) return;
+          if (!companyUrl || !homepageOk) return;
           for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
             try {
               const url = new URL(path, companyUrl).href;

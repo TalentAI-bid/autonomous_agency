@@ -241,26 +241,30 @@ export class MasterAgent extends BaseAgent {
         logger.info({ tenantId: this.tenantId, masterAgentId }, 'MasterAgent: outreach disabled, skipping campaign creation');
       }
 
-      // 5. Generate search queries using Together AI
-      const queryMessages = [
-        { role: 'system' as const, content: discoverySystemPrompt(agent.useCase) },
-        {
-          role: 'user' as const,
-          content: discoveryUserPrompt({
-            targetRoles: (requirements.targetRoles as string[]) ?? [],
-            requiredSkills: (requirements.requiredSkills as string[]) ?? [],
-            locations: (requirements.locations as string[]) ?? [],
-            industries: ((requirements.searchCriteria as Record<string, unknown>)?.industries as string[]) ?? [],
-            keywords: ((requirements.searchCriteria as Record<string, unknown>)?.keywords as string[]) ?? [],
-            useCase: agent.useCase,
-          }),
-        },
-      ];
+      // 5. Generate search queries — only needed for legacy SearXNG path.
+      // When USE_COMPANY_FINDER=true, the company-finder agent runs its own
+      // mission analysis against SITE_CONFIGS and does not consume `queries`.
+      if (!env.USE_COMPANY_FINDER) {
+        const queryMessages = [
+          { role: 'system' as const, content: discoverySystemPrompt(agent.useCase) },
+          {
+            role: 'user' as const,
+            content: discoveryUserPrompt({
+              targetRoles: (requirements.targetRoles as string[]) ?? [],
+              requiredSkills: (requirements.requiredSkills as string[]) ?? [],
+              locations: (requirements.locations as string[]) ?? [],
+              industries: ((requirements.searchCriteria as Record<string, unknown>)?.industries as string[]) ?? [],
+              keywords: ((requirements.searchCriteria as Record<string, unknown>)?.keywords as string[]) ?? [],
+              useCase: agent.useCase,
+            }),
+          },
+        ];
 
-      const queryResult = await this.trackAction('queries_generated', 'Generating search queries', () =>
-        this.extractJSON<{ queries: string[] }>(queryMessages),
-      );
-      queries = queryResult.queries ?? [];
+        const queryResult = await this.trackAction('queries_generated', 'Generating search queries', () =>
+          this.extractJSON<{ queries: string[] }>(queryMessages),
+        );
+        queries = queryResult.queries ?? [];
+      }
     } else {
       logger.info({ tenantId: this.tenantId, masterAgentId, enabledAgents }, 'MasterAgent skipping discovery — not in pipeline');
     }
@@ -316,6 +320,11 @@ export class MasterAgent extends BaseAgent {
         await this.emitEvent('pipeline:service_down', { service: 'searxng', url: searxngStatus.url });
       }
     }
+
+    logger.info(
+      { masterAgentId, useCompanyFinder: env.USE_COMPANY_FINDER, hasDiscovery },
+      'Master agent dispatch mode',
+    );
 
     // 7. Dispatch discovery jobs — branches on USE_COMPANY_FINDER feature flag.
     //    When true: single company-finder job reads SITE_CONFIGS directly.
@@ -476,9 +485,11 @@ export class MasterAgent extends BaseAgent {
       }
     }
 
+    const dispatchedToAgent = env.USE_COMPANY_FINDER ? 'finder' : 'discovery';
+
     this.sendMessage(null, 'task_assignment', {
       action: 'dispatched',
-      toAgent: 'discovery',
+      toAgent: dispatchedToAgent,
       jobCount: dispatchedJobIds.length,
       queryCount: queries.length,
     });
@@ -495,7 +506,17 @@ export class MasterAgent extends BaseAgent {
     });
     await this.clearCurrentAction();
 
-    logger.info({ tenantId: this.tenantId, masterAgentId, queryCount: queries.length, enabledAgents }, 'MasterAgent dispatched discovery jobs');
+    logger.info(
+      {
+        tenantId: this.tenantId,
+        masterAgentId,
+        queryCount: queries.length,
+        jobCount: dispatchedJobIds.length,
+        mode: dispatchedToAgent,
+        enabledAgents,
+      },
+      `MasterAgent dispatched ${dispatchedToAgent} jobs`,
+    );
 
     return {
       parsedRequirements: requirements,

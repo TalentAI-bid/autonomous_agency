@@ -30,6 +30,8 @@ interface MissionContext {
   locations?: string[];
   industries?: string[];
   targetRoles?: string[];
+  requiredSkills?: string[];
+  experienceLevel?: string;
   keywords?: string[];
 }
 
@@ -92,8 +94,33 @@ const COMPANY_NAME_BLOCKLIST = new Set([
   'rocketreach', 'wikipedia',
 ]);
 
+/** Listicle/article-title regexes (case-insensitive). Anything matching these is junk. */
+const ARTICLE_TITLE_PATTERNS: RegExp[] = [
+  /^category:/i,
+  /\bbest\b.*\bcompanies\b/i,
+  /\btop\s+\d*\s*\b.*\bcompanies\b/i,
+  /\blargest\b.*\bcompanies\b/i,
+  /\blist of\b/i,
+  /\b20(2\d|3\d)\b/,
+  /\d[\d,]*\+/,
+  /\bcompanies of\b/i,
+  /\bcompanies in\b/i,
+];
+
+/** Stopwords for last-resort mission-text tokenization fallback (BUG 1 Fallback 3). */
+const STOPWORDS = new Set([
+  'find','hire','recruit','source','companies','company','people','candidates',
+  'looking','need','want','with','that','from','about','their','they','have',
+  'will','would','should','also','more','than','some','these','those','this',
+  'into','onto','using','use','for','the','and','our','you','your','who','what',
+  'when','where','why','how','any','all','best','top','must','can','are',
+]);
+
 /** Cap on per-company Google domain backfills to avoid SERP blocks on large missions. */
 const MAX_DOMAIN_BACKFILLS = 20;
+
+/** Hard cap on the keyword pool fed to crawlSite. Each keyword × site × page = 1 Crawl4AI request. */
+const MAX_KEYWORDS = 6;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -103,9 +130,31 @@ function normalizeCompanyKey(name: string): string {
 }
 
 function isBlockedCompanyName(name: string): boolean {
-  const key = normalizeCompanyKey(name);
+  if (!name) return true;
+  const trimmed = name.trim();
+  if (trimmed.length < 2) return true;
+  if (trimmed.length > 60) return true;
+
+  const key = normalizeCompanyKey(trimmed);
   if (!key || key.length < 2) return true;
-  return COMPANY_NAME_BLOCKLIST.has(key);
+  if (COMPANY_NAME_BLOCKLIST.has(key)) return true;
+
+  for (const re of ARTICLE_TITLE_PATTERNS) {
+    if (re.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/** Defensive sanitizer applied to LLM-returned searchKeywords. */
+function isValidSearchKeyword(kw: string): boolean {
+  const trimmed = kw.trim();
+  if (trimmed.length < 2 || trimmed.length > 60) return false;
+  if (trimmed.split(/\s+/).length > 4) return false;
+  if (/\b(best|top|largest|list of)\b/i.test(trimmed)) return false;
+  if (/\b20[2-3]\d\b/.test(trimmed)) return false;
+  if (/\d[\d,]*\+/.test(trimmed)) return false;
+  if (/^category:/i.test(trimmed)) return false;
+  return true;
 }
 
 function normalizeDomain(raw: string | undefined | null): string | null {
@@ -156,10 +205,10 @@ export class CompanyFinderAgent extends BaseAgent {
     try {
       analysis = await this.extractJSON<cfPrompt.MissionAnalysis>(
         [
-          { role: 'system', content: cfPrompt.buildMissionAnalyzerSystemPrompt() },
+          { role: 'system', content: cfPrompt.buildMissionAnalyzerSystemPrompt(availableSiteKeys) },
           {
             role: 'user',
-            content: cfPrompt.buildMissionAnalyzerUserPrompt(missionContext, availableSiteKeys),
+            content: cfPrompt.buildMissionAnalyzerUserPrompt(missionContext),
           },
         ],
         2,
@@ -169,6 +218,14 @@ export class CompanyFinderAgent extends BaseAgent {
       logger.error({ err: msg }, 'CompanyFinder: mission analysis failed');
       return { status: 'failed', metrics, error: `mission analysis: ${msg}` };
     }
+
+    logger.info(
+      {
+        masterAgentId,
+        rawAnalysis: analysis,
+      },
+      'CompanyFinder: raw mission analysis',
+    );
 
     logger.info(
       {
@@ -195,10 +252,22 @@ export class CompanyFinderAgent extends BaseAgent {
     });
 
     // Fallback: if nothing passed filter, use 'all'-tagged sites (LinkedIn Jobs etc.)
-    const sitesToCrawl =
+    let sitesToCrawl =
       validSites.length > 0
         ? validSites
         : availableSiteKeys.filter((k) => SITE_CONFIGS[k]!.countries.includes('all'));
+
+    // Hard fallback: if STILL empty, use a hard-coded set of always-on job boards.
+    if (sitesToCrawl.length === 0) {
+      const hardFallback = ['linkedin_jobs', 'glassdoor'].filter((k) => SITE_CONFIGS[k]);
+      if (hardFallback.length > 0) {
+        sitesToCrawl = hardFallback;
+        logger.warn(
+          { hardFallback, targetCountry },
+          'CompanyFinder: no country/all matches — using hard fallback',
+        );
+      }
+    }
 
     if (sitesToCrawl.length === 0) {
       logger.warn(
@@ -208,14 +277,71 @@ export class CompanyFinderAgent extends BaseAgent {
       return { status: 'completed', metrics };
     }
 
-    // ── Build keyword pool ─────────────────────────────────────────────────
-    const allKeywords = this.pickKeywordPool(analysis.searchKeywords, targetCountry);
+    // ── Build keyword pool with sanitization + fallback chain ─────────────
+    const rawKeywords = this.pickKeywordPool(analysis.searchKeywords, targetCountry);
+    const beforeCount = rawKeywords.length;
+    let allKeywords = rawKeywords.filter(isValidSearchKeyword).slice(0, MAX_KEYWORDS);
+    if (allKeywords.length < beforeCount) {
+      logger.warn(
+        { dropped: beforeCount - allKeywords.length, kept: allKeywords.length },
+        'CompanyFinder: dropped malformed keywords from LLM analysis',
+      );
+    }
+
+    // Fallback 1: master-agent provided hint keywords
+    if (allKeywords.length === 0 && missionContext.keywords?.length) {
+      allKeywords = missionContext.keywords.filter(isValidSearchKeyword).slice(0, MAX_KEYWORDS);
+      if (allKeywords.length > 0) {
+        logger.warn(
+          { source: 'missionContext.keywords', count: allKeywords.length },
+          'CompanyFinder: LLM returned empty keywords, falling back to mission hints',
+        );
+      }
+    }
+
+    // Fallback 2: targetRoles + requiredSkills
     if (allKeywords.length === 0) {
-      logger.warn('CompanyFinder: empty keyword pool from mission analysis');
+      const roleSkill = [
+        ...(missionContext.targetRoles ?? []),
+        ...(missionContext.requiredSkills ?? []),
+      ].filter((s) => s && s.trim().length > 0);
+      if (roleSkill.length > 0) {
+        allKeywords = roleSkill.filter(isValidSearchKeyword).slice(0, MAX_KEYWORDS);
+        if (allKeywords.length > 0) {
+          logger.warn(
+            { source: 'targetRoles+requiredSkills', count: allKeywords.length },
+            'CompanyFinder: falling back to roles/skills as keywords',
+          );
+        }
+      }
+    }
+
+    // Fallback 3: extract noun-like tokens from the mission text (last resort).
+    if (allKeywords.length === 0 && missionContext.mission) {
+      const tokens = missionContext.mission
+        .toLowerCase()
+        .split(/[^a-zà-ÿ0-9]+/i)
+        .filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+      allKeywords = Array.from(new Set(tokens)).slice(0, 5);
+      if (allKeywords.length > 0) {
+        logger.warn(
+          { source: 'mission text tokens', count: allKeywords.length },
+          'CompanyFinder: falling back to mission text tokenization',
+        );
+      }
+    }
+
+    if (allKeywords.length === 0) {
+      logger.error('CompanyFinder: no keywords derivable from mission — aborting');
       return { status: 'completed', metrics };
     }
 
     const primaryCity = analysis.targetCities?.[0];
+
+    logger.info(
+      { masterAgentId, sitesToCrawl, allKeywords, primaryCity, targetCountry },
+      'CompanyFinder: starting site crawling',
+    );
 
     // ── Phase 2+3: Crawl + extract per site ────────────────────────────────
     type ExtractedListing = cfPrompt.JobListing & { siteKey: string; url: string };
@@ -240,6 +366,11 @@ export class CompanyFinderAgent extends BaseAgent {
       }
       metrics.pagesScraped += pages.length;
 
+      logger.info(
+        { siteKey, pageCount: pages.length, urls: pages.map((p) => p.url) },
+        'CompanyFinder: crawled site',
+      );
+
       for (const page of pages) {
         const systemPrompt = cfPrompt.buildExtractionSystemPrompt(config.type, allKeywords, {
           industries: missionContext.industries,
@@ -260,9 +391,14 @@ export class CompanyFinderAgent extends BaseAgent {
               ],
               2,
             );
-            for (const c of result.companies ?? []) {
+            const extracted = result.companies ?? [];
+            for (const c of extracted) {
               companyEntries.push({ ...c, siteKey, url: page.url });
             }
+            logger.info(
+              { siteKey, url: page.url, type: config.type, extractedCount: extracted.length },
+              'CompanyFinder: extracted from page',
+            );
           } else {
             const result = await this.extractJSON<cfPrompt.JobBoardExtractionResult>(
               [
@@ -271,9 +407,14 @@ export class CompanyFinderAgent extends BaseAgent {
               ],
               2,
             );
-            for (const l of result.listings ?? []) {
+            const extracted = result.listings ?? [];
+            for (const l of extracted) {
               listings.push({ ...l, siteKey, url: page.url });
             }
+            logger.info(
+              { siteKey, url: page.url, type: config.type, extractedCount: extracted.length },
+              'CompanyFinder: extracted from page',
+            );
           }
         } catch (err) {
           logger.warn(
@@ -288,11 +429,19 @@ export class CompanyFinderAgent extends BaseAgent {
 
     // ── Phase 4: Dedupe + filter ──────────────────────────────────────────
     const companyMap = new Map<string, AggregatedCompany>();
+    let droppedCount = 0;
 
     for (const l of listings) {
-      if (isBlockedCompanyName(l.companyName)) continue;
+      if (isBlockedCompanyName(l.companyName)) {
+        droppedCount++;
+        logger.debug({ name: l.companyName, reason: 'blocklist/pattern' }, 'CompanyFinder: dropped junk name');
+        continue;
+      }
       const domain = normalizeDomain(l.companyDomain);
-      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) continue;
+      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) {
+        droppedCount++;
+        continue;
+      }
 
       const key = normalizeCompanyKey(l.companyName);
       const existing = companyMap.get(key);
@@ -318,9 +467,16 @@ export class CompanyFinderAgent extends BaseAgent {
     }
 
     for (const c of companyEntries) {
-      if (isBlockedCompanyName(c.name)) continue;
+      if (isBlockedCompanyName(c.name)) {
+        droppedCount++;
+        logger.debug({ name: c.name, reason: 'blocklist/pattern' }, 'CompanyFinder: dropped junk name');
+        continue;
+      }
       const domain = normalizeDomain(c.domain);
-      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) continue;
+      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) {
+        droppedCount++;
+        continue;
+      }
 
       const key = normalizeCompanyKey(c.name);
       const existing = companyMap.get(key);
@@ -351,6 +507,11 @@ export class CompanyFinderAgent extends BaseAgent {
     }
 
     metrics.uniqueCompanies = companyMap.size;
+
+    logger.info(
+      { survivors: companyMap.size, dropped: droppedCount },
+      'CompanyFinder: dedupe + filter complete',
+    );
 
     if (dryRun) {
       const elapsedMs = Date.now() - startedAt;

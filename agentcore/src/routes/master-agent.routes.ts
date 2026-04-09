@@ -356,7 +356,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     const conditions = [
       eq(companies.masterAgentId, id),
       eq(companies.tenantId, request.tenantId),
-      sql`COALESCE(${companies.dataCompleteness}, 0) >= 30`,
+      sql`COALESCE(${companies.dataCompleteness}, 0) >= 10`,
     ];
     if (cursor) {
       try {

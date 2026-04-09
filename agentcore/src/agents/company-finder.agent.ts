@@ -475,6 +475,7 @@ export class CompanyFinderAgent extends BaseAgent {
                   name: c.name.trim(),
                   domain: domain ?? undefined,
                   description: c.description?.slice(0, 500) || undefined,
+                  dataCompleteness: 15,
                   rawData: {
                     discoverySource: 'company-finder',
                     discoverySite: siteKey,
@@ -541,6 +542,7 @@ export class CompanyFinderAgent extends BaseAgent {
                   name: l.companyName.trim(),
                   domain: domain ?? undefined,
                   description: l.description?.slice(0, 500) || undefined,
+                  dataCompleteness: 15,
                   rawData: {
                     discoverySource: 'company-finder',
                     discoverySite: siteKey,

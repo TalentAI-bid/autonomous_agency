@@ -34,8 +34,9 @@ export function pickBestLinkedInCompanyUrl(
   if (linkedinResults.length === 0) return null;
 
   const scored = linkedinResults.map((r) => {
+    if (!r.url) return { url: '', score: 0 };
     const slug = r.url.match(/linkedin\.com\/company\/([^/?#]+)/)?.[1]?.toLowerCase() ?? '';
-    const titleLower = r.title.toLowerCase();
+    const titleLower = (r.title ?? '').toLowerCase();
     let score = 0;
     for (const tok of tokens) {
       if (slug.includes(tok)) score += 3;

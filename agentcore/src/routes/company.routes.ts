@@ -31,7 +31,7 @@ export default async function companyRoutes(fastify: FastifyInstance) {
     const results = await withTenant(request.tenantId, async (tx) => {
       const conditions = [eq(companies.tenantId, request.tenantId)];
       if (includeIncomplete !== 'true') {
-        conditions.push(sql`COALESCE(${companies.dataCompleteness}, 0) >= 30`);
+        conditions.push(sql`COALESCE(${companies.dataCompleteness}, 0) >= 10`);
       }
       if (industry) conditions.push(eq(companies.industry, industry));
       if (masterAgentId) conditions.push(eq(companies.masterAgentId, masterAgentId));
@@ -59,7 +59,7 @@ export default async function companyRoutes(fastify: FastifyInstance) {
     const data = (hasMore ? results.slice(0, limit) : results).map(company => ({
       ...company,
       enrichmentStatus: (company.dataCompleteness ?? 0) >= 70 ? 'complete' as const :
-                        (company.dataCompleteness ?? 0) >= 30 ? 'partial' as const : 'minimal' as const,
+                        (company.dataCompleteness ?? 0) >= 10 ? 'partial' as const : 'minimal' as const,
     }));
     const nextCursor = hasMore && data.length > 0
       ? Buffer.from(JSON.stringify({

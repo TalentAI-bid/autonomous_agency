@@ -22,7 +22,7 @@ import {
   type SiteConfig,
 } from '../config/site-configs.js';
 import logger from '../utils/logger.js';
-import { extractJSON } from './together-ai.tool.js';
+import { extractJSON, SMART_MODEL } from './together-ai.tool.js';
 import * as urlPrompt from '../prompts/url-extraction.prompt.js';
 import { isJunkUrl } from '../utils/domain-blocklist.js';
 
@@ -620,6 +620,7 @@ export async function crawlGoogleAndExtractUrls(
           },
         ],
         2,
+        { model: SMART_MODEL },
       );
     } catch (err) {
       logger.warn(

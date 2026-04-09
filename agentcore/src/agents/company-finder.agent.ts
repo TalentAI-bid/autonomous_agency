@@ -194,7 +194,12 @@ export class CompanyFinderAgent extends BaseAgent {
       dispatched: 0,
     };
 
-    const availableSiteKeys = Object.keys(SITE_CONFIGS);
+    // BUG C: company-finder must only consider job_board / company_database sites.
+    // Profile sources (brave_linkedin_profiles, github_api, devto, etc.) belong
+    // exclusively to the candidate-finder pipeline.
+    const availableSiteKeys = Object.keys(SITE_CONFIGS).filter(
+      (k) => !SITE_CONFIGS[k]!.profileType,
+    );
     if (availableSiteKeys.length === 0) {
       logger.warn('CompanyFinder: SITE_CONFIGS is empty — nothing to crawl');
       return { status: 'completed', metrics };
@@ -217,6 +222,60 @@ export class CompanyFinderAgent extends BaseAgent {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err: msg }, 'CompanyFinder: mission analysis failed');
       return { status: 'failed', metrics, error: `mission analysis: ${msg}` };
+    }
+
+    // BUG A recovery: LLM sometimes returns a plain string array instead of the
+    // MissionAnalysis object. Detect and reshape so downstream code is unaware.
+    if (Array.isArray(analysis)) {
+      logger.warn(
+        { rawAnalysis: analysis },
+        'CompanyFinder: LLM returned array instead of object — recovering to MissionAnalysis shape',
+      );
+      const arr = analysis as unknown as unknown[];
+      analysis = {
+        missionType: 'recruitment',
+        searchKeywords: {
+          en: arr.filter((k): k is string => typeof k === 'string').slice(0, 6),
+          local: [],
+        },
+        targetCountry: ((missionContext.locations?.[0] ?? '').toLowerCase().slice(0, 2)) || '',
+        targetCities: missionContext.locations ?? [],
+        sitesToCrawl: ['welcometothejungle', 'linkedin_jobs', 'glassdoor'],
+        reasoning: 'Recovered from malformed LLM response (array instead of object)',
+      };
+    }
+
+    // BUG A defensive defaults: if individual required fields are missing, fill in
+    // from missionContext / hardcoded fallbacks. Never crash on missing fields.
+    if (!analysis || typeof analysis !== 'object') {
+      logger.warn({ rawAnalysis: analysis }, 'CompanyFinder: analysis is not an object — using full defaults');
+      analysis = {
+        missionType: 'recruitment',
+        searchKeywords: { en: [], local: [] },
+        targetCountry: '',
+        targetCities: missionContext.locations ?? [],
+        sitesToCrawl: ['welcometothejungle', 'linkedin_jobs', 'glassdoor'],
+        reasoning: 'Defaulted from null analysis',
+      };
+    }
+    if (!analysis.searchKeywords || typeof analysis.searchKeywords !== 'object') {
+      logger.warn('CompanyFinder: analysis.searchKeywords missing — filling from mission context');
+      const fallbackEn = [
+        ...(missionContext.targetRoles ?? []),
+        ...(missionContext.requiredSkills ?? []),
+        ...(missionContext.keywords ?? []),
+      ].filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+      analysis.searchKeywords = { en: fallbackEn, local: [] };
+    }
+    if (!Array.isArray(analysis.sitesToCrawl) || analysis.sitesToCrawl.length === 0) {
+      logger.warn('CompanyFinder: analysis.sitesToCrawl missing — using defaults');
+      analysis.sitesToCrawl = ['welcometothejungle', 'linkedin_jobs', 'glassdoor'];
+    }
+    if (typeof analysis.targetCountry !== 'string') {
+      analysis.targetCountry = '';
+    }
+    if (!Array.isArray(analysis.targetCities)) {
+      analysis.targetCities = missionContext.locations ?? [];
     }
 
     logger.info(
@@ -244,6 +303,14 @@ export class CompanyFinderAgent extends BaseAgent {
       const config = SITE_CONFIGS[siteKey];
       if (!config) {
         logger.warn({ siteKey }, 'CompanyFinder: LLM returned unknown site key, dropping');
+        return false;
+      }
+      // BUG C: profile sources are candidate-finder-only.
+      if (config.profileType) {
+        logger.warn(
+          { siteKey, profileType: config.profileType },
+          'CompanyFinder: dropped profile source (candidate-finder only)',
+        );
         return false;
       }
       if (!targetCountry) return true;

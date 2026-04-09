@@ -625,46 +625,57 @@ export class MasterAgent extends BaseAgent {
       }
     }
 
-    // 3a. Check if strategist generated queries that weren't dispatched yet
-    try {
-      const [agentRow] = await withTenant(this.tenantId, async (tx) => {
-        return tx.select({ config: masterAgents.config }).from(masterAgents)
-          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
-          .limit(1);
-      });
-      const cfg = (agentRow?.config as Record<string, unknown>) ?? {};
-      const salesStrategy = cfg.salesStrategy as SalesStrategy | undefined;
-      const pendingQueries = salesStrategy?.opportunitySearchQueries;
-      const alreadyDispatched = (cfg.dispatchedStrategyQueries as boolean) ?? false;
-
-      if (pendingQueries?.length && !alreadyDispatched && metrics.discovered === 0) {
-        let jobIdx = 0;
-        for (const sq of pendingQueries) {
-          const searchQuery = typeof sq === 'string' ? sq : (sq as Record<string, unknown>).query as string;
-          if (!searchQuery) continue;
-          await this.dispatchNext('discovery', {
-            searchQueries: [searchQuery],
-            maxResults: 10,
-            masterAgentId,
-            opportunityFocused: true,
-          }, { delay: jobIdx * 5000 });
-          jobIdx++;
-        }
-        // Mark as dispatched to avoid re-dispatching on next cycle
-        await withTenant(this.tenantId, async (tx) => {
-          await tx.update(masterAgents).set({
-            config: { ...cfg, dispatchedStrategyQueries: true },
-            updatedAt: new Date(),
-          }).where(eq(masterAgents.id, masterAgentId));
+    // 3a. Check if strategist generated queries that weren't dispatched yet.
+    //     This path dispatches LEGACY discovery jobs — only run when company-finder
+    //     is disabled. With company-finder on, the strategist queries are already
+    //     consumed via pipelineContext.sales.salesStrategy.opportunitySearchQueries
+    //     inside CompanyFinderAgent.
+    if (!env.USE_COMPANY_FINDER) {
+      try {
+        const [agentRow] = await withTenant(this.tenantId, async (tx) => {
+          return tx.select({ config: masterAgents.config }).from(masterAgents)
+            .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+            .limit(1);
         });
-        if (jobIdx > 0) {
-          actions.push(`Dispatched ${jobIdx} strategist queries as discovery jobs`);
-          decisions.push('Found undispatched strategist queries — dispatching them now.');
-          logger.info({ masterAgentId, queryCount: jobIdx }, 'Orchestrator dispatched undispatched strategist queries');
+        const cfg = (agentRow?.config as Record<string, unknown>) ?? {};
+        const salesStrategy = cfg.salesStrategy as SalesStrategy | undefined;
+        const pendingQueries = salesStrategy?.opportunitySearchQueries;
+        const alreadyDispatched = (cfg.dispatchedStrategyQueries as boolean) ?? false;
+
+        if (pendingQueries?.length && !alreadyDispatched && metrics.discovered === 0) {
+          let jobIdx = 0;
+          for (const sq of pendingQueries) {
+            const searchQuery = typeof sq === 'string' ? sq : (sq as Record<string, unknown>).query as string;
+            if (!searchQuery) continue;
+            await this.dispatchNext('discovery', {
+              searchQueries: [searchQuery],
+              maxResults: 10,
+              masterAgentId,
+              opportunityFocused: true,
+            }, { delay: jobIdx * 5000 });
+            jobIdx++;
+          }
+          // Mark as dispatched to avoid re-dispatching on next cycle
+          await withTenant(this.tenantId, async (tx) => {
+            await tx.update(masterAgents).set({
+              config: { ...cfg, dispatchedStrategyQueries: true },
+              updatedAt: new Date(),
+            }).where(eq(masterAgents.id, masterAgentId));
+          });
+          if (jobIdx > 0) {
+            actions.push(`Dispatched ${jobIdx} strategist queries as discovery jobs`);
+            decisions.push('Found undispatched strategist queries — dispatching them now.');
+            logger.info({ masterAgentId, queryCount: jobIdx }, 'Orchestrator dispatched undispatched strategist queries');
+          }
         }
+      } catch (err) {
+        logger.warn({ err, masterAgentId }, 'Failed to check strategist queries in orchestration');
       }
-    } catch (err) {
-      logger.warn({ err, masterAgentId }, 'Failed to check strategist queries in orchestration');
+    } else {
+      logger.debug(
+        { masterAgentId },
+        'Orchestrator: skipping legacy strategist→discovery dispatch (USE_COMPANY_FINDER=true)',
+      );
     }
 
     if (archiveRate > 60) {

@@ -107,7 +107,22 @@ CRITICAL RULES FOR \`sitesToCrawl\`:
 - For recruitment missions: prefer job boards (welcometothejungle, freework, linkedin_jobs, glassdoor, stepstone, dice, jobbank_ca, etc).
 - For b2b_sales / startup_sales: include BOTH job boards (signals of hiring = budget + pain) AND company databases (societe_com, uk_companies_house, northdata, einforma, ariregister).
 
-Return JSON ONLY — no prose, no markdown fences, no commentary.`;
+Return JSON ONLY — no prose, no markdown fences, no commentary.
+
+EXAMPLE RESPONSE (this is the EXACT shape you must return — return an OBJECT, never a plain array):
+{
+  "missionType": "recruitment",
+  "searchKeywords": {
+    "en": ["devops engineer", "SRE", "cloud engineer"],
+    "local": ["ingenieur devops", "architecte cloud"]
+  },
+  "targetCountry": "fr",
+  "targetCities": ["Paris", "Lyon"],
+  "sitesToCrawl": ["welcometothejungle", "freework", "linkedin_jobs", "glassdoor"],
+  "reasoning": "Recruitment mission targeting French companies hiring DevOps roles"
+}
+
+DO NOT return a plain array like ["devops engineer", "SRE"]. DO NOT return only keywords. Return the FULL JSON object with ALL fields shown above.`;
 }
 
 export function buildMissionAnalyzerUserPrompt(

@@ -425,7 +425,13 @@ export class CompanyFinderAgent extends BaseAgent {
 
       let pages: Array<{ url: string; content: string }>;
       try {
-        pages = await crawlSite(siteKey, allKeywords, primaryCity);
+        // Smart location: if the site's locationParam contains "country", pass the
+        // ISO country code (uppercase). Otherwise pass the city name.
+        let locationForSite = primaryCity;
+        if (config.locationParam && /country/i.test(config.locationParam) && targetCountry) {
+          locationForSite = targetCountry.toUpperCase();
+        }
+        pages = await crawlSite(siteKey, allKeywords, locationForSite);
       } catch (err) {
         logger.warn(
           { err: err instanceof Error ? err.message : String(err), siteKey },

@@ -3,12 +3,16 @@
  *
  * Pipeline:
  *   1. Mission analysis → LLM picks sites from SITE_CONFIGS + keyword pool
- *   2. Site crawl      → smart-crawler.crawlSite for each chosen site
- *   3. Extraction      → LLM extracts JobListing[] or CompanyEntry[] per page
- *   4. Dedupe + filter → normalize names, drop job-board self-references,
- *                        drop mega-corp and skip-domains
- *   5. Domain backfill → Google-SERP-extract per company missing a domain
- *   6. Persist + dispatch → saveOrUpdateCompany + dispatchNext('enrichment')
+ *   2. Per-site loop:
+ *      a. Crawl pages → smart-crawler.crawlSite
+ *      b. Extract    → LLM extracts JobListing[] or CompanyEntry[] per page
+ *      c. Dedupe     → skip if normalized key already in savedCompanyKeys Set
+ *      d. Filter     → drop blocklisted names, megacorps, skip-domains
+ *      e. Save       → saveOrUpdateCompany immediately
+ *      f. Dispatch   → dispatchNext('enrichment') immediately
+ *
+ * Companies appear in DB and enrichment starts within minutes of first page
+ * crawl, not after all sites finish.
  *
  * Gated by env.USE_COMPANY_FINDER in master-agent.ts. When false, master
  * dispatches the legacy DiscoveryAgent instead.
@@ -17,7 +21,7 @@
 import { BaseAgent } from './base-agent.js';
 import type { AgentType } from '../queues/queues.js';
 import { SITE_CONFIGS } from '../config/site-configs.js';
-import { crawlSite, crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
+import { crawlSite } from '../tools/smart-crawler.js';
 import * as cfPrompt from '../prompts/company-finder.prompt.js';
 import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
@@ -56,23 +60,6 @@ interface CompanyFinderOutput {
   status: 'completed' | 'failed';
   metrics: CompanyFinderMetrics;
   error?: string;
-}
-
-// Aggregated record we build during dedupe
-interface AggregatedCompany {
-  displayName: string;
-  domain: string | null;
-  discoveryUrls: string[];
-  discoverySite: string;
-  sourceType: 'job_board' | 'company_database';
-  jobTitles: string[];
-  jobLocations: string[];
-  descriptions: string[];
-  relevanceScore?: number;
-  industry?: string;
-  location?: string;
-  size?: string;
-  revenue?: string;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -116,9 +103,6 @@ const STOPWORDS = new Set([
   'into','onto','using','use','for','the','and','our','you','your','who','what',
   'when','where','why','how','any','all','best','top','must','can','are',
 ]);
-
-/** Cap on per-company Google domain backfills to avoid SERP blocks on large missions. */
-const MAX_DOMAIN_BACKFILLS = 20;
 
 /** Hard cap on the keyword pool fed to crawlSite. Each keyword × site × page = 1 Crawl4AI request. */
 const MAX_KEYWORDS = 6;
@@ -412,12 +396,10 @@ export class CompanyFinderAgent extends BaseAgent {
       'CompanyFinder: starting site crawling',
     );
 
-    // ── Phase 2+3: Crawl + extract per site ────────────────────────────────
-    type ExtractedListing = cfPrompt.JobListing & { siteKey: string; url: string };
-    type ExtractedCompanyEntry = cfPrompt.CompanyEntry & { siteKey: string; url: string };
-
-    const listings: ExtractedListing[] = [];
-    const companyEntries: ExtractedCompanyEntry[] = [];
+    // ── Phase 2: Per-site crawl + extract + save + dispatch ────────────────
+    // Cross-site dedupe: track normalized company keys already saved so that
+    // if "Capgemini" appears on WTTJ AND LinkedIn, it's only saved once.
+    const savedCompanyKeys = new Set<string>();
 
     for (const siteKey of sitesToCrawl) {
       const config = SITE_CONFIGS[siteKey]!;
@@ -468,14 +450,63 @@ export class CompanyFinderAgent extends BaseAgent {
               { model: SMART_MODEL },
             );
             const extracted = result.companies ?? [];
-            for (const c of extracted) {
-              companyEntries.push({ ...c, siteKey, url: page.url });
-            }
+            metrics.listingsExtracted += extracted.length;
             logger.info(
               { siteKey, url: page.url, type: config.type, extractedCount: extracted.length },
               'CompanyFinder: extracted from page',
             );
+
+            // Inline dedupe + filter + save + dispatch per company entry
+            for (const c of extracted) {
+              if (isBlockedCompanyName(c.name)) {
+                logger.debug({ name: c.name }, 'CompanyFinder: dropped junk name');
+                continue;
+              }
+              const domain = normalizeDomain(c.domain);
+              if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) continue;
+
+              const key = normalizeCompanyKey(c.name);
+              if (savedCompanyKeys.has(key)) continue;
+              savedCompanyKeys.add(key);
+              metrics.uniqueCompanies++;
+
+              try {
+                const saved = await this.saveOrUpdateCompany({
+                  name: c.name.trim(),
+                  domain: domain ?? undefined,
+                  description: c.description?.slice(0, 500) || undefined,
+                  rawData: {
+                    discoverySource: 'company-finder',
+                    discoverySite: siteKey,
+                    discoveryUrl: page.url,
+                    discoveryUrls: [page.url],
+                    sourceType: 'company_database',
+                    ...(c.industry && { industry: c.industry }),
+                    ...(c.location && { location: c.location }),
+                    ...(c.size && { size: c.size }),
+                    ...(c.revenue && { revenue: c.revenue }),
+                  },
+                });
+                metrics.saved++;
+
+                if (!dryRun) {
+                  await this.dispatchNext('enrichment', {
+                    companyId: saved.id,
+                    masterAgentId,
+                    pipelineContext,
+                    dryRun,
+                  });
+                  metrics.dispatched++;
+                }
+              } catch (err) {
+                logger.warn(
+                  { err: err instanceof Error ? err.message : String(err), company: c.name },
+                  'CompanyFinder: save/dispatch failed',
+                );
+              }
+            }
           } else {
+            // job_board or json_api
             const result = await this.extractJSON<cfPrompt.JobBoardExtractionResult>(
               [
                 { role: 'system', content: systemPrompt },
@@ -485,13 +516,61 @@ export class CompanyFinderAgent extends BaseAgent {
               { model: SMART_MODEL },
             );
             const extracted = result.listings ?? [];
-            for (const l of extracted) {
-              listings.push({ ...l, siteKey, url: page.url });
-            }
+            metrics.listingsExtracted += extracted.length;
             logger.info(
               { siteKey, url: page.url, type: config.type, extractedCount: extracted.length },
               'CompanyFinder: extracted from page',
             );
+
+            // Inline dedupe + filter + save + dispatch per job listing
+            for (const l of extracted) {
+              if (isBlockedCompanyName(l.companyName)) {
+                logger.debug({ name: l.companyName }, 'CompanyFinder: dropped junk name');
+                continue;
+              }
+              const domain = normalizeDomain(l.companyDomain);
+              if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) continue;
+
+              const key = normalizeCompanyKey(l.companyName);
+              if (savedCompanyKeys.has(key)) continue;
+              savedCompanyKeys.add(key);
+              metrics.uniqueCompanies++;
+
+              try {
+                const saved = await this.saveOrUpdateCompany({
+                  name: l.companyName.trim(),
+                  domain: domain ?? undefined,
+                  description: l.description?.slice(0, 500) || undefined,
+                  rawData: {
+                    discoverySource: 'company-finder',
+                    discoverySite: siteKey,
+                    discoveryUrl: page.url,
+                    discoveryUrls: [page.url],
+                    sourceType: 'job_board',
+                    hiringSignal: 'job_posting',
+                    ...(l.jobTitle && { jobTitle: l.jobTitle }),
+                    ...(l.jobLocation && { jobLocation: l.jobLocation }),
+                    ...(l.relevanceScore != null && { relevanceScore: l.relevanceScore }),
+                  },
+                });
+                metrics.saved++;
+
+                if (!dryRun) {
+                  await this.dispatchNext('enrichment', {
+                    companyId: saved.id,
+                    masterAgentId,
+                    pipelineContext,
+                    dryRun,
+                  });
+                  metrics.dispatched++;
+                }
+              } catch (err) {
+                logger.warn(
+                  { err: err instanceof Error ? err.message : String(err), company: l.companyName },
+                  'CompanyFinder: save/dispatch failed',
+                );
+              }
+            }
           }
         } catch (err) {
           logger.warn(
@@ -500,184 +579,11 @@ export class CompanyFinderAgent extends BaseAgent {
           );
         }
       }
-    }
 
-    metrics.listingsExtracted = listings.length + companyEntries.length;
-
-    // ── Phase 4: Dedupe + filter ──────────────────────────────────────────
-    const companyMap = new Map<string, AggregatedCompany>();
-    let droppedCount = 0;
-
-    for (const l of listings) {
-      if (isBlockedCompanyName(l.companyName)) {
-        droppedCount++;
-        logger.debug({ name: l.companyName, reason: 'blocklist/pattern' }, 'CompanyFinder: dropped junk name');
-        continue;
-      }
-      const domain = normalizeDomain(l.companyDomain);
-      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) {
-        droppedCount++;
-        continue;
-      }
-
-      const key = normalizeCompanyKey(l.companyName);
-      const existing = companyMap.get(key);
-      if (existing) {
-        if (!existing.discoveryUrls.includes(l.url)) existing.discoveryUrls.push(l.url);
-        if (l.jobTitle) existing.jobTitles.push(l.jobTitle);
-        if (l.jobLocation) existing.jobLocations.push(l.jobLocation);
-        if (l.description) existing.descriptions.push(l.description);
-        if (!existing.domain && domain) existing.domain = domain;
-      } else {
-        companyMap.set(key, {
-          displayName: l.companyName.trim(),
-          domain,
-          discoveryUrls: [l.url],
-          discoverySite: l.siteKey,
-          sourceType: 'job_board',
-          jobTitles: l.jobTitle ? [l.jobTitle] : [],
-          jobLocations: l.jobLocation ? [l.jobLocation] : [],
-          descriptions: l.description ? [l.description] : [],
-          relevanceScore: l.relevanceScore,
-        });
-      }
-    }
-
-    for (const c of companyEntries) {
-      if (isBlockedCompanyName(c.name)) {
-        droppedCount++;
-        logger.debug({ name: c.name, reason: 'blocklist/pattern' }, 'CompanyFinder: dropped junk name');
-        continue;
-      }
-      const domain = normalizeDomain(c.domain);
-      if (domain && (shouldSkipDomain(domain) || isMegaCorp(domain))) {
-        droppedCount++;
-        continue;
-      }
-
-      const key = normalizeCompanyKey(c.name);
-      const existing = companyMap.get(key);
-      if (existing) {
-        if (!existing.domain && domain) existing.domain = domain;
-        if (!existing.industry && c.industry) existing.industry = c.industry;
-        if (!existing.location && c.location) existing.location = c.location;
-        if (!existing.size && c.size) existing.size = c.size;
-        if (!existing.revenue && c.revenue) existing.revenue = c.revenue;
-        if (c.description) existing.descriptions.push(c.description);
-        if (!existing.discoveryUrls.includes(c.url)) existing.discoveryUrls.push(c.url);
-      } else {
-        companyMap.set(key, {
-          displayName: c.name.trim(),
-          domain,
-          discoveryUrls: [c.url],
-          discoverySite: c.siteKey,
-          sourceType: 'company_database',
-          jobTitles: [],
-          jobLocations: c.location ? [c.location] : [],
-          descriptions: c.description ? [c.description] : [],
-          industry: c.industry || undefined,
-          location: c.location || undefined,
-          size: c.size || undefined,
-          revenue: c.revenue || undefined,
-        });
-      }
-    }
-
-    metrics.uniqueCompanies = companyMap.size;
-
-    logger.info(
-      { survivors: companyMap.size, dropped: droppedCount },
-      'CompanyFinder: dedupe + filter complete',
-    );
-
-    if (dryRun) {
-      const elapsedMs = Date.now() - startedAt;
-      logger.info({ ...metrics, elapsedMs }, 'CompanyFinder: dry run summary');
-      return { status: 'completed', metrics };
-    }
-
-    // ── Phase 5: Domain backfill (best-effort, capped) ────────────────────
-    const companyList = Array.from(companyMap.values());
-    let backfillsRemaining = MAX_DOMAIN_BACKFILLS;
-    for (const company of companyList) {
-      if (company.domain) continue;
-      if (backfillsRemaining <= 0) break;
-      backfillsRemaining--;
-      try {
-        const { urls } = await crawlGoogleAndExtractUrls(
-          this.tenantId,
-          `${company.displayName} official website`,
-          'company_domain',
-          { companyName: company.displayName },
-        );
-        const firstUrl = urls[0]?.url;
-        if (firstUrl) {
-          try {
-            const d = new URL(firstUrl).hostname.replace(/^www\./, '');
-            if (!shouldSkipDomain(d) && !isMegaCorp(d)) {
-              company.domain = d;
-            }
-          } catch {
-            // invalid URL
-          }
-        }
-      } catch (err) {
-        logger.debug(
-          { err: err instanceof Error ? err.message : String(err), company: company.displayName },
-          'CompanyFinder: domain backfill failed',
-        );
-      }
-    }
-
-    // ── Phase 6: Persist + dispatch enrichment ────────────────────────────
-    for (const company of companyList) {
-      try {
-        const primaryJobTitle = company.jobTitles[0];
-        const primaryJobLocation = company.jobLocations[0];
-        const description = company.descriptions.join(' | ').slice(0, 500);
-
-        const rawData: Record<string, unknown> = {
-          discoverySource: 'company-finder',
-          discoverySite: company.discoverySite,
-          discoveryUrl: company.discoveryUrls[0],
-          discoveryUrls: company.discoveryUrls,
-          sourceType: company.sourceType,
-        };
-        if (company.sourceType === 'job_board') {
-          rawData.hiringSignal = 'job_posting';
-          if (primaryJobTitle) rawData.jobTitle = primaryJobTitle;
-          if (primaryJobLocation) rawData.jobLocation = primaryJobLocation;
-        }
-        if (company.relevanceScore != null) rawData.relevanceScore = company.relevanceScore;
-        if (company.industry) rawData.industry = company.industry;
-        if (company.location) rawData.location = company.location;
-        if (company.size) rawData.size = company.size;
-        if (company.revenue) rawData.revenue = company.revenue;
-
-        const saved = await this.saveOrUpdateCompany({
-          name: company.displayName,
-          domain: company.domain ?? undefined,
-          description: description || undefined,
-          rawData,
-        });
-        metrics.saved++;
-
-        await this.dispatchNext('enrichment', {
-          companyId: saved.id,
-          masterAgentId,
-          pipelineContext,
-          dryRun,
-        });
-        metrics.dispatched++;
-      } catch (err) {
-        logger.warn(
-          {
-            err: err instanceof Error ? err.message : String(err),
-            company: company.displayName,
-          },
-          'CompanyFinder: save/dispatch failed',
-        );
-      }
+      logger.info(
+        { siteKey, savedSoFar: metrics.saved, dispatchedSoFar: metrics.dispatched, uniqueSoFar: savedCompanyKeys.size },
+        'CompanyFinder: site complete — companies saved + enrichment dispatched',
+      );
     }
 
     const elapsedMs = Date.now() - startedAt;

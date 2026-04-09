@@ -21,6 +21,7 @@ import { crawlSite, crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js'
 import * as cfPrompt from '../prompts/company-finder.prompt.js';
 import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
+import { SMART_MODEL } from '../tools/together-ai.tool.js';
 import logger from '../utils/logger.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -217,6 +218,7 @@ export class CompanyFinderAgent extends BaseAgent {
           },
         ],
         2,
+        { model: SMART_MODEL },
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -457,6 +459,7 @@ export class CompanyFinderAgent extends BaseAgent {
                 { role: 'user', content: userPrompt },
               ],
               2,
+              { model: SMART_MODEL },
             );
             const extracted = result.companies ?? [];
             for (const c of extracted) {
@@ -473,6 +476,7 @@ export class CompanyFinderAgent extends BaseAgent {
                 { role: 'user', content: userPrompt },
               ],
               2,
+              { model: SMART_MODEL },
             );
             const extracted = result.listings ?? [];
             for (const l of extracted) {

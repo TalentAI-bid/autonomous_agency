@@ -211,7 +211,7 @@ export class EnrichmentAgent extends BaseAgent {
       try {
         // Search for company website using LLM-generated smart queries (max 2)
         let companySearchResults: SearchResult[] = [];
-        for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
+        for (const query of (smartQueries.companyWebsiteQueries ?? []).slice(0, 2)) {
           const results = await this.serpSearch(query, 'company_domain', { companyName: contactCompanyName });
           companySearchResults.push(...results);
           if (results.length > 0) break;
@@ -224,7 +224,7 @@ export class EnrichmentAgent extends BaseAgent {
             { companyName: contactCompanyName },
           );
           if (companySearchResults.length === 0) {
-            logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
+            logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min((smartQueries.companyWebsiteQueries ?? []).length, 2) + 1 }, 'All company website search queries returned 0 results');
           }
         }
         const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://') && !isJunkUrl(r.url))?.url;
@@ -918,7 +918,7 @@ export class EnrichmentAgent extends BaseAgent {
     // If no domain, try to resolve it using LLM-generated queries first
     if (!companyDomain) {
       const noiseDomains = ['linkedin.com', 'glassdoor.com', 'indeed.com', 'crunchbase.com', 'wikipedia.org', 'twitter.com', 'facebook.com'];
-      for (const query of smartQueries.domainResolutionQueries.slice(0, 2)) {
+      for (const query of (smartQueries.domainResolutionQueries ?? []).slice(0, 2)) {
         const results = await this.serpSearch(query, 'company_domain', { companyName });
         for (const r of results) {
           try {
@@ -941,7 +941,7 @@ export class EnrichmentAgent extends BaseAgent {
     try {
       // Search for company website using LLM-generated smart queries
       let companySearchResults: SearchResult[] = [];
-      for (const query of smartQueries.companyWebsiteQueries.slice(0, 2)) {
+      for (const query of (smartQueries.companyWebsiteQueries ?? []).slice(0, 2)) {
         const results = await this.serpSearch(query, 'company_domain', { companyName });
         companySearchResults.push(...results);
         if (results.length > 0) break;
@@ -954,7 +954,7 @@ export class EnrichmentAgent extends BaseAgent {
           { companyName },
         );
         if (companySearchResults.length === 0) {
-          logger.warn({ companyName, queriesAttempted: Math.min(smartQueries.companyWebsiteQueries.length, 2) + 1 }, 'All company website search queries returned 0 results');
+          logger.warn({ companyName, queriesAttempted: Math.min((smartQueries.companyWebsiteQueries ?? []).length, 2) + 1 }, 'All company website search queries returned 0 results');
         }
       }
       const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://') && !isJunkUrl(r.url))?.url;
@@ -1363,7 +1363,7 @@ export class EnrichmentAgent extends BaseAgent {
           setLinkedinContent(await this.scrapeUrl(contact.linkedinUrl));
           logger.info({ contactId }, 'LinkedIn re-scraped from existing URL');
         } else if (!contact.linkedinUrl && contactName) {
-          const queries = smartQueries.contactLinkedinQueries.length > 0
+          const queries = (smartQueries.contactLinkedinQueries ?? []).length > 0
             ? smartQueries.contactLinkedinQueries
             : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
@@ -1390,7 +1390,7 @@ export class EnrichmentAgent extends BaseAgent {
       // Source 2: GitHub (using smart queries)
       (async () => {
         if (!contactName) return;
-        const queries = smartQueries.contactGithubQueries.length > 0
+        const queries = (smartQueries.contactGithubQueries ?? []).length > 0
           ? smartQueries.contactGithubQueries
           : [`${contactName} github ${skillsStr}`.trim()];
         let githubResults: SearchResult[] = [];
@@ -1421,7 +1421,7 @@ export class EnrichmentAgent extends BaseAgent {
       // Source 3: Twitter/X (using smart queries)
       (async () => {
         if (!contactName) return;
-        const queries = smartQueries.contactSocialQueries.length > 0
+        const queries = (smartQueries.contactSocialQueries ?? []).length > 0
           ? smartQueries.contactSocialQueries
           : [`"${contactName}" ${contactTitle || skillsStr} twitter profile`.trim()];
         for (const query of queries) {
@@ -1508,7 +1508,7 @@ export class EnrichmentAgent extends BaseAgent {
           setLinkedinContent(await this.scrapeUrl(contact.linkedinUrl));
           logger.info({ contactId }, 'LinkedIn re-scraped from existing URL');
         } else if (!contact.linkedinUrl && contactName) {
-          const queries = smartQueries.contactLinkedinQueries.length > 0
+          const queries = (smartQueries.contactLinkedinQueries ?? []).length > 0
             ? smartQueries.contactLinkedinQueries
             : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;

@@ -550,6 +550,12 @@ export class CompanyFinderAgent extends BaseAgent {
                     discoveryUrls: [page.url],
                     sourceType: 'job_board',
                     hiringSignal: 'job_posting',
+                    openPositions: l.jobTitle ? [{
+                      title: l.jobTitle,
+                      location: l.jobLocation || '',
+                      url: page.url,
+                      description: l.description || '',
+                    }] : [],
                     ...(l.jobTitle && { jobTitle: l.jobTitle }),
                     ...(l.jobLocation && { jobLocation: l.jobLocation }),
                     ...(l.relevanceScore != null && { relevanceScore: l.relevanceScore }),

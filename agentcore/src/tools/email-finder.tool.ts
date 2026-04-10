@@ -1,120 +1,100 @@
-import dns from 'dns';
-import net from 'net';
-import { Redis } from 'ioredis';
-import { createRedisConnection } from '../queues/setup.js';
+import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
 
-export interface EmailResult {
-  email: string;
-  verified: boolean;
-  confidence: 'high' | 'medium' | 'low';
+function normalizeForEmail(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')  // remove accents é→e, ñ→n, ü→u
+    .replace(/[^a-z]/g, '');           // only keep letters
 }
 
-const redis: Redis = createRedisConnection();
-const CACHE_TTL_SEC = 30 * 24 * 3600; // 30 days
-
-function buildPatterns(firstName: string, lastName: string, domain: string): Array<{ email: string; confidence: 'high' | 'medium' | 'low' }> {
-  const f = firstName[0]?.toLowerCase() ?? '';
-  const l = lastName[0]?.toLowerCase() ?? '';
-  const first = firstName.toLowerCase();
-  const last = lastName.toLowerCase();
+function generatePatterns(first: string, last: string, domain: string): string[] {
+  const f = normalizeForEmail(first);
+  const l = normalizeForEmail(last);
+  if (!f || !l || !domain) return [];
   return [
-    { email: `${first}.${last}@${domain}`, confidence: 'high' },
-    { email: `${first}${last}@${domain}`, confidence: 'high' },
-    { email: `${f}${last}@${domain}`, confidence: 'medium' },
-    { email: `${first}@${domain}`, confidence: 'medium' },
-    { email: `${first}${l}@${domain}`, confidence: 'low' },
-    { email: `${f}.${last}@${domain}`, confidence: 'low' },
+    `${f}.${l}@${domain}`,       // jean.dupont@domain.com
+    `${f[0]}${l}@${domain}`,     // jdupont@domain.com
+    `${f}@${domain}`,            // jean@domain.com
+    `${f[0]}.${l}@${domain}`,    // j.dupont@domain.com
+    `${f}${l}@${domain}`,        // jeandupont@domain.com
+    `${l}.${f}@${domain}`,       // dupont.jean@domain.com
+    `${f}_${l}@${domain}`,       // jean_dupont@domain.com
+    `${l}@${domain}`,            // dupont@domain.com
   ];
 }
 
-async function getMXServer(domain: string): Promise<string | null> {
-  try {
-    const records = await dns.promises.resolveMx(domain);
-    if (!records.length) return null;
-    records.sort((a, b) => a.priority - b.priority);
-    return records[0]!.exchange;
-  } catch {
-    return null;
-  }
+interface ReacherResponse {
+  is_reachable: 'safe' | 'invalid' | 'risky' | 'unknown';
+  smtp: {
+    can_connect_smtp?: boolean;
+    is_catch_all?: boolean;
+    is_deliverable?: boolean;
+    error?: { type: string; message: string };
+  };
+  misc: { is_role_account?: boolean };
 }
 
-async function smtpVerify(email: string, mxServer: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection(25, mxServer);
-    let data = '';
-    let stage = 0;
-    const TIMEOUT = 8000;
-
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve(false);
-    }, TIMEOUT);
-
-    socket.on('data', (chunk: Buffer) => {
-      data += chunk.toString();
-      if (stage === 0 && data.includes('220')) {
-        socket.write(`EHLO agentcore.app\r\n`);
-        stage = 1;
-      } else if (stage === 1 && (data.includes('250') || data.includes('200'))) {
-        socket.write(`MAIL FROM:<verify@agentcore.app>\r\n`);
-        stage = 2;
-      } else if (stage === 2 && (data.includes('250') || data.includes('200'))) {
-        socket.write(`RCPT TO:<${email}>\r\n`);
-        stage = 3;
-      } else if (stage === 3) {
-        clearTimeout(timer);
-        socket.write('QUIT\r\n');
-        socket.destroy();
-        resolve(data.includes('250'));
-      }
-    });
-
-    socket.on('error', () => {
-      clearTimeout(timer);
-      resolve(false);
-    });
-
-    socket.on('close', () => {
-      clearTimeout(timer);
-    });
-  });
-}
-
-export async function findEmail(
-  tenantId: string,
+export async function findEmailByPattern(
   firstName: string,
   lastName: string,
   domain: string,
-): Promise<EmailResult | null> {
-  const cacheKey = `tenant:${tenantId}:email:${firstName.toLowerCase()}.${lastName.toLowerCase()}@${domain}`;
-  const cached = await redis.get(cacheKey);
-  if (cached) return JSON.parse(cached) as EmailResult;
+): Promise<{ email: string | null; method: string; attempts: number }> {
+  const patterns = generatePatterns(firstName, lastName, domain);
+  if (patterns.length === 0) {
+    logger.warn({ firstName, lastName, domain }, 'Email finder: no patterns generated');
+    return { email: null, method: 'no_patterns', attempts: 0 };
+  }
 
-  const patterns = buildPatterns(firstName, lastName, domain);
-  const mxServer = await getMXServer(domain);
+  let attempts = 0;
+  let catchAllDetected = false;
 
-  if (mxServer) {
-    for (const pattern of patterns) {
-      try {
-        const verified = await smtpVerify(pattern.email, mxServer);
-        if (verified) {
-          const result: EmailResult = { email: pattern.email, verified: true, confidence: pattern.confidence };
-          await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(result));
-          return result;
-        }
-      } catch (err) {
-        logger.warn({ err, email: pattern.email }, 'SMTP verify error');
+  for (const candidate of patterns) {
+    attempts++;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
+      const response = await fetch(`${env.REACHER_URL}/v0/check_email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_email: candidate }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        logger.warn({ candidate, status: response.status }, 'Reacher API error');
+        continue;
       }
+
+      const result: ReacherResponse = await response.json() as ReacherResponse;
+
+      // Catch-all domain — return first pattern as best guess
+      if (result.smtp?.is_catch_all) {
+        catchAllDetected = true;
+        logger.info({ domain, candidate }, 'Catch-all domain detected, returning first pattern');
+        return { email: patterns[0]!, method: 'catch_all_guess', attempts };
+      }
+
+      if (result.is_reachable === 'safe') {
+        logger.info({ candidate, attempts }, 'Email verified as safe via Reacher');
+        return { email: candidate, method: 'smtp_verified', attempts };
+      }
+
+      logger.debug({ candidate, reachable: result.is_reachable }, 'Email pattern not valid');
+
+      // Rate limit — 1 second between checks
+      await new Promise(r => setTimeout(r, 1000));
+
+    } catch (err) {
+      logger.warn(
+        { candidate, err: err instanceof Error ? err.message : String(err) },
+        'Reacher check failed for candidate',
+      );
     }
   }
 
-  // Return highest-confidence pattern unverified
-  if (patterns.length > 0) {
-    const result: EmailResult = { email: patterns[0]!.email, verified: false, confidence: patterns[0]!.confidence };
-    await redis.setex(cacheKey, CACHE_TTL_SEC, JSON.stringify(result));
-    return result;
-  }
-
-  return null;
+  return { email: null, method: catchAllDetected ? 'catch_all_none' : 'exhausted', attempts };
 }

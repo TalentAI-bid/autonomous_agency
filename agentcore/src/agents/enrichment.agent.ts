@@ -3,6 +3,7 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
+import { findEmailByPattern } from '../tools/email-finder.tool.js';
 import { isMegaCorp, shouldSkipDomain, isJunkUrl } from '../utils/domain-blocklist.js';
 import { type SearchResult } from '../tools/searxng.tool.js';
 import { crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
@@ -468,10 +469,19 @@ export class EnrichmentAgent extends BaseAgent {
                   const firstName = nameParts[0] ?? '';
                   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1]! : '';
                   if (firstName && lastName) {
-                    const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId, companyId ?? undefined);
-                    if (emailResult.email) {
-                      personEmail = emailResult.email;
-                      logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found');
+                    // PRIMARY: Pattern guesser + Reacher SMTP verification
+                    const patternResult = await findEmailByPattern(firstName, lastName, companyDomain);
+                    if (patternResult.email) {
+                      personEmail = patternResult.email;
+                      logger.info({ contactId, personName: person.name, personEmail, method: patternResult.method, attempts: patternResult.attempts }, 'Key person email found via pattern + Reacher');
+                    }
+                    // FALLBACK: Old Generect/emailIntelligence method
+                    if (!personEmail) {
+                      const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId, companyId ?? undefined);
+                      if (emailResult.email) {
+                        personEmail = emailResult.email;
+                        logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found via Generect fallback');
+                      }
                     }
                   }
                 } catch (err) {
@@ -579,10 +589,20 @@ export class EnrichmentAgent extends BaseAgent {
         }
 
         if (domain) {
-          const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId, companyId ?? undefined);
-          if (result.email && result.confidence >= 50) {
-            emailFound = result.email;
-            emailVerified = result.confidence >= 80;
+          // PRIMARY: Pattern guesser + Reacher SMTP verification
+          const patternResult = await findEmailByPattern(contact.firstName!, contact.lastName!, domain);
+          if (patternResult.email) {
+            emailFound = patternResult.email;
+            emailVerified = patternResult.method === 'smtp_verified';
+            logger.info({ contactId, email: emailFound, method: patternResult.method, attempts: patternResult.attempts }, 'Email found via pattern + Reacher');
+          }
+          // FALLBACK: Old Generect/emailIntelligence method
+          if (!emailFound) {
+            const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId, companyId ?? undefined);
+            if (result.email && result.confidence >= 50) {
+              emailFound = result.email;
+              emailVerified = result.confidence >= 80;
+            }
           }
         }
       } catch (err) {
@@ -1153,15 +1173,26 @@ export class EnrichmentAgent extends BaseAgent {
             } catch { /* continue */ }
           }
 
-          // 2. Find email via email intelligence engine (Generect → SearXNG → GitHub → MX guess)
+          // 2. Find email via pattern guesser + Reacher, then Generect fallback
           let personEmail = person.email || '';
           if (!personEmail) {
             const emailDomain = companyDomain || companyName;
             try {
-              const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
-              if (emailResult.email) {
-                personEmail = emailResult.email;
-                logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member');
+              // PRIMARY: Pattern guesser + Reacher SMTP verification
+              if (emailDomain.includes('.') && !emailDomain.includes(' ')) {
+                const patternResult = await findEmailByPattern(firstName, lastName, emailDomain);
+                if (patternResult.email) {
+                  personEmail = patternResult.email;
+                  logger.info({ personName: person.name, email: personEmail, method: patternResult.method, attempts: patternResult.attempts }, 'Email found for team member via pattern + Reacher');
+                }
+              }
+              // FALLBACK: Old Generect/emailIntelligence method
+              if (!personEmail) {
+                const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
+                if (emailResult.email) {
+                  personEmail = emailResult.email;
+                  logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member via Generect fallback');
+                }
               }
             } catch (err) {
               logger.warn({ err, personName: person.name }, 'Email finding failed for team member');

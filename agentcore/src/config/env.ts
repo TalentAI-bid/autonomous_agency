@@ -29,6 +29,7 @@ const envSchema = z.object({
   OPENCORPORATES_API_TOKEN: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
   GENERECT_API_KEY: z.string().optional(),
+  REACHER_URL: z.string().default('http://173.212.232.243:8070'),
 
   // SMTP
   SMTP_HOST: z.string().optional(),

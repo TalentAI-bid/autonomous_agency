@@ -1510,7 +1510,7 @@ export class EnrichmentAgent extends BaseAgent {
           logger.info({ contactId }, 'LinkedIn re-scraped from existing URL');
         } else if (!contact.linkedinUrl && contactName) {
           const queries = (smartQueries.contactLinkedinQueries ?? []).length > 0
-            ? smartQueries.contactLinkedinQueries
+            ? (smartQueries.contactLinkedinQueries ?? [])
             : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
           for (const query of queries) {
@@ -1537,7 +1537,7 @@ export class EnrichmentAgent extends BaseAgent {
       (async () => {
         if (!contactName) return;
         const queries = (smartQueries.contactGithubQueries ?? []).length > 0
-          ? smartQueries.contactGithubQueries
+          ? (smartQueries.contactGithubQueries ?? [])
           : [`${contactName} github ${skillsStr}`.trim()];
         let githubResults: SearchResult[] = [];
         for (const q of queries) {
@@ -1568,7 +1568,7 @@ export class EnrichmentAgent extends BaseAgent {
       (async () => {
         if (!contactName) return;
         const queries = (smartQueries.contactSocialQueries ?? []).length > 0
-          ? smartQueries.contactSocialQueries
+          ? (smartQueries.contactSocialQueries ?? [])
           : [`"${contactName}" ${contactTitle || skillsStr} twitter profile`.trim()];
         for (const query of queries) {
           const results = await this.serpSearch(query, 'twitter_profile', { personName: contactName });
@@ -1655,7 +1655,7 @@ export class EnrichmentAgent extends BaseAgent {
           logger.info({ contactId }, 'LinkedIn re-scraped from existing URL');
         } else if (!contact.linkedinUrl && contactName) {
           const queries = (smartQueries.contactLinkedinQueries ?? []).length > 0
-            ? smartQueries.contactLinkedinQueries
+            ? (smartQueries.contactLinkedinQueries ?? [])
             : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
           let found = false;
           for (const query of queries) {

@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, lt, sql } from 'drizzle-orm';
+import { eq, and, desc, lt, lte, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies } from '../db/schema/index.js';
+import { dispatchJob } from '../services/queue.service.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 const createCompanySchema = z.object({
@@ -124,5 +125,37 @@ export default async function companyRoutes(fastify: FastifyInstance) {
     });
     if (result.length === 0) throw new NotFoundError('Company', id);
     return { success: true };
+  });
+
+  // POST /api/companies/admin/retry-stuck-enrichment
+  fastify.post('/admin/retry-stuck-enrichment', async (request) => {
+    const stuckCompanies = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({
+        id: companies.id,
+        name: companies.name,
+        masterAgentId: companies.masterAgentId,
+      })
+      .from(companies)
+      .where(and(
+        eq(companies.tenantId, request.tenantId),
+        lte(companies.dataCompleteness, 15),
+      ));
+    });
+
+    let dispatched = 0;
+    for (const company of stuckCompanies) {
+      if (!company.masterAgentId) continue;
+      try {
+        await dispatchJob(request.tenantId, 'enrichment', {
+          companyId: company.id,
+          masterAgentId: company.masterAgentId,
+        });
+        dispatched++;
+      } catch {
+        // skip individual failures, continue with rest
+      }
+    }
+
+    return { total: stuckCompanies.length, dispatched };
   });
 }

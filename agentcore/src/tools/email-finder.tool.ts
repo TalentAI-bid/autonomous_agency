@@ -54,7 +54,7 @@ export async function findEmailByPattern(
     attempts++;
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 90000);
 
       const response = await fetch(`${env.REACHER_URL}/v0/check_email`, {
         method: 'POST',

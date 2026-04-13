@@ -80,6 +80,11 @@ const COMPANY_NAME_BLOCKLIST = new Set([
   'societe.com', 'societe',
   'crunchbase', 'bloomberg', 'zoominfo', 'apollo',
   'rocketreach', 'wikipedia',
+  // Job titles / role keywords (catch exact-match after legal suffix strip)
+  'devops', 'sre', 'cloud engineer', 'cloud architect', 'data engineer',
+  'frontend', 'backend', 'fullstack', 'full stack', 'developer', 'engineer',
+  'consultant', 'freelance', 'expert', 'specialist', 'manager', 'lead',
+  'senior', 'junior', 'intern', 'stagiaire', 'alternance', 'cdi', 'cdd',
 ]);
 
 /** Listicle/article-title regexes (case-insensitive). Anything matching these is junk. */
@@ -93,6 +98,8 @@ const ARTICLE_TITLE_PATTERNS: RegExp[] = [
   /\d[\d,]*\+/,
   /\bcompanies of\b/i,
   /\bcompanies in\b/i,
+  /^(devops|sre|cloud|data|frontend|backend|fullstack|java|python|react|angular|node)\b/i,
+  /\bsearch\b.*\b(sarl|sàrl|gmbh|ltd)\b/i,
 ];
 
 /** Stopwords for last-resort mission-text tokenization fallback (BUG 1 Fallback 3). */

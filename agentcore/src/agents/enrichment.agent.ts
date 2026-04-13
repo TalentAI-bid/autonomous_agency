@@ -4,7 +4,7 @@ import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import { findEmailByPattern } from '../tools/email-finder.tool.js';
-import { getLinkedInProfile, getLinkedInCompany, getVoyagerStats, type VoyagerProfile, type VoyagerCompany } from '../tools/linkedin-voyager.tool.js';
+
 import { isMegaCorp, shouldSkipDomain, isJunkUrl } from '../utils/domain-blocklist.js';
 import { type SearchResult } from '../tools/searxng.tool.js';
 import { crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
@@ -366,33 +366,6 @@ export class EnrichmentAgent extends BaseAgent {
           },
         ]);
 
-        // ── Voyager company supplement ──
-        let voyagerCompanyData: VoyagerCompany | null = null;
-        if (linkedinCompanyUrl) {
-          try {
-            const stats = getVoyagerStats();
-            if (stats.dailyCount < stats.dailyLimit) {
-              voyagerCompanyData = await getLinkedInCompany(linkedinCompanyUrl);
-              if (voyagerCompanyData) {
-                logger.info({ companyName: contactCompanyName, voyagerIndustry: voyagerCompanyData.industry }, 'Voyager company data fetched');
-                if (!deepCompany.industry && voyagerCompanyData.industry) deepCompany.industry = voyagerCompanyData.industry;
-                if (!deepCompany.size && voyagerCompanyData.companySize) deepCompany.size = voyagerCompanyData.companySize;
-                if (!deepCompany.headquarters && voyagerCompanyData.headquarters) deepCompany.headquarters = voyagerCompanyData.headquarters;
-                if (!deepCompany.description && voyagerCompanyData.about) deepCompany.description = voyagerCompanyData.about.slice(0, 500);
-                if (!deepCompany.foundedYear && voyagerCompanyData.founded) deepCompany.foundedYear = String(voyagerCompanyData.founded);
-                if ((!deepCompany.techStack || deepCompany.techStack.length === 0) && voyagerCompanyData.specialties?.length) {
-                  deepCompany.techStack = voyagerCompanyData.specialties;
-                }
-                if (!deepCompany.domain && voyagerCompanyData.website) {
-                  try { deepCompany.domain = new URL(voyagerCompanyData.website).hostname.replace('www.', ''); } catch {}
-                }
-              }
-            }
-          } catch (err) {
-            logger.debug({ err: err instanceof Error ? err.message : String(err) }, 'Voyager company fetch failed (non-critical)');
-          }
-        }
-
         // Calculate company data completeness
         const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters, deepCompany.techStack?.length ? 'yes' : '', deepCompany.keyPeople?.length ? 'yes' : '', deepCompany.recentNews?.length ? 'yes' : '', deepCompany.products?.length ? 'yes' : '', deepCompany.competitors?.length ? 'yes' : ''];
         const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
@@ -455,7 +428,6 @@ export class EnrichmentAgent extends BaseAgent {
             employeeCount: deepCompany.employeeCount || undefined,
             recentFunding: deepCompany.recentFunding || undefined,
             teamPageUrl: deepCompany.teamPageUrl || undefined,
-            voyagerCompanyData: voyagerCompanyData ?? undefined,
           },
         });
 
@@ -490,23 +462,6 @@ export class EnrichmentAgent extends BaseAgent {
                   }
                 } catch (err) {
                   logger.warn({ err, contactId, personName: person.name }, 'Key person LinkedIn search failed');
-                }
-              }
-
-              // Voyager profile supplement
-              let voyagerProfile: VoyagerProfile | null = null;
-              if (personLinkedinUrl) {
-                try {
-                  const stats = getVoyagerStats();
-                  if (stats.dailyCount < stats.dailyLimit) {
-                    voyagerProfile = await getLinkedInProfile(personLinkedinUrl);
-                    if (voyagerProfile) {
-                      if (!person.title && voyagerProfile.headline) person.title = voyagerProfile.headline;
-                      logger.info({ personName: person.name, skills: voyagerProfile.skills?.length }, 'Voyager person profile fetched');
-                    }
-                  }
-                } catch (err) {
-                  logger.debug({ personName: person.name, err: err instanceof Error ? err.message : String(err) }, 'Voyager person fetch failed');
                 }
               }
 
@@ -557,7 +512,6 @@ export class EnrichmentAgent extends BaseAgent {
                     source: 'key_person_enrichment',
                     department: person.department || undefined,
                     parentContactId: contactId,
-                    voyagerProfile: voyagerProfile ?? undefined,
                   },
                 });
                 logger.info({ contactId, personName: person.name, hasEmail: !!personEmail }, 'Key person contact created');
@@ -982,29 +936,11 @@ export class EnrichmentAgent extends BaseAgent {
     });
 
     // ── Phase 2: Deep company enrichment (same as contact path) ─────────
+    // Domain should already come from company-finder (extracted from job board pages).
+    // No SERP domain resolution — use what we have or proceed without.
     let companyDomain = company.domain ?? undefined;
-
-    // If no domain, try to resolve it using LLM-generated queries first
     if (!companyDomain) {
-      const noiseDomains = ['linkedin.com', 'glassdoor.com', 'indeed.com', 'crunchbase.com', 'wikipedia.org', 'twitter.com', 'facebook.com'];
-      for (const query of (smartQueries.domainResolutionQueries ?? []).slice(0, 2)) {
-        const results = await this.serpSearch(query, 'company_domain', { companyName });
-        for (const r of results) {
-          try {
-            const hostname = new URL(r.url).hostname.replace('www.', '');
-            if (!noiseDomains.some(d => hostname.includes(d))) {
-              companyDomain = hostname;
-              break;
-            }
-          } catch { /* skip */ }
-        }
-        if (companyDomain) break;
-      }
-      if (companyDomain) {
-        logger.info({ companyId, companyName, resolvedDomain: companyDomain }, 'Domain resolved via LLM smart queries');
-      } else {
-        logger.info({ companyId, companyName }, 'Proceeding with company enrichment without domain');
-      }
+      logger.info({ companyId, companyName }, 'No domain from company-finder — proceeding without domain');
     }
 
     try {
@@ -1105,22 +1041,6 @@ export class EnrichmentAgent extends BaseAgent {
         }
       });
 
-      // Voyager domain fallback — only if we still have no domain and found a LinkedIn URL
-      if (!companyDomain && linkedinCompanyUrl) {
-        try {
-          const stats = getVoyagerStats();
-          if (stats.dailyCount < stats.dailyLimit) {
-            const voyagerCo = await getLinkedInCompany(linkedinCompanyUrl);
-            if (voyagerCo?.website) {
-              try {
-                companyDomain = new URL(voyagerCo.website).hostname.replace('www.', '');
-                logger.info({ companyId, companyName, resolvedDomain: companyDomain }, 'Domain resolved via Voyager');
-              } catch {}
-            }
-          }
-        } catch {}
-      }
-
       const searchSnippets = companySearchResults.map((r) => `${r.title}: ${r.snippet}`).join('\n');
 
       const deepCompany = await this.extractJSON<DeepCompanyProfile>([
@@ -1142,33 +1062,6 @@ export class EnrichmentAgent extends BaseAgent {
           }),
         },
       ]);
-
-      // ── Voyager company supplement ──
-      let voyagerCompanyData: VoyagerCompany | null = null;
-      if (linkedinCompanyUrl) {
-        try {
-          const stats = getVoyagerStats();
-          if (stats.dailyCount < stats.dailyLimit) {
-            voyagerCompanyData = await getLinkedInCompany(linkedinCompanyUrl);
-            if (voyagerCompanyData) {
-              logger.info({ companyName, voyagerIndustry: voyagerCompanyData.industry }, 'Voyager company data fetched');
-              if (!deepCompany.industry && voyagerCompanyData.industry) deepCompany.industry = voyagerCompanyData.industry;
-              if (!deepCompany.size && voyagerCompanyData.companySize) deepCompany.size = voyagerCompanyData.companySize;
-              if (!deepCompany.headquarters && voyagerCompanyData.headquarters) deepCompany.headquarters = voyagerCompanyData.headquarters;
-              if (!deepCompany.description && voyagerCompanyData.about) deepCompany.description = voyagerCompanyData.about.slice(0, 500);
-              if (!deepCompany.foundedYear && voyagerCompanyData.founded) deepCompany.foundedYear = String(voyagerCompanyData.founded);
-              if ((!deepCompany.techStack || deepCompany.techStack.length === 0) && voyagerCompanyData.specialties?.length) {
-                deepCompany.techStack = voyagerCompanyData.specialties;
-              }
-              if (!deepCompany.domain && voyagerCompanyData.website) {
-                try { deepCompany.domain = new URL(voyagerCompanyData.website).hostname.replace('www.', ''); } catch {}
-              }
-            }
-          }
-        } catch (err) {
-          logger.debug({ err: err instanceof Error ? err.message : String(err) }, 'Voyager company fetch failed (non-critical)');
-        }
-      }
 
       // Calculate company data completeness
       const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters, deepCompany.techStack?.length ? 'yes' : '', deepCompany.keyPeople?.length ? 'yes' : '', deepCompany.recentNews?.length ? 'yes' : '', deepCompany.products?.length ? 'yes' : '', deepCompany.competitors?.length ? 'yes' : ''];
@@ -1221,7 +1114,6 @@ export class EnrichmentAgent extends BaseAgent {
           employeeCount: deepCompany.employeeCount || undefined,
           recentFunding: deepCompany.recentFunding || undefined,
           teamPageUrl: deepCompany.teamPageUrl || undefined,
-          voyagerCompanyData: voyagerCompanyData ?? undefined,
         },
       });
 
@@ -1268,23 +1160,6 @@ export class EnrichmentAgent extends BaseAgent {
               const liResults = await this.serpSearch(liQuery, 'linkedin_person', { companyName, personName: person.name });
               personLinkedinUrl = liResults.find(r => r.url.includes('linkedin.com/in/'))?.url ?? '';
             } catch { /* continue */ }
-          }
-
-          // Voyager profile supplement
-          let voyagerProfile: VoyagerProfile | null = null;
-          if (personLinkedinUrl) {
-            try {
-              const stats = getVoyagerStats();
-              if (stats.dailyCount < stats.dailyLimit) {
-                voyagerProfile = await getLinkedInProfile(personLinkedinUrl);
-                if (voyagerProfile) {
-                  if (!person.title && voyagerProfile.headline) person.title = voyagerProfile.headline;
-                  logger.info({ personName: person.name, skills: voyagerProfile.skills?.length }, 'Voyager person profile fetched');
-                }
-              }
-            } catch (err) {
-              logger.debug({ personName: person.name, err: err instanceof Error ? err.message : String(err) }, 'Voyager person fetch failed');
-            }
           }
 
           // 2. Find email via pattern guesser + Reacher, then Generect fallback
@@ -1339,7 +1214,6 @@ export class EnrichmentAgent extends BaseAgent {
               rawData: {
                 source: 'company_enrichment_team',
                 department: person.department || undefined,
-                voyagerProfile: voyagerProfile ?? undefined,
               },
             });
 

@@ -387,8 +387,8 @@ export class MasterAgent extends BaseAgent {
         }
 
         const valid = (Array.isArray(selection.selectedAgents) ? selection.selectedAgents : []).filter(
-          (a): a is 'company-finder' | 'candidate-finder' =>
-            a === 'company-finder' || a === 'candidate-finder',
+          (a): a is 'company-finder' | 'candidate-finder' | 'linkedin' =>
+            a === 'company-finder' || a === 'candidate-finder' || a === 'linkedin',
         );
         if (valid.length === 0) {
           valid.push(agent.useCase === 'recruitment' ? 'candidate-finder' : 'company-finder');

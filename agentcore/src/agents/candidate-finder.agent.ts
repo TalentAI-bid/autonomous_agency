@@ -21,7 +21,7 @@ import { SITE_CONFIGS } from '../config/site-configs.js';
 import { crawlSite, crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
 import * as candPrompt from '../prompts/candidate-finder.prompt.js';
 import { slugMatchesPerson } from '../utils/linkedin-match.js';
-import { searchLinkedInPeople, getLinkedInProfile, getVoyagerStats } from '../tools/linkedin-voyager.tool.js';
+
 import type { PipelineContext } from '../types/pipeline-context.js';
 import logger from '../utils/logger.js';
 
@@ -340,37 +340,6 @@ export class CandidateFinderAgent extends BaseAgent {
       }
     }
 
-    // ── Phase 3.5: Voyager LinkedIn search (supplementary) ───────────────
-    {
-      const stats = getVoyagerStats();
-      if (stats.dailyCount < stats.dailyLimit - 15) {
-        try {
-          const searchResult = await searchLinkedInPeople(
-            analysis.targetRole || targetSkills[0] || '',
-            analysis.targetCountry || '',
-            10,
-          );
-          for (const result of searchResult.results) {
-            const fullName = `${result.firstName} ${result.lastName}`.trim();
-            if (isBlockedName(fullName)) continue;
-            allProfiles.push({
-              fullName,
-              headline: result.headline,
-              currentTitle: result.headline?.split(' at ')?.[0]?.trim() || result.headline,
-              currentCompany: result.currentCompany || '',
-              location: result.location,
-              linkedinUrl: result.profileUrl ? normalizeLinkedInUrl(result.profileUrl) : undefined,
-              skills: [],
-              siteKey: 'linkedin_voyager',
-            } as ExtractedProfile);
-          }
-          logger.info({ count: searchResult.results.length }, 'CandidateFinder: Voyager search added profiles');
-        } catch (err) {
-          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'CandidateFinder: Voyager search failed');
-        }
-      }
-    }
-
     metrics.profilesExtracted = allProfiles.length;
 
     // ── Phase 4: Dedupe + filter ──────────────────────────────────────────
@@ -457,37 +426,6 @@ export class CandidateFinderAgent extends BaseAgent {
       }
     }
 
-    // ── Phase 5.5: Voyager profile enrichment (top 10 with LinkedIn URLs) ──
-    const MAX_VOYAGER_ENRICHMENTS = 10;
-    let voyagerEnrichCount = 0;
-    for (const candidate of candidateList) {
-      if (voyagerEnrichCount >= MAX_VOYAGER_ENRICHMENTS) break;
-      if (!candidate.linkedinUrl) continue;
-      const stats = getVoyagerStats();
-      if (stats.dailyCount >= stats.dailyLimit) break;
-      try {
-        const vp = await getLinkedInProfile(candidate.linkedinUrl);
-        if (vp) {
-          if (vp.skills?.length && (!candidate.skills || candidate.skills.length === 0)) candidate.skills = vp.skills;
-          if (vp.headline && !candidate.headline) candidate.headline = vp.headline;
-          if (vp.location && !candidate.location) candidate.location = vp.location;
-          (candidate as any)._voyagerProfile = {
-            experiences: vp.experiences,
-            education: vp.education,
-            languages: vp.languages,
-            certifications: vp.certifications,
-            summary: vp.summary,
-          };
-          voyagerEnrichCount++;
-        }
-      } catch (err) {
-        logger.debug({ name: candidate.fullName, err: err instanceof Error ? err.message : String(err) }, 'CandidateFinder: Voyager enrich failed');
-      }
-    }
-    if (voyagerEnrichCount > 0) {
-      logger.info({ voyagerEnrichCount }, 'CandidateFinder: Voyager profile enrichment completed');
-    }
-
     // ── Phase 6: Persist + dispatch enrichment ────────────────────────────
     for (const candidate of candidateList) {
       try {
@@ -504,8 +442,6 @@ export class CandidateFinderAgent extends BaseAgent {
         if (candidate.websiteUrl) rawData.websiteUrl = candidate.websiteUrl;
         if (candidate.experienceYears != null) rawData.experienceYears = candidate.experienceYears;
         if (candidate.relevanceScore != null) rawData.relevanceScore = candidate.relevanceScore;
-        if ((candidate as any)._voyagerProfile) rawData.voyagerProfile = (candidate as any)._voyagerProfile;
-
         const saved = await this.saveOrUpdateContact({
           firstName: firstName || undefined,
           lastName: lastName || undefined,

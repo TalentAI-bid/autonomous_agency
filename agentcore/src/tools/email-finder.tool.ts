@@ -1,6 +1,10 @@
 import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
 
+let dailyEmailChecks = 0;
+let dailyResetAt = Date.now() + 24 * 60 * 60 * 1000;
+const MAX_DAILY_EMAIL_CHECKS = 300;
+
 function normalizeForEmail(str: string): string {
   return str
     .toLowerCase()
@@ -41,6 +45,17 @@ export async function findEmailByPattern(
   lastName: string,
   domain: string,
 ): Promise<{ email: string | null; method: string; attempts: number }> {
+  // Daily limit guard
+  if (Date.now() >= dailyResetAt) {
+    dailyEmailChecks = 0;
+    dailyResetAt = Date.now() + 24 * 60 * 60 * 1000;
+  }
+  if (dailyEmailChecks >= MAX_DAILY_EMAIL_CHECKS) {
+    logger.info({ dailyEmailChecks, domain }, 'Email finder: daily Reacher limit reached');
+    return { email: null, method: 'daily_limit', attempts: 0 };
+  }
+  dailyEmailChecks++;
+
   const patterns = generatePatterns(firstName, lastName, domain);
   if (patterns.length === 0) {
     logger.warn({ firstName, lastName, domain }, 'Email finder: no patterns generated');

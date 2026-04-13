@@ -5,10 +5,7 @@ import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import { findEmailByPattern } from '../tools/email-finder.tool.js';
 
-import { isMegaCorp, shouldSkipDomain, isJunkUrl } from '../utils/domain-blocklist.js';
-import { type SearchResult } from '../tools/searxng.tool.js';
-import { crawlGoogleAndExtractUrls } from '../tools/smart-crawler.js';
-import type { UrlExtractionIntent } from '../prompts/url-extraction.prompt.js';
+import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
 import {
   buildSystemPrompt as candidateSystemPrompt,
   buildUserPrompt as candidateUserPrompt,
@@ -19,12 +16,6 @@ import {
   buildUserPrompt as companyDeepUserPrompt,
   type DeepCompanyProfile,
 } from '../prompts/company-deep.prompt.js';
-import {
-  buildSystemPrompt as searchKeywordsSystemPrompt,
-  buildUserPrompt as searchKeywordsUserPrompt,
-  type GeneratedSearchQueries,
-} from '../prompts/search-keywords.prompt.js';
-import { pickBestLinkedInCompanyUrl } from '../utils/linkedin-match.js';
 import logger from '../utils/logger.js';
 
 /** Pull discovery-source signals out of an existing company.rawData so they survive enrichment overwrites. */
@@ -152,30 +143,15 @@ export class EnrichmentAgent extends BaseAgent {
       }
     }
 
-    // ── Phase 0: LLM brain — generate smart search queries ─────────────────
-
-    const skills = (contact.skills as string[]) ?? [];
-    const skillsStr = skills.slice(0, 3).join(' ');
-
-    const smartQueries = await this.generateSmartQueries({
-      companyName: contactCompanyName || 'Unknown',
-      contactName: contactName || undefined,
-      contactTitle: contactTitle || undefined,
-    });
-
-    // ── Phase 1: Multi-source data collection (6 parallel sources) ─────────
+    // ── Phase 1: Multi-source data collection (scrape existing URLs only) ──
 
     let githubContent = '';
     let githubReposContent = '';
     let personalSiteContent = '';
     let linkedinContent = '';
-    let linkedinSearchContent = '';
     let twitterContent = '';
-    let stackOverflowContent = '';
-    let devCommunityContent = '';
-    let foundLinkedinUrl: string | null = null;
 
-    // Quick company domain lookup for URL validation in source searches
+    // Quick company domain lookup
     let knownCompanyDomain: string | undefined;
     if (contact.companyId) {
       try {
@@ -188,19 +164,14 @@ export class EnrichmentAgent extends BaseAgent {
       } catch { /* non-critical */ }
     }
 
-    // Branch sources by use case
-    const setFoundLinkedinUrl = (url: string) => { foundLinkedinUrl = url; };
+    // Scrape existing URLs only — no SERP searches
     const sourceResults = useCase === 'sales'
-      ? await this.runSalesSourceSearches(contactId, contactName, contactTitle, contactCompanyName, knownCompanyDomain, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { twitterContent = content; }, (content) => { personalSiteContent = content; }, setFoundLinkedinUrl)
-      : await this.runRecruitmentSourceSearches(contactId, contactName, contactTitle, contactCompanyName, skillsStr, contact, smartQueries, (content) => { linkedinContent = content; }, (content) => { linkedinSearchContent = content; }, (content) => { githubContent = content; }, (content) => { githubReposContent = content; }, (content) => { twitterContent = content; }, (content) => { stackOverflowContent = content; }, (content) => { personalSiteContent = content; }, (content) => { devCommunityContent = content; }, setFoundLinkedinUrl);
+      ? await this.runSalesSourceSearches(contactId, knownCompanyDomain, contact, (c) => { linkedinContent = c; }, (c) => { personalSiteContent = c; })
+      : await this.runRecruitmentSourceSearches(contactId, contact as any, (c) => { linkedinContent = c; }, (c) => { githubContent = c; }, (c) => { githubReposContent = c; }, (c) => { twitterContent = c; });
 
-    // Log any failures from parallel sources
     sourceResults.forEach((result, i) => {
       if (result.status === 'rejected') {
-        const sourceNames = useCase === 'sales'
-          ? ['LinkedIn', 'CompanyTeamPage']
-          : ['LinkedIn', 'GitHub', 'Twitter/X', 'StackOverflow', 'Blog/Portfolio', 'DevCommunity'];
-        logger.warn({ err: result.reason, contactId, source: sourceNames[i] }, 'Source search failed');
+        logger.warn({ err: result.reason, contactId, source: i }, 'Source scrape failed');
       }
     });
 
@@ -211,25 +182,9 @@ export class EnrichmentAgent extends BaseAgent {
 
     if (contactCompanyName) {
       try {
-        // Search for company website using LLM-generated smart queries (max 2)
-        let companySearchResults: SearchResult[] = [];
-        for (const query of (smartQueries.companyWebsiteQueries ?? []).slice(0, 2)) {
-          const results = await this.serpSearch(query, 'company_domain', { companyName: contactCompanyName });
-          companySearchResults.push(...results);
-          if (results.length > 0) break;
-        }
-        // Fallback to hardcoded query if smart queries returned nothing
-        if (companySearchResults.length === 0) {
-          companySearchResults = await this.serpSearch(
-            `${contactCompanyName} company official website`,
-            'company_domain',
-            { companyName: contactCompanyName },
-          );
-          if (companySearchResults.length === 0) {
-            logger.warn({ companyName: contactCompanyName, queriesAttempted: Math.min((smartQueries.companyWebsiteQueries ?? []).length, 2) + 1 }, 'All company website search queries returned 0 results');
-          }
-        }
-        const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://') && !isJunkUrl(r.url))?.url;
+        // Domain from company-finder — no SERP needed
+        const companyDomain = knownCompanyDomain;
+        const companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
 
         let homepageContent = '';
         let aboutPageContent = '';
@@ -237,23 +192,12 @@ export class EnrichmentAgent extends BaseAgent {
         let teamPageContent = '';
         let linkedinCompanyContent = '';
         let linkedinCompanyUrl = '';
-        let crunchbaseContent = '';
-        let newsContent = '';
-        let glassdoorContent = '';
-        let companyDomain: string | undefined;
 
         if (companyUrl) {
-          try {
-            companyDomain = new URL(companyUrl).hostname.replace('www.', '');
-          } catch { /* ignore */ }
-
-          // Scrape homepage
           homepageContent = await this.scrapeUrl(companyUrl);
         }
 
-        // Gate the company-website sources on homepage health.
-        // If the homepage is unreachable/empty, scraping /about, /team, /careers
-        // will produce identical 500s and burn ~10 Crawl4AI requests per dead host.
+        // Gate sub-page scrapes on homepage health
         const homepageOk = !!homepageContent && homepageContent.length > 200;
         if (companyUrl && !homepageOk) {
           logger.warn(
@@ -262,21 +206,26 @@ export class EnrichmentAgent extends BaseAgent {
           );
         }
 
-        // Run remaining 5 company sources + about/careers in parallel
+        // Extract LinkedIn company URL from homepage HTML via regex
+        const linkedinMatch = homepageContent?.match(/https?:\/\/(www\.)?linkedin\.com\/company\/[a-zA-Z0-9_-]+/);
+        if (linkedinMatch) {
+          linkedinCompanyUrl = linkedinMatch[0];
+          try {
+            linkedinCompanyContent = await this.scrapeUrl(linkedinCompanyUrl);
+            logger.info({ contactId, linkedinCompanyUrl }, 'LinkedIn company page found from homepage');
+          } catch { /* non-critical */ }
+        }
+
         const companySourceResults = await Promise.allSettled([
-          // Source 1b: About page
           (async () => {
             if (!companyUrl || !homepageOk) return;
             aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href);
           })(),
-
-          // Source 1c: Careers page
           (async () => {
             if (!companyUrl || !homepageOk) return;
             careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href);
           })(),
-
-          // Source 2: Team/Leadership page — try multiple paths
+          // Team page — try multiple paths
           (async () => {
             if (!companyUrl || !homepageOk) return;
             for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
@@ -291,59 +240,14 @@ export class EnrichmentAgent extends BaseAgent {
               } catch { /* try next path */ }
             }
           })(),
-
-          // Source 3: LinkedIn company page (intent-filtered) + Crunchbase fallback
-          (async () => {
-            const liResults = await this.serpSearch(
-              `"${contactCompanyName}" linkedin company`,
-              'linkedin_company',
-              { companyName: contactCompanyName },
-            );
-            const liUrl = pickBestLinkedInCompanyUrl(liResults, contactCompanyName);
-            if (liUrl) {
-              linkedinCompanyUrl = liUrl;
-              linkedinCompanyContent = await this.scrapeUrl(liUrl);
-              logger.info({ contactId, liUrl }, 'LinkedIn company page scraped');
-            }
-            // Crunchbase: best-effort generic news lookup that often surfaces it
-            const newsResults = await this.serpSearch(
-              `"${contactCompanyName}" funding crunchbase OR techcrunch`,
-              'news',
-              { companyName: contactCompanyName },
-            );
-            const cbUrl = newsResults.find((r) =>
-              r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'),
-            )?.url;
-            if (cbUrl) {
-              crunchbaseContent = await this.scrapeUrl(cbUrl);
-              logger.info({ contactId, cbUrl }, 'Crunchbase/funding content scraped');
-            } else {
-              crunchbaseContent = newsResults
-                .filter((r) => !r.url.includes('linkedin.com'))
-                .slice(0, 3)
-                .map((r) => `${r.title}: ${r.snippet}`)
-                .join('\n');
-            }
-          })(),
-
-          // Source 4: Company news (LLM URL extraction from SERP, intent='news')
-          (async () => {
-            const query = `${contactCompanyName} latest news 2026`;
-            const results = await this.serpSearch(query, 'news', { companyName: contactCompanyName });
-            newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
-            logger.info({ contactId, resultsCount: results.length }, 'Company news gathered');
-          })(),
         ]);
 
-        // Log company source failures
         companySourceResults.forEach((result, i) => {
           if (result.status === 'rejected') {
-            const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn+Crunchbase', 'News'];
-            logger.warn({ err: result.reason, contactId, source: sourceNames[i] }, 'Company source search failed');
+            const sourceNames = ['About', 'Careers', 'Team'];
+            logger.warn({ err: result.reason, contactId, source: sourceNames[i] }, 'Company source scrape failed');
           }
         });
-
-        const searchSnippets = companySearchResults.map((r) => `${r.title}: ${r.snippet}`).join('\n');
 
         // Deep company enrichment via LLM
         const deepCompany = await this.extractJSON<DeepCompanyProfile>([
@@ -358,10 +262,10 @@ export class EnrichmentAgent extends BaseAgent {
               careersPageContent,
               teamPageContent,
               linkedinCompanyContent,
-              crunchbaseContent,
-              newsContent,
-              glassdoorContent,
-              searchResults: searchSnippets,
+              crunchbaseContent: '',
+              newsContent: '',
+              glassdoorContent: '',
+              searchResults: '',
             }),
           },
         ]);
@@ -395,11 +299,9 @@ export class EnrichmentAgent extends BaseAgent {
           }
         }
 
-        // Validate LLM-returned linkedinUrl for the COMPANY — must contain a name token
-        const llmCompanyLinkedinUrl = deepCompany.linkedinUrl || '';
-        const validatedCompanyLinkedinUrl = llmCompanyLinkedinUrl
-          ? (pickBestLinkedInCompanyUrl([{ url: llmCompanyLinkedinUrl, title: resolvedCompanyName, snippet: '' }], resolvedCompanyName) ?? undefined)
-          : undefined;
+        // Use homepage-extracted LinkedIn URL or LLM-returned one (simple regex validation)
+        const resolvedLinkedinUrl = linkedinCompanyUrl
+          || (deepCompany.linkedinUrl?.includes('linkedin.com/company/') ? deepCompany.linkedinUrl : undefined);
 
         const company = await this.saveOrUpdateCompany({
           id: contact.companyId ?? undefined,
@@ -410,7 +312,7 @@ export class EnrichmentAgent extends BaseAgent {
           techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,
           funding: deepCompany.funding || undefined,
           description: deepCompany.description || undefined,
-          linkedinUrl: validatedCompanyLinkedinUrl,
+          linkedinUrl: resolvedLinkedinUrl,
           dataCompleteness: companyDataCompleteness,
           rawData: {
             ...preservedDiscoveryData,
@@ -448,22 +350,9 @@ export class EnrichmentAgent extends BaseAgent {
             keyPeopleToResearch.map(async (person) => {
               if (!person.name) return person;
 
-              let personLinkedinUrl = person.linkedinUrl || '';
+              // LinkedIn URL from LLM extraction (no SERP)
+              const personLinkedinUrl = person.linkedinUrl || '';
               let personEmail = person.email || '';
-
-              // Search LinkedIn for this person if no URL yet
-              if (!personLinkedinUrl) {
-                try {
-                  const query = `"${person.name}" "${contactCompanyName}" linkedin profile`;
-                  const results = await this.serpSearch(query, 'linkedin_person', { companyName: contactCompanyName, personName: person.name });
-                  personLinkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url ?? '';
-                  if (personLinkedinUrl) {
-                    logger.info({ contactId, personName: person.name, personLinkedinUrl }, 'Key person LinkedIn found');
-                  }
-                } catch (err) {
-                  logger.warn({ err, contactId, personName: person.name }, 'Key person LinkedIn search failed');
-                }
-              }
 
               // Find email for this person
               if (!personEmail && companyDomain) {
@@ -573,22 +462,10 @@ export class EnrichmentAgent extends BaseAgent {
           domain = company?.domain ?? '';
         }
 
+        // Domain must come from company-finder — no SERP fallback
         if (!domain) {
-          const domainResults = await this.serpSearch(
-            `${contactCompanyName} official website`,
-            'company_domain',
-            { companyName: contactCompanyName },
-          );
-          const domainUrl = domainResults.find((r) =>
-            !r.url.includes('linkedin.com') &&
-            !r.url.includes('facebook.com') &&
-            r.url.startsWith('https://'),
-          )?.url;
-          if (domainUrl) {
-            try {
-              domain = new URL(domainUrl).hostname.replace('www.', '');
-            } catch { /* ignore */ }
-          }
+          // Use knownCompanyDomain from earlier lookup as last resort
+          domain = knownCompanyDomain || '';
         }
 
         if (domain) {
@@ -639,13 +516,10 @@ export class EnrichmentAgent extends BaseAgent {
               education: (contact.education as Record<string, unknown>[]) ?? undefined,
             },
             linkedinContent: linkedinContent || undefined,
-            linkedinSearchContent: linkedinSearchContent || undefined,
             githubContent: githubContent || undefined,
             githubReposContent: githubReposContent || undefined,
             personalSiteContent: personalSiteContent || undefined,
             twitterContent: twitterContent || undefined,
-            stackOverflowContent: stackOverflowContent || undefined,
-            devCommunityContent: devCommunityContent || undefined,
             searchSnippets: searchSnippets || undefined,
           }),
         },
@@ -660,7 +534,7 @@ export class EnrichmentAgent extends BaseAgent {
       email: emailFound ?? undefined,
       emailVerified,
       companyId: companyId ?? undefined,
-      linkedinUrl: foundLinkedinUrl ?? contact.linkedinUrl ?? undefined,
+      linkedinUrl: contact.linkedinUrl ?? undefined,
       updatedAt: new Date(),
     };
 
@@ -928,42 +802,14 @@ export class EnrichmentAgent extends BaseAgent {
 
     const ctx = this.getPipelineContext(input);
 
-    // ── Phase 0: LLM brain — generate smart search queries ─────────────
-    const smartQueries = await this.generateSmartQueries({
-      companyName,
-      domain: company.domain ?? undefined,
-      industry: company.industry ?? undefined,
-    });
-
-    // ── Phase 2: Deep company enrichment (same as contact path) ─────────
-    // Domain should already come from company-finder (extracted from job board pages).
-    // No SERP domain resolution — use what we have or proceed without.
+    // Domain from company-finder — no SERP needed
     let companyDomain = company.domain ?? undefined;
     if (!companyDomain) {
       logger.info({ companyId, companyName }, 'No domain from company-finder — proceeding without domain');
     }
+    const companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
 
     try {
-      // Search for company website using LLM-generated smart queries
-      let companySearchResults: SearchResult[] = [];
-      for (const query of (smartQueries.companyWebsiteQueries ?? []).slice(0, 2)) {
-        const results = await this.serpSearch(query, 'company_domain', { companyName });
-        companySearchResults.push(...results);
-        if (results.length > 0) break;
-      }
-      // Fallback to hardcoded query if smart queries returned nothing
-      if (companySearchResults.length === 0) {
-        companySearchResults = await this.serpSearch(
-          `${companyName} company official website`,
-          'company_domain',
-          { companyName },
-        );
-        if (companySearchResults.length === 0) {
-          logger.warn({ companyName, queriesAttempted: Math.min((smartQueries.companyWebsiteQueries ?? []).length, 2) + 1 }, 'All company website search queries returned 0 results');
-        }
-      }
-      const companyUrl = companySearchResults.find((r) => r.url.startsWith('https://') && !isJunkUrl(r.url))?.url;
-
       let homepageContent = '';
       let aboutPageContent = '';
       let careersPageContent = '';
@@ -975,9 +821,6 @@ export class EnrichmentAgent extends BaseAgent {
       let glassdoorContent = '';
 
       if (companyUrl) {
-        try {
-          companyDomain = companyDomain || new URL(companyUrl).hostname.replace('www.', '');
-        } catch { /* ignore */ }
         homepageContent = await this.scrapeUrl(companyUrl);
       }
 
@@ -988,6 +831,16 @@ export class EnrichmentAgent extends BaseAgent {
           { companyId, companyUrl, len: homepageContent?.length ?? 0 },
           'Enrichment: homepage unreachable/empty — skipping additional company-page scrapes',
         );
+      }
+
+      // Extract LinkedIn company URL from homepage HTML via regex
+      const linkedinMatch = homepageContent?.match(/https?:\/\/(www\.)?linkedin\.com\/company\/[a-zA-Z0-9_-]+/);
+      if (linkedinMatch) {
+        linkedinCompanyUrl = linkedinMatch[0];
+        try {
+          linkedinCompanyContent = await this.scrapeUrl(linkedinCompanyUrl);
+          logger.info({ companyId, linkedinCompanyUrl }, 'LinkedIn company page found from homepage');
+        } catch { /* non-critical */ }
       }
 
       const companySourceResults = await Promise.allSettled([
@@ -1004,44 +857,14 @@ export class EnrichmentAgent extends BaseAgent {
             } catch { /* try next path */ }
           }
         })(),
-        // LinkedIn company page (intent-filtered) + Crunchbase fallback
-        (async () => {
-          const liResults = await this.serpSearch(
-            `"${companyName}" linkedin company`,
-            'linkedin_company',
-            { companyName },
-          );
-          // Validated by slug-token match (Fix D) — never accept first-match guess
-          const liUrl = pickBestLinkedInCompanyUrl(liResults, companyName);
-          if (liUrl) {
-            linkedinCompanyUrl = liUrl;
-            linkedinCompanyContent = await this.scrapeUrl(liUrl);
-          }
-          const newsResults = await this.serpSearch(
-            `"${companyName}" funding crunchbase OR techcrunch`,
-            'news',
-            { companyName },
-          );
-          const cbUrl = newsResults.find((r) => r.url.includes('crunchbase.com') || r.url.includes('techcrunch.com'))?.url;
-          if (cbUrl) crunchbaseContent = await this.scrapeUrl(cbUrl);
-          else crunchbaseContent = newsResults.filter(r => !r.url.includes('linkedin.com')).slice(0, 3).map((r) => `${r.title}: ${r.snippet}`).join('\n');
-        })(),
-        // Company news (LLM URL extraction from SERP)
-        (async () => {
-          const query = `${companyName} latest news 2026`;
-          const results = await this.serpSearch(query, 'news', { companyName });
-          newsContent = results.slice(0, 5).map((r) => `${r.title} (${r.url}): ${r.snippet}`).join('\n');
-        })(),
       ]);
 
       companySourceResults.forEach((result, i) => {
         if (result.status === 'rejected') {
-          const sourceNames = ['About', 'Careers', 'Team', 'LinkedIn+Crunchbase', 'News'];
-          logger.warn({ err: result.reason, companyId, source: sourceNames[i] }, 'Company source search failed');
+          const sourceNames = ['About', 'Careers', 'Team'];
+          logger.warn({ err: result.reason, companyId, source: sourceNames[i] }, 'Company source scrape failed');
         }
       });
-
-      const searchSnippets = companySearchResults.map((r) => `${r.title}: ${r.snippet}`).join('\n');
 
       const deepCompany = await this.extractJSON<DeepCompanyProfile>([
         { role: 'system', content: companyDeepSystemPrompt(buildMissionContextString(ctx)) },
@@ -1055,10 +878,10 @@ export class EnrichmentAgent extends BaseAgent {
             careersPageContent,
             teamPageContent,
             linkedinCompanyContent,
-            crunchbaseContent,
-            newsContent,
-            glassdoorContent,
-            searchResults: searchSnippets,
+            crunchbaseContent: '',
+            newsContent: '',
+            glassdoorContent: '',
+            searchResults: '',
           }),
         },
       ]);
@@ -1080,11 +903,9 @@ export class EnrichmentAgent extends BaseAgent {
         company.rawData as Record<string, unknown> | null,
       );
 
-      // Validate LLM-returned linkedinUrl for the COMPANY — must contain a name token
-      const llmCompanyLinkedinUrl = deepCompany.linkedinUrl || '';
-      const validatedCompanyLinkedinUrl = llmCompanyLinkedinUrl
-        ? (pickBestLinkedInCompanyUrl([{ url: llmCompanyLinkedinUrl, title: resolvedName, snippet: '' }], resolvedName) ?? undefined)
-        : undefined;
+      // Use homepage-extracted LinkedIn URL or LLM-returned one (simple regex validation)
+      const resolvedLinkedinUrl = linkedinCompanyUrl
+        || (deepCompany.linkedinUrl?.includes('linkedin.com/company/') ? deepCompany.linkedinUrl : undefined);
 
       await this.saveOrUpdateCompany({
         id: companyId,
@@ -1095,7 +916,7 @@ export class EnrichmentAgent extends BaseAgent {
         techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,
         funding: deepCompany.funding || undefined,
         description: deepCompany.description || undefined,
-        linkedinUrl: validatedCompanyLinkedinUrl,
+        linkedinUrl: resolvedLinkedinUrl,
         dataCompleteness: companyDataCompleteness,
         rawData: {
           ...preservedDiscoveryDataCO,
@@ -1152,15 +973,8 @@ export class EnrichmentAgent extends BaseAgent {
           const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
           if (!firstName || !lastName) continue;
 
-          // 1. Search LinkedIn for this person
-          let personLinkedinUrl = person.linkedinUrl || '';
-          if (!personLinkedinUrl) {
-            try {
-              const liQuery = `"${person.name}" "${companyName}" linkedin profile`;
-              const liResults = await this.serpSearch(liQuery, 'linkedin_person', { companyName, personName: person.name });
-              personLinkedinUrl = liResults.find(r => r.url.includes('linkedin.com/in/'))?.url ?? '';
-            } catch { /* continue */ }
-          }
+          // LinkedIn URL: use existing URL from LLM extraction (no SERP)
+          const personLinkedinUrl = person.linkedinUrl || '';
 
           // 2. Find email via pattern guesser + Reacher, then Generect fallback
           let personEmail = person.email || '';
@@ -1276,232 +1090,46 @@ export class EnrichmentAgent extends BaseAgent {
     }
   }
 
-  // ── SERP search helper (Google → Brave → DuckDuckGo) ────────────────────
-  /**
-   * Replacement for `this.searchWeb()` that goes through smart-crawler:
-   * crawls Google/Brave/DDG, lets the LLM extract URLs matching the given
-   * intent, and returns SearchResult-shaped records so existing post-filter
-   * code (`.find(r => r.url.includes(...))`) keeps working unchanged.
-   */
-  private async serpSearch(
-    query: string,
-    intent: UrlExtractionIntent,
-    hints: { companyName?: string; personName?: string } = {},
-  ): Promise<SearchResult[]> {
-    if (!query || query.trim().length < 3) return [];
-    try {
-      const { urls } = await crawlGoogleAndExtractUrls(this.tenantId, query, intent, hints);
-      return urls.map((u) => ({ url: u.url, title: u.title, snippet: u.snippet }));
-    } catch (err) {
-      logger.warn(
-        { err: err instanceof Error ? err.message : String(err), query, intent },
-        'serpSearch failed — returning empty result list',
-      );
-      return [];
-    }
-  }
 
-  // ── LLM-powered smart query generation ──────────────────────────────────
-
-  private async generateSmartQueries(params: {
-    companyName: string;
-    domain?: string;
-    contactName?: string;
-    contactTitle?: string;
-    industry?: string;
-  }): Promise<GeneratedSearchQueries> {
-    try {
-      const queries = await this.extractJSON<GeneratedSearchQueries>([
-        { role: 'system', content: searchKeywordsSystemPrompt() },
-        { role: 'user', content: searchKeywordsUserPrompt(params) },
-      ]);
-      logger.info({
-        companyName: params.companyName,
-        reasoning: queries.reasoning,
-        queryCount: {
-          website: queries.companyWebsiteQueries?.length ?? 0,
-          linkedin: queries.linkedinCompanyQueries?.length ?? 0,
-          contact: queries.contactLinkedinQueries?.length ?? 0,
-          github: queries.contactGithubQueries?.length ?? 0,
-          social: queries.contactSocialQueries?.length ?? 0,
-          domain: queries.domainResolutionQueries?.length ?? 0,
-        },
-      }, 'Smart query generation succeeded');
-      return queries;
-    } catch (err) {
-      logger.warn({ err, companyName: params.companyName }, 'Smart query generation failed, using fallback templates');
-      return this.buildFallbackQueries(params);
-    }
-  }
-
-  private buildFallbackQueries(params: {
-    companyName: string;
-    domain?: string;
-    contactName?: string;
-    contactTitle?: string;
-  }): GeneratedSearchQueries {
-    const cn = params.companyName;
-    const ct = params.contactName ?? '';
-    const title = params.contactTitle ?? '';
-    return {
-      companyWebsiteQueries: [
-        `${cn} company official website`,
-      ],
-      linkedinCompanyQueries: [`"${cn}" linkedin company`],
-      contactLinkedinQueries: ct && cn ? [`"${ct}" "${cn}" linkedin profile`.trim()] : (ct ? [`"${ct}" "${title}" linkedin profile`.trim()] : []),
-      contactGithubQueries: ct ? [`${ct} github`.trim()] : [],
-      contactSocialQueries: ct ? [`"${ct}" ${title} twitter profile`.trim()] : [],
-      domainResolutionQueries: [`"${cn}" official website`],
-      reasoning: 'Fallback to hardcoded templates',
-    };
-  }
-
-  // ── Source search methods ────────────────────────────────────────────────
+  // ── Source search methods (scrape existing URLs only — no SERP) ─────────
 
   private async runRecruitmentSourceSearches(
     contactId: string,
-    contactName: string,
-    contactTitle: string,
-    contactCompanyName: string,
-    skillsStr: string,
-    contact: { linkedinUrl: string | null; skills: unknown; experience: unknown },
-    smartQueries: GeneratedSearchQueries,
+    contact: { linkedinUrl: string | null; rawData: Record<string, unknown> | null },
     setLinkedinContent: (s: string) => void,
-    setLinkedinSearchContent: (s: string) => void,
     setGithubContent: (s: string) => void,
     setGithubReposContent: (s: string) => void,
     setTwitterContent: (s: string) => void,
-    setStackOverflowContent: (s: string) => void,
-    setPersonalSiteContent: (s: string) => void,
-    setDevCommunityContent: (s: string) => void,
-    setFoundLinkedinUrl: (s: string) => void,
   ): Promise<PromiseSettledResult<void>[]> {
+    const raw = (contact.rawData ?? {}) as Record<string, unknown>;
     return Promise.allSettled([
-      // Source 1: LinkedIn (using smart queries)
+      // LinkedIn: scrape if URL already known (from candidate-finder or linkedin-agent)
       (async () => {
-        if (contact.linkedinUrl && !contact.skills && !contact.experience) {
+        if (contact.linkedinUrl) {
           setLinkedinContent(await this.scrapeUrl(contact.linkedinUrl));
-          logger.info({ contactId }, 'LinkedIn re-scraped from existing URL');
-        } else if (!contact.linkedinUrl && contactName) {
-          const queries = (smartQueries.contactLinkedinQueries ?? []).length > 0
-            ? (smartQueries.contactLinkedinQueries ?? [])
-            : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
-          let found = false;
-          for (const query of queries) {
-            // Per-domain delay is now enforced inside smart-crawler; no manual sleep needed.
-            const results = await this.serpSearch(query, 'linkedin_person', { companyName: contactCompanyName, personName: contactName });
-            const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
-            if (linkedinUrl) {
-              setLinkedinSearchContent(await this.scrapeUrl(linkedinUrl));
-              setFoundLinkedinUrl(linkedinUrl);
-              logger.info({ contactId, linkedinUrl }, 'LinkedIn profile found via smart search');
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
-            // NOTE: do not overwrite an existing linkedinUrl with empty string;
-            // setFoundLinkedinUrl is only invoked on hit so contact.linkedinUrl is preserved.
-            logger.info({ contactId, contactName }, 'LinkedIn not found via search');
-          }
+          logger.info({ contactId }, 'LinkedIn scraped from existing URL');
         }
       })(),
 
-      // Source 2: GitHub (using smart queries)
+      // GitHub: scrape if URL in rawData
       (async () => {
-        if (!contactName) return;
-        const queries = (smartQueries.contactGithubQueries ?? []).length > 0
-          ? (smartQueries.contactGithubQueries ?? [])
-          : [`${contactName} github ${skillsStr}`.trim()];
-        let githubResults: SearchResult[] = [];
-        for (const q of queries) {
-          githubResults = await this.serpSearch(q, 'github_profile', { personName: contactName });
-          if (githubResults.length > 0) break;
-        }
-        const githubUrl = githubResults.find((r) =>
-          r.url.includes('github.com/') &&
-          !r.url.includes('github.com/topics') &&
-          !r.url.includes('github.com/search') &&
-          !r.url.includes('github.com/orgs'),
-        )?.url;
-
+        const githubUrl = raw.githubUrl as string | undefined;
         if (githubUrl) {
           setGithubContent(await this.scrapeUrl(githubUrl));
-          logger.info({ contactId, githubUrl }, 'GitHub profile scraped');
+          logger.info({ contactId, githubUrl }, 'GitHub profile scraped from existing URL');
           try {
             const reposUrl = `${githubUrl.replace(/\/$/, '')}?tab=repositories&sort=stars`;
             setGithubReposContent(await this.scrapeUrl(reposUrl));
-            logger.info({ contactId, reposUrl }, 'GitHub repos tab scraped');
-          } catch (err) {
-            logger.warn({ err, contactId }, 'GitHub repos tab scrape failed');
-          }
+          } catch {}
         }
       })(),
 
-      // Source 3: Twitter/X (using smart queries)
+      // Twitter: scrape if URL in rawData
       (async () => {
-        if (!contactName) return;
-        const queries = (smartQueries.contactSocialQueries ?? []).length > 0
-          ? (smartQueries.contactSocialQueries ?? [])
-          : [`"${contactName}" ${contactTitle || skillsStr} twitter profile`.trim()];
-        for (const query of queries) {
-          const results = await this.serpSearch(query, 'twitter_profile', { personName: contactName });
-          const twitterUrl = results.find((r) =>
-            (r.url.includes('twitter.com/') || r.url.includes('x.com/')) &&
-            !r.url.includes('/status/') &&
-            !r.url.includes('/search'),
-          )?.url;
-          if (twitterUrl) {
-            setTwitterContent(await this.scrapeUrl(twitterUrl));
-            logger.info({ contactId, twitterUrl }, 'Twitter/X profile scraped');
-            break;
-          }
-        }
-      })(),
-
-      // Source 4: Stack Overflow
-      (async () => {
-        if (!contactName) return;
-        const query = `"${contactName}" ${skillsStr} stackoverflow user`.trim();
-        const results = await this.serpSearch(query, 'stackoverflow_profile', { personName: contactName });
-        const soUrl = results.find((r) => r.url.includes('stackoverflow.com/users/'))?.url;
-        if (soUrl) {
-          setStackOverflowContent(await this.scrapeUrl(soUrl));
-          logger.info({ contactId, soUrl }, 'Stack Overflow profile scraped');
-        }
-      })(),
-
-      // Source 5: Blog / Portfolio
-      (async () => {
-        if (!contactName || !contactTitle) return;
-        const portfolioQuery = `${contactName} ${contactTitle} portfolio OR blog OR personal site`;
-        const portfolioResults = await this.serpSearch(portfolioQuery, 'personal_site', { personName: contactName });
-        const personalUrl = portfolioResults.find((r) =>
-          !r.url.includes('linkedin.com') &&
-          !r.url.includes('github.com') &&
-          !r.url.includes('indeed.com') &&
-          !r.url.includes('glassdoor.com') &&
-          !r.url.includes('facebook.com') &&
-          !r.url.includes('twitter.com') &&
-          !r.url.includes('x.com'),
-        )?.url;
-        if (personalUrl) {
-          setPersonalSiteContent(await this.scrapeUrl(personalUrl));
-          logger.info({ contactId, personalUrl }, 'Personal site scraped');
-        }
-      })(),
-
-      // Source 6: Dev Community (Medium / dev.to)
-      (async () => {
-        if (!contactName) return;
-        const query = `"${contactName}" ${skillsStr} medium dev.to author`.trim();
-        const results = await this.serpSearch(query, 'dev_community', { personName: contactName });
-        const devUrl = results.find((r) =>
-          r.url.includes('medium.com/') || r.url.includes('dev.to/'),
-        )?.url;
-        if (devUrl) {
-          setDevCommunityContent(await this.scrapeUrl(devUrl));
-          logger.info({ contactId, devUrl }, 'Dev community profile scraped');
+        const twitterUrl = raw.twitterUrl as string | undefined;
+        if (twitterUrl) {
+          setTwitterContent(await this.scrapeUrl(twitterUrl));
+          logger.info({ contactId, twitterUrl }, 'Twitter scraped from existing URL');
         }
       })(),
     ]);
@@ -1509,74 +1137,35 @@ export class EnrichmentAgent extends BaseAgent {
 
   private async runSalesSourceSearches(
     contactId: string,
-    contactName: string,
-    contactTitle: string,
-    contactCompanyName: string,
     companyDomain: string | undefined,
-    contact: { linkedinUrl: string | null; skills: unknown; experience: unknown },
-    smartQueries: GeneratedSearchQueries,
+    contact: { linkedinUrl: string | null },
     setLinkedinContent: (s: string) => void,
-    setLinkedinSearchContent: (s: string) => void,
-    setTwitterContent: (s: string) => void,
     setPersonalSiteContent: (s: string) => void,
-    setFoundLinkedinUrl: (s: string) => void,
   ): Promise<PromiseSettledResult<void>[]> {
     return Promise.allSettled([
-      // Source 1: LinkedIn profile (using smart queries)
+      // LinkedIn: scrape if URL already known
       (async () => {
-        if (contact.linkedinUrl && !contact.skills && !contact.experience) {
+        if (contact.linkedinUrl) {
           setLinkedinContent(await this.scrapeUrl(contact.linkedinUrl));
-          logger.info({ contactId }, 'LinkedIn re-scraped from existing URL');
-        } else if (!contact.linkedinUrl && contactName) {
-          const queries = (smartQueries.contactLinkedinQueries ?? []).length > 0
-            ? (smartQueries.contactLinkedinQueries ?? [])
-            : [`"${contactName}" "${contactCompanyName}" linkedin profile`.trim()];
-          let found = false;
-          for (const query of queries) {
-            // Per-domain delay is now enforced inside smart-crawler; no manual sleep needed.
-            const results = await this.serpSearch(query, 'linkedin_person', { companyName: contactCompanyName, personName: contactName });
-            const linkedinUrl = results.find((r) => r.url.includes('linkedin.com/in/'))?.url;
-            if (linkedinUrl) {
-              setLinkedinSearchContent(await this.scrapeUrl(linkedinUrl));
-              setFoundLinkedinUrl(linkedinUrl);
-              logger.info({ contactId, linkedinUrl }, 'LinkedIn profile found via smart search (sales)');
-              found = true;
+          logger.info({ contactId }, 'LinkedIn scraped from existing URL (sales)');
+        }
+      })(),
+
+      // Team page: scrape directly from company domain
+      (async () => {
+        if (!companyDomain) return;
+        for (const path of ['/team', '/about-us', '/leadership', '/our-team', '/people']) {
+          try {
+            const url = `https://${companyDomain}${path}`;
+            const content = await this.scrapeUrl(url);
+            if (content && content.length > 200) {
+              setPersonalSiteContent(content);
+              logger.info({ contactId, url }, 'Company team page scraped (sales)');
               break;
             }
-          }
-          if (!found) {
-            // NOTE: do not overwrite an existing linkedinUrl with empty string;
-            // setFoundLinkedinUrl is only invoked on hit so contact.linkedinUrl is preserved.
-            logger.info({ contactId, contactName }, 'LinkedIn not found via search');
-          }
+          } catch { /* try next path */ }
         }
       })(),
-
-      // Source 2: Company team page (must be on company's own domain)
-      (async () => {
-        if (!contactCompanyName) return;
-        const query = `"${contactCompanyName}" team OR leadership OR about-us`;
-        const results = await this.serpSearch(query, 'team_page', { companyName: contactCompanyName });
-        const teamUrl = results.find((r) => {
-          if (!r.url.startsWith('https://')) return false;
-          if (isJunkUrl(r.url)) return false;
-          try {
-            const urlHost = new URL(r.url).hostname.replace(/^www\./, '').toLowerCase();
-            // If we know the company domain, URL must be on it
-            if (companyDomain && !urlHost.endsWith(companyDomain)) return false;
-          } catch { return false; }
-          return true;
-        })?.url;
-        if (teamUrl) {
-          const content = await this.scrapeUrl(teamUrl);
-          setPersonalSiteContent(content); // reuse personalSiteContent slot for team page data
-          logger.info({ contactId, teamUrl }, 'Company team page scraped (sales)');
-        }
-      })(),
-
-      // Source 3: (removed) Company news for sales — output was only logged, never
-      // consumed downstream. Company-deep prompt already pulls news in the company
-      // enrichment phase via 'news' intent.
     ]);
   }
 }

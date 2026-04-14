@@ -59,16 +59,17 @@ Rules:
 - For funding, use: "Pre-seed", "Seed", "Series A/B/C/D+", "Public", "Bootstrapped", "Unknown".
 - For recentFunding, extract the latest funding round details (e.g. "Series B - $50M led by Acme Ventures, Jan 2026"). Use "" if unknown.
 - For glassdoorRating, extract the overall rating (e.g. "4.2/5"). Use "" if not found.
-- keyPeople extraction — STRICT RULES:
-  - ONLY extract people found on the company's OWN DOMAIN pages (homepage, about page, team page, leadership page). The company domain is provided in the COMPANY header above.
-  - COMPLETELY IGNORE people mentioned in: news articles, Crunchbase, external directories, press releases, partner pages, or any page NOT on the company's own domain.
-  - ONLY include CURRENT employees. Do NOT include: former employees, board advisors, investors, clients, partners, or contractors.
+- keyPeople extraction — STRICT ANTI-HALLUCINATION RULES:
+  - ONLY extract people whose FULL NAME appears VERBATIM in the provided website content above. Do NOT invent, guess, or infer names.
+  - If no people names are visible in the text, return keyPeople: []. An empty array is correct when no names are found.
+  - ONLY use HOMEPAGE, ABOUT PAGE, TEAM PAGE, and CAREERS PAGE content. IGNORE LinkedIn, news, or any external source for people names.
+  - ONLY include CURRENT employees with a clear title/role visible in the content.
+  - Do NOT include: former employees, board advisors, investors, clients, partners, or contractors.
   - Extract a MAXIMUM of 5 people. No more.
-  - Priority order: use the MISSION CONTEXT above to determine which roles matter. If no mission context is provided, fall back to CEO → CTO → COO → Founder → Managing Director.
-  - ROLE REQUIREMENT: For each person, extract their CURRENT role at the company. If you cannot determine their current role, do NOT include them.
-  - EXCLUSION LIST: Do NOT extract people whose title contains any of the following: Intern, Internship, Stagiaire, Student, Junior, Assistant (unless "Executive Assistant to CEO"), Trainee, Apprentice, Alternant, Volunteer. These are not valid sales targets.
-  - If fewer than 5 people are found on the company's own domain, return only those found. Do NOT pad with people from other sources.
-  - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive").
+  - Priority order: use MISSION CONTEXT to determine which roles matter. Default: CTO, VP Engineering, Head of Engineering, COO, Founder.
+  - EXCLUSION: Skip people with titles containing: Intern, Student, Junior, Trainee, Apprentice, Volunteer.
+  - If fewer than 5 people are found, return only those found. Do NOT pad the list.
+  - For each person: name (exactly as written in content), title, department (e.g. "Engineering", "Sales", "Executive").
   - Do NOT include LinkedIn URLs or email addresses — those are extracted separately.
   - Use empty strings for unknown fields.
 - Extract teamPageUrl: the URL of the team/leadership page if found. Use "" if not found.

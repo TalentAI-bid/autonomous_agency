@@ -55,6 +55,10 @@ function buildMissionContextString(ctx: unknown): string | undefined {
   return parts.length ? parts.join('\n') : undefined;
 }
 
+// Priority titles for email verification — tech/engineering roles are most valuable
+const PRIORITY_TITLES = ['cto', 'vp engineering', 'head of engineering', 'director of engineering', 'vp technology', 'head of technology', 'technical director', 'chief technology', 'engineering manager', 'head of product', 'dsi', 'directeur technique', 'responsable technique', 'directeur informatique'];
+const SKIP_TITLES = ['ceo', 'coo', 'cfo', 'chief executive', 'chief operating', 'chief financial', 'président', 'directeur général', 'pdg'];
+
 export class EnrichmentAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { contactId, companyId: inputCompanyId, masterAgentId, dryRun } = input as {
@@ -285,6 +289,21 @@ export class EnrichmentAgent extends BaseAgent {
         // Cap key people to prevent LLM over-generation
         if (deepCompany.keyPeople) deepCompany.keyPeople = deepCompany.keyPeople.slice(0, 5);
 
+        // Validate: only keep key people whose names appear in actual scraped content
+        if (deepCompany.keyPeople?.length) {
+          const allScrapedText = [homepageContent, aboutPageContent, careersPageContent, teamPageContent]
+            .filter(Boolean).join(' ').toLowerCase();
+          deepCompany.keyPeople = deepCompany.keyPeople.filter(person => {
+            const name = (person.name || '').trim();
+            if (!name || name.length < 3) return false;
+            if (!allScrapedText.includes(name.toLowerCase())) {
+              logger.warn({ name, title: person.title }, 'Key person name NOT found in scraped content — removing hallucination');
+              return false;
+            }
+            return true;
+          });
+        }
+
         // Match regex-extracted LinkedIn URLs to key people by name slug
         if (deepCompany.keyPeople?.length && extractedPeopleLinkedinUrls.length > 0) {
           const matchedUrls = new Set<string>();
@@ -378,13 +397,27 @@ export class EnrichmentAgent extends BaseAgent {
 
         // ── Phase 2b: Key person deep research ──────────────────────────────
         if (deepCompany.keyPeople?.length && companyDomain) {
-          const keyPeopleToResearch = deepCompany.keyPeople.slice(0, 5);
+          const keyPeopleToResearch = (deepCompany.keyPeople || [])
+            .filter(p => !SKIP_TITLES.some(s => (p.title || '').toLowerCase().includes(s)))
+            .sort((a, b) => {
+              const aP = PRIORITY_TITLES.some(t => (a.title || '').toLowerCase().includes(t)) ? 0 : 1;
+              const bP = PRIORITY_TITLES.some(t => (b.title || '').toLowerCase().includes(t)) ? 0 : 1;
+              return aP - bP;
+            })
+            .slice(0, 3);
           const keyPeopleResults = await Promise.allSettled(
             keyPeopleToResearch.map(async (person) => {
               if (!person.name) return person;
 
               // LinkedIn URL only from regex match (set by slug-matching above, never from LLM)
-              const personLinkedinUrl = (person as any).linkedinUrl || '';
+              let personLinkedinUrl: string | undefined = (person as any).linkedinUrl || undefined;
+              if (personLinkedinUrl) {
+                const allContent = [homepageContent, aboutPageContent, careersPageContent, teamPageContent, linkedinCompanyContent].filter(Boolean).join('\n');
+                if (!allContent.includes(personLinkedinUrl)) {
+                  logger.warn({ person: person.name, fakeUrl: personLinkedinUrl }, 'LinkedIn URL not in scraped content — removing');
+                  personLinkedinUrl = undefined;
+                }
+              }
               let personEmail = '';
               let emailMethod: string | undefined;
               let emailAttempts: number | undefined;
@@ -439,7 +472,7 @@ export class EnrichmentAgent extends BaseAgent {
                   });
                   if (existingByName.length > 0) {
                     logger.debug({ person: person.name }, 'Contact already exists — skipping');
-                    return { ...person, linkedinUrl: personLinkedinUrl, email: personEmail };
+                    return { ...person, linkedinUrl: personLinkedinUrl || '', email: personEmail };
                   }
                 }
 
@@ -477,7 +510,7 @@ export class EnrichmentAgent extends BaseAgent {
                 logger.warn({ err, contactId, personName: person.name }, 'Failed to create key person contact');
               }
 
-              return { ...person, linkedinUrl: personLinkedinUrl, email: personEmail };
+              return { ...person, linkedinUrl: personLinkedinUrl || '', email: personEmail };
             }),
           );
 
@@ -988,6 +1021,21 @@ export class EnrichmentAgent extends BaseAgent {
       // Cap key people to prevent LLM over-generation
       if (deepCompany.keyPeople) deepCompany.keyPeople = deepCompany.keyPeople.slice(0, 5);
 
+      // Validate: only keep key people whose names appear in actual scraped content
+      if (deepCompany.keyPeople?.length) {
+        const allScrapedText = [homepageContent, aboutPageContent, careersPageContent, teamPageContent]
+          .filter(Boolean).join(' ').toLowerCase();
+        deepCompany.keyPeople = deepCompany.keyPeople.filter(person => {
+          const name = (person.name || '').trim();
+          if (!name || name.length < 3) return false;
+          if (!allScrapedText.includes(name.toLowerCase())) {
+            logger.warn({ name, title: person.title }, 'Key person name NOT found in scraped content — removing hallucination');
+            return false;
+          }
+          return true;
+        });
+      }
+
       // Match regex-extracted LinkedIn URLs to key people by name slug
       if (deepCompany.keyPeople?.length && extractedPeopleLinkedinUrls.length > 0) {
         const matchedUrls = new Set<string>();
@@ -1084,9 +1132,18 @@ export class EnrichmentAgent extends BaseAgent {
         const masterAgentId = input.masterAgentId as string;
         const ctx = this.getPipelineContext(input);
 
-        logger.info({ companyId, companyName, keyPeopleCount: deepCompany.keyPeople.length }, 'Finding emails for team members');
+        const priorityPeople = (deepCompany.keyPeople || [])
+          .filter(p => !SKIP_TITLES.some(s => (p.title || '').toLowerCase().includes(s)))
+          .sort((a, b) => {
+            const aP = PRIORITY_TITLES.some(t => (a.title || '').toLowerCase().includes(t)) ? 0 : 1;
+            const bP = PRIORITY_TITLES.some(t => (b.title || '').toLowerCase().includes(t)) ? 0 : 1;
+            return aP - bP;
+          })
+          .slice(0, 3);
 
-        for (const person of deepCompany.keyPeople) {
+        logger.info({ companyId, companyName, keyPeopleCount: priorityPeople.length }, 'Finding emails for team members');
+
+        for (const person of priorityPeople) {
           if (!person.name) continue;
           const nameParts = person.name.trim().split(/\s+/);
           const firstName = nameParts[0] ?? '';
@@ -1110,7 +1167,14 @@ export class EnrichmentAgent extends BaseAgent {
           }
 
           // LinkedIn URL only from regex match (set by slug-matching above, never from LLM)
-          const personLinkedinUrl = (person as any).linkedinUrl || '';
+          let personLinkedinUrl: string | undefined = (person as any).linkedinUrl || undefined;
+          if (personLinkedinUrl) {
+            const allContent = [homepageContent, aboutPageContent, careersPageContent, teamPageContent, linkedinCompanyContent].filter(Boolean).join('\n');
+            if (!allContent.includes(personLinkedinUrl)) {
+              logger.warn({ person: person.name, fakeUrl: personLinkedinUrl }, 'LinkedIn URL not in scraped content — removing');
+              personLinkedinUrl = undefined;
+            }
+          }
 
           // 2. Find email via pattern guesser + Reacher, then Generect fallback
           let personEmail = '';

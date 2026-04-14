@@ -297,7 +297,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // GET /api/master-agents/:id/emails — Sent emails for this agent (paginated)
   fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/emails', async (request) => {
     const { id } = request.params;
-    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
     const { cursor } = request.query;
 
     const results = await withTenant(request.tenantId, async (tx) => {
@@ -350,7 +350,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // GET /api/master-agents/:id/companies — Companies discovered by this agent (paginated)
   fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/companies', async (request) => {
     const { id } = request.params;
-    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
     const { cursor } = request.query;
 
     const conditions = [
@@ -384,7 +384,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // GET /api/master-agents/:id/documents — Documents for this agent (paginated)
   fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/documents', async (request) => {
     const { id } = request.params;
-    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
     const { cursor } = request.query;
 
     const conditions = [eq(documents.masterAgentId, id), eq(documents.tenantId, request.tenantId)];

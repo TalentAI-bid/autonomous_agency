@@ -25,7 +25,7 @@ export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const { data: agentRes, isLoading } = useMasterAgent(id);
-  const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 20 });
+  const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 100 });
   const { data: stats } = useAgentStats(id);
   const { data: emails } = useAgentEmails(id);
   const { data: companiesData } = useAgentCompanies(id);

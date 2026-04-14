@@ -26,7 +26,7 @@ export default async function companyRoutes(fastify: FastifyInstance) {
   fastify.get<{
     Querystring: { cursor?: string; limit?: string; search?: string; industry?: string; masterAgentId?: string; includeIncomplete?: string };
   }>('/', async (request) => {
-    const limit = Math.min(parseInt(request.query.limit || '20', 10), 100);
+    const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
     const { cursor, search, industry, masterAgentId, includeIncomplete } = request.query;
 
     const results = await withTenant(request.tenantId, async (tx) => {

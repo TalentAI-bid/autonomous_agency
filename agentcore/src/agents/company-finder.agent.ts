@@ -21,7 +21,7 @@
 import { BaseAgent } from './base-agent.js';
 import type { AgentType } from '../queues/queues.js';
 import { SITE_CONFIGS } from '../config/site-configs.js';
-import { crawlSite } from '../tools/smart-crawler.js';
+import { crawlSite, crawlPage } from '../tools/smart-crawler.js';
 import * as cfPrompt from '../prompts/company-finder.prompt.js';
 import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
@@ -533,6 +533,64 @@ export class CompanyFinderAgent extends BaseAgent {
               'CompanyFinder: extracted from page',
             );
 
+            // Deep crawl WTTJ company pages to get domain, team, LinkedIn
+            if (siteKey === 'welcometothejungle') {
+              const wttjCompanyConfig = SITE_CONFIGS['welcometothejungle_company'];
+              if (wttjCompanyConfig) {
+                for (const listing of extracted.slice(0, 10)) {
+                  const slug = listing.companyName
+                    .toLowerCase()
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-+|-+$/g, '');
+
+                  if (!slug || slug.length < 2) continue;
+
+                  const companyPageUrl = `https://www.welcometothejungle.com/fr/companies/${slug}`;
+
+                  try {
+                    logger.info({ company: listing.companyName, slug, url: companyPageUrl },
+                      'CompanyFinder: crawling WTTJ company page');
+
+                    const companyContent = await crawlPage(companyPageUrl, wttjCompanyConfig);
+
+                    if (companyContent && companyContent.length > 300) {
+                      // Extract website/domain
+                      const websitePatterns = [
+                        /(?:Site web|Website|site internet)[:\s]*\[?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
+                        /(?:Site web|Website|site internet)[:\s]*\[?(https?:\/\/[^\s\]"')]+)/i,
+                        /\bhttps?:\/\/(?!(?:www\.)?(?:linkedin|facebook|twitter|instagram|youtube|welcometothejungle))[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
+                      ];
+
+                      for (const pattern of websitePatterns) {
+                        const match = companyContent.match(pattern);
+                        if (match) {
+                          let domain = (match[1] || match[0]).replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').trim();
+                          if (domain.includes('.') && !domain.includes(' ') && domain.length >= 4) {
+                            listing.companyDomain = domain;
+                            logger.info({ company: listing.companyName, domain, source: 'wttj-company-page' },
+                              'Domain found on WTTJ company page');
+                            break;
+                          }
+                        }
+                      }
+
+                      // Extract LinkedIn
+                      const liMatch = companyContent.match(/https?:\/\/(www\.)?linkedin\.com\/company\/[a-zA-Z0-9_-]+/);
+                      if (liMatch) {
+                        (listing as any).linkedinCompanyUrl = liMatch[0];
+                      }
+
+                      // Store WTTJ content for enrichment to use
+                      (listing as any).wttjContent = companyContent.slice(0, 5000);
+                    }
+                  } catch (err) {
+                    logger.debug({ company: listing.companyName, slug }, 'WTTJ company page crawl failed');
+                  }
+                }
+              }
+            }
+
             // Inline dedupe + filter + save + dispatch per job listing
             for (const l of extracted) {
               if (isBlockedCompanyName(l.companyName)) {
@@ -569,6 +627,8 @@ export class CompanyFinderAgent extends BaseAgent {
                     ...(l.jobTitle && { jobTitle: l.jobTitle }),
                     ...(l.jobLocation && { jobLocation: l.jobLocation }),
                     ...(l.relevanceScore != null && { relevanceScore: l.relevanceScore }),
+                    ...((l as any).wttjContent && { wttjContent: (l as any).wttjContent }),
+                    ...((l as any).linkedinCompanyUrl && { linkedinCompanyUrl: (l as any).linkedinCompanyUrl }),
                   },
                 });
                 metrics.saved++;

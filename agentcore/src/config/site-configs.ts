@@ -115,6 +115,26 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     headers: { 'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.7' },
   },
 
+  welcometothejungle_company: {
+    name: 'WTTJ Company Page',
+    baseUrl: 'https://www.welcometothejungle.com/fr/companies',
+    type: 'company_database' as const,
+    searchParam: '',
+    cookieDismiss: `
+      const btn = document.querySelector('#axeptio_btn_acceptAll');
+      if (btn) btn.click();
+      await new Promise(r => setTimeout(r, 1500));
+    `,
+    genericCookieFallback: true,
+    waitForSelector: '[data-testid="company-card"], .sc-company-header, body',
+    waitMs: 3000,
+    maxPages: 1,
+    delayBetweenPages: 5000,
+    countries: ['fr', 'be', 'lu', 'ch'],
+    profileType: 'general' as const,
+    headers: { 'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.7' },
+  },
+
   freework: {
     name: 'Free-Work',
     baseUrl: 'https://www.free-work.com/fr/tech-it/jobs',

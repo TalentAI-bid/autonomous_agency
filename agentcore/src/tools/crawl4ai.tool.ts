@@ -102,6 +102,9 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
 
     if (!response.ok) {
       logger.error({ status: response.status, url }, 'Crawl4AI request failed');
+      if (response.status >= 500) {
+        await recordCrawl4aiFailure(tenantId);
+      }
       return '';
     }
 

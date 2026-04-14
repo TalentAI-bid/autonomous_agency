@@ -60,6 +60,18 @@ function buildMissionContextString(ctx: unknown): string | undefined {
 const PRIORITY_TITLES = ['cto', 'vp engineering', 'head of engineering', 'director of engineering', 'vp technology', 'head of technology', 'technical director', 'chief technology', 'engineering manager', 'head of product', 'dsi', 'directeur technique', 'responsable technique', 'directeur informatique'];
 const SKIP_TITLES = ['ceo', 'coo', 'cfo', 'chief executive', 'chief operating', 'chief financial', 'président', 'directeur général', 'pdg'];
 
+/** Validate LLM-returned domain — reject industry descriptions, garbage strings */
+function isValidDomain(domain: string | undefined | null): string | undefined {
+  if (!domain) return undefined;
+  const trimmed = domain.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  if (!trimmed.includes('.')) return undefined;
+  if (trimmed.includes(' ')) return undefined;
+  if (trimmed.length > 253) return undefined;
+  if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(trimmed)) return undefined;
+  return trimmed.replace(/^www\./, '');
+}
+
 export class EnrichmentAgent extends BaseAgent {
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { contactId, companyId: inputCompanyId, masterAgentId, dryRun } = input as {
@@ -130,6 +142,13 @@ export class EnrichmentAgent extends BaseAgent {
         contactCompanyName = parsed.name || contactCompanyName;
       } catch { /* keep original */ }
     }
+    // Skip invalid company names early (avoids wasting LLM calls)
+    if (!contactCompanyName || contactCompanyName === '...' || contactCompanyName === '…' || /^\.{2,}$/.test(contactCompanyName)) {
+      logger.warn({ contactId, contactCompanyName }, 'Skipping enrichment: invalid company name');
+      await this.clearCurrentAction();
+      return { contactId, status: 'skipped', reason: 'invalid_company_name' };
+    }
+
     const raw = (contact.rawData as Record<string, unknown>) ?? {};
 
     // Get useCase from PipelineContext or fall back to DB
@@ -266,6 +285,37 @@ export class EnrichmentAgent extends BaseAgent {
           if (!extractedPeopleLinkedinUrls.includes(normalized)) extractedPeopleLinkedinUrls.push(normalized);
         }
 
+        // Check if we have enough content for LLM deep analysis
+        const totalScrapedLen = [homepageContent, aboutPageContent, careersPageContent, teamPageContent]
+          .reduce((sum, s) => sum + (s?.length ?? 0), 0);
+
+        if (totalScrapedLen < 200) {
+          logger.warn({ contactId, contactCompanyName, totalScrapedLen }, 'Skipping LLM deep analysis — insufficient scraped content');
+          let noContentPreservedData: Record<string, unknown> = {};
+          if (contact.companyId) {
+            try {
+              const [existingCo] = await withTenant(this.tenantId, async (tx) => {
+                return tx.select({ rawData: companies.rawData }).from(companies)
+                  .where(eq(companies.id, contact.companyId!)).limit(1);
+              });
+              noContentPreservedData = extractPreservedDiscoveryData(existingCo?.rawData as Record<string, unknown> | null);
+            } catch { /* non-critical */ }
+          }
+          const minimalCompany = await this.saveOrUpdateCompany({
+            id: contact.companyId ?? undefined,
+            name: contactCompanyName,
+            domain: companyDomain || undefined,
+            dataCompleteness: 10,
+            rawData: { ...noContentPreservedData, enrichmentSkipped: 'no_content' },
+          });
+          companyId = minimalCompany.id;
+          companyEnriched = true;
+          await withTenant(this.tenantId, async (tx) => {
+            await tx.update(contacts).set({ companyId: minimalCompany.id, updatedAt: new Date() })
+              .where(eq(contacts.id, contactId));
+          });
+        } else {
+
         // Deep company enrichment via LLM
         const deepCompany = await this.extractJSON<DeepCompanyProfile>([
           { role: 'system', content: companyDeepSystemPrompt(buildMissionContextString(ctx)) },
@@ -359,7 +409,7 @@ export class EnrichmentAgent extends BaseAgent {
         const company = await this.saveOrUpdateCompany({
           id: contact.companyId ?? undefined,
           name: resolvedCompanyName,
-          domain: deepCompany.domain || companyDomain || undefined,
+          domain: isValidDomain(deepCompany.domain) || companyDomain || undefined,
           industry: deepCompany.industry || undefined,
           size: deepCompany.size || undefined,
           techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,
@@ -558,6 +608,7 @@ export class EnrichmentAgent extends BaseAgent {
             } catch { /* non-fatal */ }
           }
         }
+        } // end else (deep analysis with sufficient content)
       } catch (err) {
         logger.warn({ err, contactId, companyName: contactCompanyName }, 'Deep company enrichment failed');
       }
@@ -910,6 +961,7 @@ export class EnrichmentAgent extends BaseAgent {
 
     // Skip enrichment for companies with garbage/generic names
     if (!companyName || companyName.length < 2 || companyName === 'Unknown' ||
+        companyName === '...' || companyName === '…' || /^\.{2,}$/.test(companyName) ||
         /^(meet\s+the|top\s+\d+|best\s+\d+)\s/i.test(companyName) ||
         companyName.split(/\s+/).length > 8) {
       logger.warn({ companyId, companyName }, 'Skipping enrichment for invalid company name');
@@ -999,6 +1051,23 @@ export class EnrichmentAgent extends BaseAgent {
         if (!extractedPeopleLinkedinUrls.includes(normalized)) extractedPeopleLinkedinUrls.push(normalized);
       }
 
+      // Check if we have enough content for LLM deep analysis
+      const totalScrapedLen = [homepageContent, aboutPageContent, careersPageContent, teamPageContent]
+        .reduce((sum, s) => sum + (s?.length ?? 0), 0);
+
+      if (totalScrapedLen < 200) {
+        logger.warn({ companyId, companyName, totalScrapedLen }, 'Skipping LLM deep analysis — insufficient scraped content');
+        await this.saveOrUpdateCompany({
+          id: companyId,
+          name: companyName,
+          domain: companyDomain || undefined,
+          dataCompleteness: 10,
+          rawData: { ...(company.rawData as Record<string, unknown> ?? {}), enrichmentSkipped: 'no_content' },
+        });
+        await this.clearCurrentAction();
+        return { companyId, companyName, status: 'skipped', reason: 'no_scraped_content', dataCompleteness: 10 };
+      }
+
       const deepCompany = await this.extractJSON<DeepCompanyProfile>([
         { role: 'system', content: companyDeepSystemPrompt(buildMissionContextString(ctx)) },
         {
@@ -1079,7 +1148,7 @@ export class EnrichmentAgent extends BaseAgent {
       await this.saveOrUpdateCompany({
         id: companyId,
         name: resolvedName,
-        domain: deepCompany.domain || companyDomain || undefined,
+        domain: isValidDomain(deepCompany.domain) || companyDomain || undefined,
         industry: deepCompany.industry || undefined,
         size: deepCompany.size || undefined,
         techStack: deepCompany.techStack?.length ? deepCompany.techStack : undefined,

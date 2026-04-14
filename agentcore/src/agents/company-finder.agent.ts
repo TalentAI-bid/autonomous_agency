@@ -117,7 +117,10 @@ const MAX_KEYWORDS = 6;
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function normalizeCompanyKey(name: string): string {
-  const stripped = name.trim().replace(LEGAL_SUFFIX_RE, '').trim();
+  const stripped = name.trim()
+    .replace(/\s*\(.*?\)\s*$/, '')   // strip trailing "(Paris)", "(France)", etc.
+    .replace(LEGAL_SUFFIX_RE, '')
+    .trim();
   return stripped.toLowerCase().replace(/\s+/g, ' ');
 }
 

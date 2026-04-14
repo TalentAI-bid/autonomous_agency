@@ -20,7 +20,7 @@ export interface DeepCompanyProfile {
     description: string;
     url: string;
   }>;
-  keyPeople: Array<{ name: string; title: string; department: string; linkedinUrl: string; email: string }>;
+  keyPeople: Array<{ name: string; title: string; department: string }>;
   competitors: string[];
   contactEmail: string;
   hiringContactEmails: string[];
@@ -68,7 +68,8 @@ Rules:
   - ROLE REQUIREMENT: For each person, extract their CURRENT role at the company. If you cannot determine their current role, do NOT include them.
   - EXCLUSION LIST: Do NOT extract people whose title contains any of the following: Intern, Internship, Stagiaire, Student, Junior, Assistant (unless "Executive Assistant to CEO"), Trainee, Apprentice, Alternant, Volunteer. These are not valid sales targets.
   - If fewer than 5 people are found on the company's own domain, return only those found. Do NOT pad with people from other sources.
-  - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive"), linkedinUrl (if visible on team page), email (if visible on team/contact page).
+  - For each person: name, title, department (e.g. "Engineering", "Sales", "Executive").
+  - Do NOT include LinkedIn URLs or email addresses — those are extracted separately.
   - Use empty strings for unknown fields.
 - Extract teamPageUrl: the URL of the team/leadership page if found. Use "" if not found.
 - Extract open positions from careers page if available. For each position extract: title, location, requiredSkills (array), salary (string, use "" if not found), description (brief), and url (if available).

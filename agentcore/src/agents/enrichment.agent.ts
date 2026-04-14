@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ilike } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
@@ -282,6 +282,27 @@ export class EnrichmentAgent extends BaseAgent {
           },
         ]);
 
+        // Cap key people to prevent LLM over-generation
+        if (deepCompany.keyPeople) deepCompany.keyPeople = deepCompany.keyPeople.slice(0, 5);
+
+        // Match regex-extracted LinkedIn URLs to key people by name slug
+        if (deepCompany.keyPeople?.length && extractedPeopleLinkedinUrls.length > 0) {
+          const matchedUrls = new Set<string>();
+          for (const person of deepCompany.keyPeople) {
+            if (!person.name) continue;
+            const nameSlug = person.name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+            const match = extractedPeopleLinkedinUrls.find(url => {
+              const slug = url.split('/in/')[1]?.split('/')[0]?.split('?')[0]?.toLowerCase() ?? '';
+              return slug.includes(nameSlug) || nameSlug.includes(slug);
+            });
+            if (match) {
+              (person as any).linkedinUrl = match;
+              matchedUrls.add(match);
+            }
+          }
+          (deepCompany as any)._unmatchedLinkedinUrls = extractedPeopleLinkedinUrls.filter(u => !matchedUrls.has(u));
+        }
+
         // Calculate company data completeness
         const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters, deepCompany.techStack?.length ? 'yes' : '', deepCompany.keyPeople?.length ? 'yes' : '', deepCompany.recentNews?.length ? 'yes' : '', deepCompany.products?.length ? 'yes' : '', deepCompany.competitors?.length ? 'yes' : ''];
         const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
@@ -357,17 +378,19 @@ export class EnrichmentAgent extends BaseAgent {
 
         // ── Phase 2b: Key person deep research ──────────────────────────────
         if (deepCompany.keyPeople?.length && companyDomain) {
-          const keyPeopleToResearch = deepCompany.keyPeople.slice(0, 3);
+          const keyPeopleToResearch = deepCompany.keyPeople.slice(0, 5);
           const keyPeopleResults = await Promise.allSettled(
             keyPeopleToResearch.map(async (person) => {
               if (!person.name) return person;
 
-              // LinkedIn URL from LLM extraction (no SERP)
-              const personLinkedinUrl = person.linkedinUrl || '';
-              let personEmail = person.email || '';
+              // LinkedIn URL only from regex match (set by slug-matching above, never from LLM)
+              const personLinkedinUrl = (person as any).linkedinUrl || '';
+              let personEmail = '';
+              let emailMethod: string | undefined;
+              let emailAttempts: number | undefined;
 
               // Find email for this person
-              if (!personEmail && companyDomain) {
+              if (companyDomain) {
                 try {
                   const nameParts = person.name.trim().split(/\s+/);
                   const firstName = nameParts[0] ?? '';
@@ -377,6 +400,8 @@ export class EnrichmentAgent extends BaseAgent {
                     const patternResult = await findEmailByPattern(firstName, lastName, companyDomain);
                     if (patternResult.email) {
                       personEmail = patternResult.email;
+                      emailMethod = patternResult.method;
+                      emailAttempts = patternResult.attempts;
                       logger.info({ contactId, personName: person.name, personEmail, method: patternResult.method, attempts: patternResult.attempts }, 'Key person email found via pattern + Reacher');
                     }
                     // FALLBACK: Old Generect/emailIntelligence method
@@ -384,6 +409,7 @@ export class EnrichmentAgent extends BaseAgent {
                       const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId, companyId ?? undefined);
                       if (emailResult.email) {
                         personEmail = emailResult.email;
+                        emailMethod = 'generect_fallback';
                         logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found via Generect fallback');
                       }
                     }
@@ -398,6 +424,25 @@ export class EnrichmentAgent extends BaseAgent {
                 const nameParts = person.name.trim().split(/\s+/);
                 const firstName = nameParts[0] ?? '';
                 const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+                // Name-based dedup: skip if contact with same name already exists for this company
+                if (firstName && lastName) {
+                  const existingByName = await withTenant(this.tenantId, async (tx) => {
+                    return tx.select({ id: contacts.id }).from(contacts)
+                      .where(and(
+                        eq(contacts.tenantId, this.tenantId),
+                        ilike(contacts.firstName, firstName),
+                        ilike(contacts.lastName, lastName),
+                        eq(contacts.companyId, company.id)
+                      ))
+                      .limit(1);
+                  });
+                  if (existingByName.length > 0) {
+                    logger.debug({ person: person.name }, 'Contact already exists — skipping');
+                    return { ...person, linkedinUrl: personLinkedinUrl, email: personEmail };
+                  }
+                }
+
                 const keyPersonContact = await this.saveOrUpdateContact({
                   firstName,
                   lastName,
@@ -413,6 +458,8 @@ export class EnrichmentAgent extends BaseAgent {
                     source: 'key_person_enrichment',
                     department: person.department || undefined,
                     parentContactId: contactId,
+                    ...(emailMethod ? { emailMethod } : {}),
+                    ...(emailAttempts !== undefined ? { emailAttempts } : {}),
                   },
                 });
                 logger.info({ contactId, personName: person.name, hasEmail: !!personEmail }, 'Key person contact created');
@@ -452,6 +499,31 @@ export class EnrichmentAgent extends BaseAgent {
 
           logger.info({ contactId, keyPeopleCount: enrichedKeyPeople.length }, 'Key people enrichment completed');
         }
+
+        // Create standalone contacts for unmatched LinkedIn URLs found in scraped HTML
+        const unmatchedUrls = (deepCompany as any)._unmatchedLinkedinUrls as string[] | undefined;
+        if (unmatchedUrls?.length) {
+          for (const url of unmatchedUrls.slice(0, 5)) {
+            try {
+              const slug = url.split('/in/')[1]?.split('/')[0] ?? '';
+              const parts = slug.split('-').filter(Boolean);
+              if (parts.length >= 2) {
+                const firstName = parts[0]!;
+                const lastName = parts.slice(1).join(' ');
+                await this.saveOrUpdateContact({
+                  firstName, lastName,
+                  companyName: contactCompanyName,
+                  companyId: company.id,
+                  masterAgentId,
+                  linkedinUrl: url,
+                  source: 'web_search',
+                  status: 'discovered',
+                  rawData: { source: 'linkedin_regex_unmatched', parentContactId: contactId },
+                });
+              }
+            } catch { /* non-fatal */ }
+          }
+        }
       } catch (err) {
         logger.warn({ err, contactId, companyName: contactCompanyName }, 'Deep company enrichment failed');
       }
@@ -486,6 +558,8 @@ export class EnrichmentAgent extends BaseAgent {
           if (patternResult.email) {
             emailFound = patternResult.email;
             emailVerified = patternResult.method === 'smtp_verified';
+            raw.emailMethod = patternResult.method;
+            raw.emailAttempts = patternResult.attempts;
             logger.info({ contactId, email: emailFound, method: patternResult.method, attempts: patternResult.attempts }, 'Email found via pattern + Reacher');
           }
           // FALLBACK: Old Generect/emailIntelligence method
@@ -494,6 +568,7 @@ export class EnrichmentAgent extends BaseAgent {
             if (result.email && result.confidence >= 50) {
               emailFound = result.email;
               emailVerified = result.confidence >= 80;
+              raw.emailMethod = 'generect_fallback';
             }
           }
         }
@@ -910,6 +985,27 @@ export class EnrichmentAgent extends BaseAgent {
         },
       ]);
 
+      // Cap key people to prevent LLM over-generation
+      if (deepCompany.keyPeople) deepCompany.keyPeople = deepCompany.keyPeople.slice(0, 5);
+
+      // Match regex-extracted LinkedIn URLs to key people by name slug
+      if (deepCompany.keyPeople?.length && extractedPeopleLinkedinUrls.length > 0) {
+        const matchedUrls = new Set<string>();
+        for (const person of deepCompany.keyPeople) {
+          if (!person.name) continue;
+          const nameSlug = person.name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+          const match = extractedPeopleLinkedinUrls.find(url => {
+            const slug = url.split('/in/')[1]?.split('/')[0]?.split('?')[0]?.toLowerCase() ?? '';
+            return slug.includes(nameSlug) || nameSlug.includes(slug);
+          });
+          if (match) {
+            (person as any).linkedinUrl = match;
+            matchedUrls.add(match);
+          }
+        }
+        (deepCompany as any)._unmatchedLinkedinUrls = extractedPeopleLinkedinUrls.filter(u => !matchedUrls.has(u));
+      }
+
       // Calculate company data completeness
       const companyFields = [deepCompany.name, deepCompany.domain, deepCompany.industry, deepCompany.size, deepCompany.description, deepCompany.funding, deepCompany.linkedinUrl, deepCompany.foundedYear, deepCompany.headquarters, deepCompany.techStack?.length ? 'yes' : '', deepCompany.keyPeople?.length ? 'yes' : '', deepCompany.recentNews?.length ? 'yes' : '', deepCompany.products?.length ? 'yes' : '', deepCompany.competitors?.length ? 'yes' : ''];
       const companyFilledFields = companyFields.filter(f => f && String(f).length > 0).length;
@@ -990,19 +1086,37 @@ export class EnrichmentAgent extends BaseAgent {
 
         logger.info({ companyId, companyName, keyPeopleCount: deepCompany.keyPeople.length }, 'Finding emails for team members');
 
-        for (const person of deepCompany.keyPeople.slice(0, 10)) {
+        for (const person of deepCompany.keyPeople) {
           if (!person.name) continue;
           const nameParts = person.name.trim().split(/\s+/);
           const firstName = nameParts[0] ?? '';
           const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
           if (!firstName || !lastName) continue;
 
-          // LinkedIn URL: use existing URL from LLM extraction (no SERP)
-          const personLinkedinUrl = person.linkedinUrl || '';
+          // Name-based dedup: skip if contact with same name already exists for this company
+          const existingByName = await withTenant(this.tenantId, async (tx) => {
+            return tx.select({ id: contacts.id }).from(contacts)
+              .where(and(
+                eq(contacts.tenantId, this.tenantId),
+                ilike(contacts.firstName, firstName),
+                ilike(contacts.lastName, lastName),
+                eq(contacts.companyId, companyId)
+              ))
+              .limit(1);
+          });
+          if (existingByName.length > 0) {
+            logger.debug({ person: person.name }, 'Team member already exists — skipping');
+            continue;
+          }
+
+          // LinkedIn URL only from regex match (set by slug-matching above, never from LLM)
+          const personLinkedinUrl = (person as any).linkedinUrl || '';
 
           // 2. Find email via pattern guesser + Reacher, then Generect fallback
-          let personEmail = person.email || '';
-          if (!personEmail) {
+          let personEmail = '';
+          let emailMethod: string | undefined;
+          let emailAttempts: number | undefined;
+          {
             const emailDomain = companyDomain || companyName;
             try {
               // PRIMARY: Pattern guesser + Reacher SMTP verification
@@ -1010,6 +1124,8 @@ export class EnrichmentAgent extends BaseAgent {
                 const patternResult = await findEmailByPattern(firstName, lastName, emailDomain);
                 if (patternResult.email) {
                   personEmail = patternResult.email;
+                  emailMethod = patternResult.method;
+                  emailAttempts = patternResult.attempts;
                   logger.info({ personName: person.name, email: personEmail, method: patternResult.method, attempts: patternResult.attempts }, 'Email found for team member via pattern + Reacher');
                 }
               }
@@ -1018,6 +1134,7 @@ export class EnrichmentAgent extends BaseAgent {
                 const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
                 if (emailResult.email) {
                   personEmail = emailResult.email;
+                  emailMethod = emailResult.method || 'generect_fallback';
                   logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member via Generect fallback');
                 }
               }
@@ -1052,6 +1169,8 @@ export class EnrichmentAgent extends BaseAgent {
               rawData: {
                 source: 'company_enrichment_team',
                 department: person.department || undefined,
+                ...(emailMethod ? { emailMethod } : {}),
+                ...(emailAttempts !== undefined ? { emailAttempts } : {}),
               },
             });
 
@@ -1075,6 +1194,31 @@ export class EnrichmentAgent extends BaseAgent {
             }
           } catch (err) {
             logger.debug({ err, personName: person.name }, 'Failed to create team member contact');
+          }
+        }
+
+        // Create standalone contacts for unmatched LinkedIn URLs found in scraped HTML
+        const unmatchedUrls = (deepCompany as any)._unmatchedLinkedinUrls as string[] | undefined;
+        if (unmatchedUrls?.length) {
+          for (const url of unmatchedUrls.slice(0, 5)) {
+            try {
+              const slug = url.split('/in/')[1]?.split('/')[0] ?? '';
+              const parts = slug.split('-').filter(Boolean);
+              if (parts.length >= 2) {
+                const firstName = parts[0]!;
+                const lastName = parts.slice(1).join(' ');
+                await this.saveOrUpdateContact({
+                  firstName, lastName,
+                  companyName,
+                  companyId,
+                  masterAgentId,
+                  linkedinUrl: url,
+                  source: 'web_search',
+                  status: 'discovered',
+                  rawData: { source: 'linkedin_regex_unmatched' },
+                });
+              }
+            } catch { /* non-fatal */ }
           }
         }
       }

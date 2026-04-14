@@ -411,7 +411,7 @@ export default function AgentDetailPage() {
                         )}
 
                         {/* Tech stack chips */}
-                        {company.techStack && company.techStack.length > 0 && (
+                        {Array.isArray(company.techStack) && company.techStack.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {company.techStack.slice(0, 5).map((tech, i) => (
                               <span key={i} className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded">

@@ -5,6 +5,7 @@ import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import { findEmailByPattern } from '../tools/email-finder.tool.js';
 
+import { SMART_MODEL } from '../tools/together-ai.tool.js';
 import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
 import {
   buildSystemPrompt as candidateSystemPrompt,
@@ -284,7 +285,7 @@ export class EnrichmentAgent extends BaseAgent {
               searchResults: '',
             }),
           },
-        ]);
+        ], 2, { model: SMART_MODEL });
 
         // Cap key people to prevent LLM over-generation
         if (deepCompany.keyPeople) deepCompany.keyPeople = deepCompany.keyPeople.slice(0, 5);
@@ -1016,7 +1017,7 @@ export class EnrichmentAgent extends BaseAgent {
             searchResults: '',
           }),
         },
-      ]);
+      ], 2, { model: SMART_MODEL });
 
       // Cap key people to prevent LLM over-generation
       if (deepCompany.keyPeople) deepCompany.keyPeople = deepCompany.keyPeople.slice(0, 5);

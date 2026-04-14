@@ -45,7 +45,6 @@ const envSchema = z.object({
 
   // Feature flags
   USE_COMPANY_FINDER: z.coerce.boolean().default(true),
-  ENABLE_LINKEDIN: z.coerce.boolean().default(true),
 
   // App
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

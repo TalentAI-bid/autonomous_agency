@@ -91,9 +91,16 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         urls: [url],
-        word_count_threshold: 10,
-        extraction_strategy: 'NoExtractionStrategy',
-        chunking_strategy: 'RegexChunking',
+        browser_config: {
+          headless: true,
+          java_script_enabled: true,
+          user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        },
+        crawler_config: {
+          page_timeout: 30000,
+          remove_overlay_elements: true,
+          word_count_threshold: 50,
+        },
       }),
       signal: controller.signal,
     });
@@ -113,7 +120,7 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
     // If synchronous result
     if (data.results?.length) {
       const md = data.results[0]?.markdown;
-      const text = typeof md === 'string' ? md : (md?.raw_markdown ?? data.results[0]?.extracted_content ?? '');
+      const text = typeof md === 'string' ? md : (md?.raw_markdown || md?.fit_markdown || data.results[0]?.extracted_content || '');
       if (text && text.trim().length >= 100) await redis.setex(cacheKey, CACHE_TTL_SEC, text);
       await recordCrawl4aiSuccess();
       return text;
@@ -131,7 +138,7 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
         const pollData = await pollRes.json() as CrawlResult;
         if (pollData.status === 'completed' && pollData.results?.length) {
           const md = pollData.results[0]?.markdown;
-          const text = typeof md === 'string' ? md : (md?.raw_markdown ?? pollData.results[0]?.extracted_content ?? '');
+          const text = typeof md === 'string' ? md : (md?.raw_markdown || md?.fit_markdown || pollData.results[0]?.extracted_content || '');
           if (text && text.trim().length >= 100) await redis.setex(cacheKey, CACHE_TTL_SEC, text);
           await recordCrawl4aiSuccess();
           return text;

@@ -476,15 +476,10 @@ export class CompanyFinderAgent extends BaseAgent {
               const companyPageUrl = `https://www.welcometothejungle.com/fr/companies/${slug}`;
 
               try {
-                // Crawl main page + team + tech tabs in parallel
-                const [mainContent, teamContent, techContent] = await Promise.all([
-                  crawlPage(companyPageUrl, wttjCompanyConfig).catch(() => ''),
-                  crawlPage(`${companyPageUrl}/team-1`, wttjCompanyConfig).catch(() => ''),
-                  crawlPage(`${companyPageUrl}/tech-1`, wttjCompanyConfig).catch(() => ''),
-                ]);
-                const companyContent = [mainContent, teamContent, techContent].filter(Boolean).join('\n\n---\n\n');
-                if (!companyContent || companyContent.length < 500) continue;
-                if (companyContent.includes('ne fait plus partie de la jungle')) continue;
+                const mainContent = await crawlPage(companyPageUrl, wttjCompanyConfig);
+                if (!mainContent || mainContent.length < 500) continue;
+                if (mainContent.includes('ne fait plus partie de la jungle')) continue;
+                const companyContent = mainContent;
 
                 // Extract company name — first H1 on WTTJ company page
                 const nameMatch = companyContent.match(/^#\s+([^\n]+)/m);
@@ -549,15 +544,33 @@ export class CompanyFinderAgent extends BaseAgent {
                   }
                 }
 
-                // Extract LinkedIn — skip WTTJ's own LinkedIn
-                const allLinkedins = [...mainContent.matchAll(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/g)];
-                const WTTJ_LINKEDIN_SLUGS = ['wttj-fr', 'wttj', 'welcometothejungle', 'welcome-to-the-jungle'];
+                // Extract LinkedIn — priority: social network link (markdown from WTTJ social buttons)
                 let linkedinUrl = '';
-                for (const liMatch of allLinkedins) {
-                  const liSlug = liMatch[1];
-                  if (WTTJ_LINKEDIN_SLUGS.includes(liSlug.toLowerCase())) continue;
-                  linkedinUrl = `https://www.linkedin.com/company/${liSlug}`;
-                  break;
+                const socialLiMatch = mainContent.match(
+                  /\[([^\]]*linkedin[^\]]*)\]\((https?:\/\/(?:www\.)?linkedin\.com\/company\/[a-zA-Z0-9_-]+)\)/i
+                );
+                if (socialLiMatch) {
+                  linkedinUrl = socialLiMatch[2];
+                }
+
+                // Fallback: scan all linkedin URLs, skip WTTJ's own
+                if (!linkedinUrl) {
+                  const allLinkedins = [...mainContent.matchAll(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/g)];
+                  const WTTJ_LINKEDIN_SLUGS = ['wttj-fr', 'wttj', 'welcometothejungle', 'welcome-to-the-jungle'];
+                  for (const liMatch of allLinkedins) {
+                    const liSlug = liMatch[1];
+                    if (WTTJ_LINKEDIN_SLUGS.includes(liSlug.toLowerCase())) continue;
+                    linkedinUrl = `https://www.linkedin.com/company/${liSlug}`;
+                    break;
+                  }
+                }
+
+                // Final safety: reject if it's still a WTTJ slug
+                if (linkedinUrl) {
+                  const finalSlug = linkedinUrl.split('/company/')[1]?.split(/[/?#]/)[0]?.toLowerCase() || '';
+                  if (['wttj-fr', 'wttj', 'welcometothejungle', 'welcome-to-the-jungle'].includes(finalSlug)) {
+                    linkedinUrl = '';
+                  }
                 }
 
                 // Cross-site dedupe
@@ -583,8 +596,6 @@ export class CompanyFinderAgent extends BaseAgent {
                       hiringSignal: 'job_posting',
                       wttjSlug: slug,
                       wttjContent: mainContent.slice(0, 8000),
-                      wttjTeamContent: teamContent ? teamContent.slice(0, 5000) : undefined,
-                      wttjTechContent: techContent ? techContent.slice(0, 5000) : undefined,
                       linkedinCompanyUrl: linkedinUrl,
                       ...(industry && { industry }),
                       ...(location && { location }),
@@ -605,7 +616,7 @@ export class CompanyFinderAgent extends BaseAgent {
 
                   logger.info({
                     company: companyName, slug, domain: companyDomain,
-                    mainLen: mainContent.length, teamLen: teamContent.length, techLen: techContent.length,
+                    contentLen: mainContent.length,
                   }, 'CompanyFinder: saved WTTJ company from profile page');
                 } catch (err) {
                   logger.warn(

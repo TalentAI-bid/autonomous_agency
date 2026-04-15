@@ -153,28 +153,6 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     headers: { 'Accept-Language': 'fr-FR,fr;q=0.9' },
   },
 
-  linkedin_jobs: {
-    name: 'LinkedIn Jobs',
-    baseUrl: 'https://www.linkedin.com/jobs/search',
-    type: 'job_board',
-    searchParam: 'keywords',
-    locationParam: 'location',
-    cookieDismiss: `
-      const btn = document.querySelector('button[action-type="ACCEPT"]');
-      if (btn) btn.click();
-      await new Promise(r => setTimeout(r, 1500));
-    `,
-    genericCookieFallback: true,
-    waitForSelector: '.jobs-search__results-list, .base-search-card',
-    waitMs: 3500,
-    maxPages: 2,
-    nextPageParam: 'start',
-    nextPageIncrement: 25,
-    delayBetweenPages: 12000,
-    countries: ['all'],
-    headers: { 'Accept-Language': 'en-US,en;q=0.9' },
-  },
-
   glassdoor: {
     name: 'Glassdoor',
     baseUrl: 'https://www.glassdoor.com/Job/jobs.htm',
@@ -422,40 +400,6 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
   },
 
   // ── Profile Sources (candidate-finder) ──────────────────────────────────
-  brave_linkedin_profiles: {
-    name: 'Brave LinkedIn Profile Search',
-    baseUrl: 'https://search.brave.com/search',
-    type: 'job_board',
-    searchParam: 'q',
-    cookieDismiss: '',
-    genericCookieFallback: true,
-    waitForSelector: 'body',
-    waitMs: 1500,
-    maxPages: 2,
-    nextPageParam: 'offset',
-    nextPageIncrement: 10,
-    delayBetweenPages: 6000,
-    countries: ['all'],
-    profileType: 'general',
-    headers: { 'Accept-Language': 'en-US,en;q=0.9' },
-  },
-
-  duckduckgo_linkedin_profiles: {
-    name: 'DuckDuckGo LinkedIn Profile Search',
-    baseUrl: 'https://duckduckgo.com/html/',
-    type: 'job_board',
-    searchParam: 'q',
-    cookieDismiss: '',
-    genericCookieFallback: true,
-    waitForSelector: '.results, .result',
-    waitMs: 1500,
-    maxPages: 2,
-    delayBetweenPages: 6000,
-    countries: ['all'],
-    profileType: 'general',
-    headers: { 'Accept-Language': 'en-US,en;q=0.9' },
-  },
-
   github_api: {
     name: 'GitHub Users API',
     baseUrl: 'https://api.github.com/search/users',

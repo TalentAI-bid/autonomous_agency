@@ -511,23 +511,32 @@ export class CompanyFinderAgent extends BaseAgent {
                   }
                 }
 
-                // Extract website domain from "[View website]" link first
+                // Extract website domain from "[View website]" / "[Voir le site]" link first
                 let companyDomain = '';
-                const viewWebsite = companyContent.match(/\[View website\]\((https?:\/\/[^\)]+)\)/i);
-                if (viewWebsite) {
-                  try {
-                    const d = new URL(viewWebsite[1]).hostname.replace('www.', '');
-                    if (d.length >= 4) companyDomain = d;
-                  } catch { /* ignore */ }
+                const viewWebsitePatterns = [
+                  /\[View website\]\((https?:\/\/[^\)]+)\)/i,
+                  /\[Voir le site\]\((https?:\/\/[^\)]+)\)/i,
+                  /\[Site web\]\((https?:\/\/[^\)]+)\)/i,
+                  /\[Website\]\((https?:\/\/[^\)]+)\)/i,
+                ];
+                for (const pattern of viewWebsitePatterns) {
+                  const match = mainContent.match(pattern);
+                  if (match) {
+                    try {
+                      companyDomain = new URL(match[1]).hostname.replace('www.', '');
+                      logger.info({ company: companyName, domain: companyDomain, source: 'view-website-link' }, 'Domain from View website');
+                      break;
+                    } catch {}
+                  }
                 }
 
                 // Fallback: scan all URLs if no "View website" link
                 if (!companyDomain) {
                   const allUrls = companyContent.match(/https?:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s"')><]*/g) || [];
-                  const skipDomains = ['welcometothejungle', 'linkedin', 'facebook', 'twitter', 'instagram',
+                  const skipDomains = ['welcometothejungle', 'wttj', 'solutions.welcometothejungle',
+                    'linkedin', 'facebook', 'twitter', 'instagram',
                     'youtube', 'axeptio', 'imgix', 'gstatic', 'maps.google', 'googleapis', 'cloudflare',
-                    'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager',
-                    'lafrenchtech', 'eurazeo', '83north'];
+                    'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager'];
 
                   for (const u of allUrls) {
                     try {
@@ -540,9 +549,16 @@ export class CompanyFinderAgent extends BaseAgent {
                   }
                 }
 
-                // Extract LinkedIn
-                const liMatch = companyContent.match(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/);
-                const linkedinUrl = liMatch ? `https://www.linkedin.com/company/${liMatch[1]}` : '';
+                // Extract LinkedIn — skip WTTJ's own LinkedIn
+                const allLinkedins = [...mainContent.matchAll(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/g)];
+                const WTTJ_LINKEDIN_SLUGS = ['wttj-fr', 'wttj', 'welcometothejungle', 'welcome-to-the-jungle'];
+                let linkedinUrl = '';
+                for (const liMatch of allLinkedins) {
+                  const liSlug = liMatch[1];
+                  if (WTTJ_LINKEDIN_SLUGS.includes(liSlug.toLowerCase())) continue;
+                  linkedinUrl = `https://www.linkedin.com/company/${liSlug}`;
+                  break;
+                }
 
                 // Cross-site dedupe
                 const key = normalizeCompanyKey(companyName);

@@ -374,6 +374,60 @@ export abstract class BaseAgent {
     }
   }
 
+  /**
+   * Send a question to the Agent Room and poll for the user's reply.
+   * Returns the matched option value, or null on timeout.
+   */
+  protected async waitForHumanResponse(
+    question: string,
+    options: { label: string; value: string }[],
+    timeoutMs = 180000,
+  ): Promise<string | null> {
+    const optionsText = options
+      .map((o, i) => `${String.fromCharCode(65 + i)}) ${o.label}`)
+      .join('\n');
+    this.sendMessage(null, 'question', {
+      question,
+      options: optionsText,
+      expectsResponse: true,
+    });
+
+    const key = `tenant:${this.tenantId}:human-instruction:${this.masterAgentId}:${this.agentType}`;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const instruction = await this.redis.get(key);
+      if (instruction) {
+        await this.redis.del(key);
+        const trimmed = instruction.trim().toUpperCase();
+        for (let i = 0; i < options.length; i++) {
+          const letter = String.fromCharCode(65 + i);
+          if (
+            trimmed === letter ||
+            trimmed === options[i]!.value ||
+            instruction.toLowerCase().includes(options[i]!.value) ||
+            instruction.toLowerCase().includes(options[i]!.label.toLowerCase())
+          ) {
+            this.sendMessage(null, 'agent_response', {
+              respondingTo: question,
+              selectedOption: options[i]!.value,
+              action: 'user_selected',
+            });
+            return options[i]!.value;
+          }
+        }
+        // Unrecognized response — return raw
+        this.sendMessage(null, 'agent_response', {
+          respondingTo: question,
+          rawResponse: instruction,
+          action: 'user_selected',
+        });
+        return instruction;
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    return null;
+  }
+
   // ── Events ────────────────────────────────────────────────────────────────
 
   protected async emitEvent(event: string, data: Record<string, unknown>): Promise<void> {

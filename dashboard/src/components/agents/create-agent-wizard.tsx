@@ -25,7 +25,6 @@ export function CreateAgentWizard() {
   const [scoringThreshold, setScoringThreshold] = useState(70);
   const [emailTone, setEmailTone] = useState('professional');
   const [emailAccountId, setEmailAccountId] = useState('');
-  const [bdStrategy, setBdStrategy] = useState('hybrid');
   const { data: emailAccountsList } = useEmailAccounts();
   const activeEmailAccounts = emailAccountsList?.filter((a) => a.isActive) ?? [];
 
@@ -57,7 +56,6 @@ export function CreateAgentWizard() {
         config: {
           scoringThreshold,
           emailTone,
-          bdStrategy,
           ...(locations.length > 0 && { locations }),
           ...(skills.length > 0 && { requiredSkills: skills }),
           ...(emailAccountId && { emailAccountId }),
@@ -168,21 +166,6 @@ export function CreateAgentWizard() {
                   </Button>
                 ))}
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Discovery strategy</Label>
-              <select
-                value={bdStrategy}
-                onChange={(e) => setBdStrategy(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="hybrid">Hybrid — Both sources (recommended)</option>
-                <option value="hiring_signal">Hiring Signal — Job boards only</option>
-                <option value="industry_target">Industry Targeting — Company registries only</option>
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Hiring Signal finds companies actively hiring. Industry Targeting finds all companies in a sector.
-              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="emailAccount">Sending email account</Label>

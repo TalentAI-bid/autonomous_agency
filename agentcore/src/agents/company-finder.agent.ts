@@ -460,7 +460,13 @@ export class CompanyFinderAgent extends BaseAgent {
               const companyPageUrl = `https://www.welcometothejungle.com/fr/companies/${slug}`;
 
               try {
-                const companyContent = await crawlPage(companyPageUrl, wttjCompanyConfig);
+                // Crawl main page + team + tech tabs in parallel
+                const [mainContent, teamContent, techContent] = await Promise.all([
+                  crawlPage(companyPageUrl, wttjCompanyConfig).catch(() => ''),
+                  crawlPage(`${companyPageUrl}/team-1`, wttjCompanyConfig).catch(() => ''),
+                  crawlPage(`${companyPageUrl}/tech-1`, wttjCompanyConfig).catch(() => ''),
+                ]);
+                const companyContent = [mainContent, teamContent, techContent].filter(Boolean).join('\n\n---\n\n');
                 if (!companyContent || companyContent.length < 500) continue;
                 if (companyContent.includes('ne fait plus partie de la jungle')) continue;
 
@@ -544,7 +550,9 @@ export class CompanyFinderAgent extends BaseAgent {
                       sourceType: 'job_board',
                       hiringSignal: 'job_posting',
                       wttjSlug: slug,
-                      wttjContent: companyContent.slice(0, 8000),
+                      wttjContent: mainContent.slice(0, 8000),
+                      wttjTeamContent: teamContent ? teamContent.slice(0, 5000) : undefined,
+                      wttjTechContent: techContent ? techContent.slice(0, 5000) : undefined,
                       linkedinCompanyUrl: linkedinUrl,
                       ...(industry && { industry }),
                       ...(location && { location }),
@@ -563,8 +571,10 @@ export class CompanyFinderAgent extends BaseAgent {
                     metrics.dispatched++;
                   }
 
-                  logger.info({ company: companyName, slug, domain: companyDomain },
-                    'CompanyFinder: saved WTTJ company from profile page');
+                  logger.info({
+                    company: companyName, slug, domain: companyDomain,
+                    mainLen: mainContent.length, teamLen: teamContent.length, techLen: techContent.length,
+                  }, 'CompanyFinder: saved WTTJ company from profile page');
                 } catch (err) {
                   logger.warn(
                     { err: err instanceof Error ? err.message : String(err), company: companyName, slug },

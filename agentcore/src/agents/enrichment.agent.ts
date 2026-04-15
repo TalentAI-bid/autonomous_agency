@@ -993,6 +993,12 @@ export class EnrichmentAgent extends BaseAgent {
       let newsContent = '';
       let glassdoorContent = '';
 
+      // Load WTTJ content from rawData (saved by company-finder during discovery)
+      const companyRawData = (company.rawData as Record<string, unknown>) ?? {};
+      const wttjContent = (companyRawData.wttjContent as string) || '';
+      const wttjTeamContent = (companyRawData.wttjTeamContent as string) || '';
+      const wttjTechContent = (companyRawData.wttjTechContent as string) || '';
+
       if (companyUrl) {
         homepageContent = await this.scrapeUrl(companyUrl);
       }
@@ -1029,6 +1035,12 @@ export class EnrichmentAgent extends BaseAgent {
         }
       });
 
+      // Use WTTJ team content as fallback if real team page scraping returned nothing
+      if (!teamPageContent && wttjTeamContent) {
+        teamPageContent = wttjTeamContent;
+        logger.info({ companyId }, 'Using WTTJ team content as team page fallback');
+      }
+
       // Extract LinkedIn URLs from ALL scraped company content
       const allCompanyContent = [homepageContent, aboutPageContent, careersPageContent, teamPageContent];
       const companyLiMatch = allCompanyContent.filter(Boolean).join('\n')
@@ -1052,7 +1064,7 @@ export class EnrichmentAgent extends BaseAgent {
       }
 
       // Check if we have enough content for LLM deep analysis
-      const totalScrapedLen = [homepageContent, aboutPageContent, careersPageContent, teamPageContent]
+      const totalScrapedLen = [homepageContent, aboutPageContent, careersPageContent, teamPageContent, wttjContent, wttjTechContent]
         .reduce((sum, s) => sum + (s?.length ?? 0), 0);
 
       if (totalScrapedLen < 200) {
@@ -1075,7 +1087,7 @@ export class EnrichmentAgent extends BaseAgent {
           content: companyDeepUserPrompt({
             companyName,
             domain: companyDomain,
-            homepageContent,
+            homepageContent: homepageContent || wttjContent,
             aboutPageContent,
             careersPageContent,
             teamPageContent,
@@ -1083,7 +1095,7 @@ export class EnrichmentAgent extends BaseAgent {
             crunchbaseContent: '',
             newsContent: '',
             glassdoorContent: '',
-            searchResults: '',
+            searchResults: wttjTechContent ? `WTTJ TECH PAGE:\n${wttjTechContent}` : '',
           }),
         },
       ], 2, { model: SMART_MODEL });
@@ -1093,7 +1105,7 @@ export class EnrichmentAgent extends BaseAgent {
 
       // Validate: only keep key people whose names appear in actual scraped content
       if (deepCompany.keyPeople?.length) {
-        const allScrapedText = [homepageContent, aboutPageContent, careersPageContent, teamPageContent]
+        const allScrapedText = [homepageContent, aboutPageContent, careersPageContent, teamPageContent, wttjContent, wttjTeamContent, wttjTechContent]
           .filter(Boolean).join(' ').toLowerCase();
         deepCompany.keyPeople = deepCompany.keyPeople.filter(person => {
           const name = (person.name || '').trim();

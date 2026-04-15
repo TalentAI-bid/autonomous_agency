@@ -47,6 +47,7 @@ export interface PipelineContext {
 }
 
 export interface SalesStrategy {
+  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid';
   marketAnalysis?: {
     customerPersonas?: Array<{
       title?: string;

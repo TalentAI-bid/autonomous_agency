@@ -156,6 +156,20 @@ export class MasterAgent extends BaseAgent {
             if (!pipelineContext.sales) pipelineContext.sales = {};
             pipelineContext.sales.salesStrategy = strategy;
             logger.info({ masterAgentId, queryCount: strategy.opportunitySearchQueries?.length ?? 0 }, 'StrategistAgent initial strategy completed (inline)');
+
+            // If strategist recommended a BD strategy and user didn't set one, save it to config
+            if (strategy.bdStrategy && !agentConfig.bdStrategy) {
+              try {
+                await withTenant(this.tenantId, async (tx) => {
+                  await tx.update(masterAgents)
+                    .set({ config: { ...agentConfig, bdStrategy: strategy.bdStrategy }, updatedAt: new Date() })
+                    .where(eq(masterAgents.id, masterAgentId));
+                });
+                logger.info({ masterAgentId, bdStrategy: strategy.bdStrategy }, 'Saved strategist BD strategy to agent config');
+              } catch (saveErr) {
+                logger.warn({ err: saveErr, masterAgentId }, 'Failed to save strategist BD strategy');
+              }
+            }
           } else {
             logger.warn({ masterAgentId }, 'Strategist timed out — falling back to fire-and-forget');
             await this.dispatchNext('strategist', {
@@ -359,25 +373,12 @@ export class MasterAgent extends BaseAgent {
           keywords: mergedKeywords,
         };
 
-        // Determine BD strategy from mission context
-        type BDStrategy = 'hiring_signal' | 'industry_target' | 'hybrid';
-        let bdStrategy: BDStrategy = 'hiring_signal';
-
-        const missionLower = (agent.mission || '').toLowerCase();
-
-        if (agent.useCase === 'recruitment') {
-          bdStrategy = 'hiring_signal';
-        } else if (agent.useCase === 'sales') {
-          const hasIndustryKeywords = /\b(find|search|all|every|list|companies in|saas|fintech|startup|industry)\b/i.test(missionLower);
-          const hasHiringKeywords = /\b(hiring|recruit|looking for|need|job|position|open role)\b/i.test(missionLower);
-          if (hasHiringKeywords && hasIndustryKeywords) {
-            bdStrategy = 'hybrid';
-          } else if (hasIndustryKeywords) {
-            bdStrategy = 'industry_target';
-          }
+        // Read BD strategy — re-read config in case strategist updated it
+        let bdStrategy = (agentConfig.bdStrategy as string) || 'hybrid';
+        if (!agentConfig.bdStrategy && pipelineContext?.sales?.salesStrategy?.bdStrategy) {
+          bdStrategy = pipelineContext.sales.salesStrategy.bdStrategy;
         }
-
-        logger.info({ masterAgentId, bdStrategy, useCase: agent.useCase }, 'Master agent: BD strategy selected');
+        logger.info({ masterAgentId, bdStrategy, useCase: agent.useCase }, 'Master agent: BD strategy');
 
         // LLM picks one or both finders.
         let selection: agentSelectorPrompt.AgentSelection;

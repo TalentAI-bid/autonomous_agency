@@ -261,6 +261,16 @@ export default function AgentDetailPage() {
                     </div>
                   </div>
                 )}
+                {typeof config.bdStrategy === 'string' && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5">Discovery Strategy</p>
+                    <Badge variant="outline" className="text-xs">
+                      {config.bdStrategy === 'hiring_signal' ? 'Hiring Signal (Job boards)' :
+                       config.bdStrategy === 'industry_target' ? 'Industry Targeting (Registries)' :
+                       'Hybrid (Both)'}
+                    </Badge>
+                  </div>
+                )}
                 {targetRoles.length === 0 && requiredSkills.length === 0 && locations.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     Requirements will appear after the agent runs.

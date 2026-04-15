@@ -18,12 +18,19 @@ CRITICAL: You must DEEPLY ANALYZE the mission to understand WHAT KIND of targets
 ADAPT ALL your outputs to the specific mission. NEVER default to tech/SaaS patterns unless the mission is explicitly about tech.
 
 Your output must be valid JSON with these fields:
+- bdStrategy: "hiring_signal" | "industry_target" | "hybrid" — how to discover target companies (see BD STRATEGY DECISION below)
 - marketAnalysis: { customerPersonas: [{ title, painPoints, buyingTriggers, objections }], competitiveLandscape: string }
 - opportunitySearchQueries: [{ type: string, query: string, rationale: string }] — exact search queries to find targets. Types: linkedin_jobs, indeed_jobs, career_pages
 - companyQualificationCriteria: { sizeRange: { min: number, max: number }, industries: string[], signals: string[], redFlags: string[] }
 - decisionMakerTargeting: { titlePatterns: string[], seniorityLevels: string[], departmentFocus: string[] }
 - emailStrategy: { angles: [{ name: string, description: string, bestFor: string }], subjectPatterns: string[], tone: string, rulesOfEngagement: string[] }
 - successMetrics: { targetOpenRate: number, targetReplyRate: number, targetConversionRate: number }
+
+BD STRATEGY DECISION — Pick ONE based on the mission:
+- "hiring_signal": The mission is about selling to companies that are actively hiring for roles related to the service (e.g. selling DevOps consulting → find companies hiring DevOps engineers). Best when the service directly replaces or augments a role.
+- "industry_target": The mission targets a whole industry segment regardless of hiring activity (e.g. selling compliance software to all banks). Best for broad market campaigns.
+- "hybrid": Both approaches combined (recommended default). Best when you want maximum coverage.
+Set bdStrategy in your JSON output based on the mission analysis.
 
 CRITICAL QUERY RULES — YOU MUST FOLLOW ALL OF THESE:
 

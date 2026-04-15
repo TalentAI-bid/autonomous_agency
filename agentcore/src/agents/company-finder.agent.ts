@@ -322,7 +322,7 @@ export class CompanyFinderAgent extends BaseAgent {
         : availableSiteKeys.filter((k) => SITE_CONFIGS[k]!.countries.includes('all'));
 
     // Strategy-based site filtering
-    const bdStrategy = missionContext.bdStrategy || 'hiring_signal';
+    const bdStrategy = missionContext.bdStrategy || 'hybrid';
     if (bdStrategy === 'hiring_signal') {
       sitesToCrawl = sitesToCrawl.filter(key => SITE_CONFIGS[key]?.type === 'job_board');
     } else if (bdStrategy === 'industry_target') {

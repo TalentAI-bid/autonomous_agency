@@ -193,7 +193,7 @@ export class CompanyFinderAgent extends BaseAgent {
     // Profile sources (brave_linkedin_profiles, github_api, devto, etc.) belong
     // exclusively to the candidate-finder pipeline.
     const availableSiteKeys = Object.keys(SITE_CONFIGS).filter(
-      (k) => !SITE_CONFIGS[k]!.profileType,
+      (k) => !SITE_CONFIGS[k]!.profileType && k !== 'welcometothejungle_company',
     );
     if (availableSiteKeys.length === 0) {
       logger.warn('CompanyFinder: SITE_CONFIGS is empty — nothing to crawl');
@@ -319,6 +319,22 @@ export class CompanyFinderAgent extends BaseAgent {
       validSites.length > 0
         ? validSites
         : availableSiteKeys.filter((k) => SITE_CONFIGS[k]!.countries.includes('all'));
+
+    // Exclude company_database sites from recruitment missions
+    if (analysis.missionType === 'recruitment') {
+      const before = sitesToCrawl.length;
+      sitesToCrawl = sitesToCrawl.filter(key => {
+        const config = SITE_CONFIGS[key];
+        if (config?.type === 'company_database') {
+          logger.info({ siteKey: key }, 'CompanyFinder: excluding company_database from recruitment mission');
+          return false;
+        }
+        return true;
+      });
+      if (sitesToCrawl.length < before) {
+        logger.info({ dropped: before - sitesToCrawl.length }, 'CompanyFinder: dropped company_database sites for recruitment');
+      }
+    }
 
     // Hard fallback: if STILL empty, use a hard-coded set of always-on job boards.
     if (sitesToCrawl.length === 0) {

@@ -192,28 +192,6 @@ export class MasterAgent extends BaseAgent {
         }
       }
 
-      // 3e. Ask user for BD strategy (sales missions only, if not already set)
-      if (agent.useCase === 'sales' && !agentConfig.bdStrategy) {
-        const strategistRec = pipelineContext?.sales?.salesStrategy?.bdStrategy || 'hybrid';
-        const userChoice = await this.waitForHumanResponse(
-          `How should I find target companies? (Strategist recommends: ${strategistRec})`,
-          [
-            { label: 'Hiring Signal — Find companies actively hiring for roles you can fill (faster, fewer leads)', value: 'hiring_signal' },
-            { label: 'Industry Targeting — Find all companies in the target industry (slower, more leads)', value: 'industry_target' },
-            { label: 'Hybrid — Both approaches combined (recommended)', value: 'hybrid' },
-          ],
-          180000,
-        );
-        const chosenStrategy = userChoice || strategistRec;
-        await withTenant(this.tenantId, async (tx) => {
-          await tx.update(masterAgents)
-            .set({ config: { ...agentConfig, bdStrategy: chosenStrategy }, updatedAt: new Date() })
-            .where(eq(masterAgents.id, masterAgentId));
-        });
-        (agentConfig as Record<string, unknown>).bdStrategy = chosenStrategy;
-        logger.info({ masterAgentId, chosenStrategy, source: userChoice ? 'user' : 'timeout_default' }, 'BD strategy selected');
-      }
-
       // 4. Auto-create campaign (or reuse existing) + save all config in one write
       if (enableOutreach) {
         campaignId = await withTenant(this.tenantId, async (tx) => {

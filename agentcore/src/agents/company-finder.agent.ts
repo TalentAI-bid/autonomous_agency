@@ -464,32 +464,63 @@ export class CompanyFinderAgent extends BaseAgent {
                 if (!companyContent || companyContent.length < 500) continue;
                 if (companyContent.includes('ne fait plus partie de la jungle')) continue;
 
-                // Extract website domain
-                const allUrls = companyContent.match(/https?:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s"')><]*/g) || [];
-                const skipDomains = ['welcometothejungle', 'linkedin', 'facebook', 'twitter', 'instagram',
-                  'youtube', 'axeptio', 'imgix', 'gstatic', 'maps.google', 'googleapis', 'cloudflare',
-                  'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager',
-                  'lafrenchtech', 'eurazeo', '83north'];
+                // Extract company name — first H1 on WTTJ company page
+                const nameMatch = companyContent.match(/^#\s+([^\n]+)/m);
+                let companyName = '';
+                if (nameMatch) {
+                  companyName = nameMatch[1].trim().replace(/\[.*?\]\(.*?\)/g, '').trim();
+                }
+                if (!companyName || companyName.length < 2 ||
+                    ['presentation', 'présentation', 'crédits', 'about', 'team', 'culture'].includes(companyName.toLowerCase())) {
+                  companyName = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                }
 
+                // Extract industry and location from lines after H1
+                const lines = companyContent.split('\n');
+                const h1Index = lines.findIndex(l => l.startsWith('# '));
+                let industry = '';
+                let location = '';
+                if (h1Index >= 0) {
+                  for (let i = h1Index + 1; i < Math.min(h1Index + 6, lines.length); i++) {
+                    const line = lines[i].trim();
+                    if (line === 'Follow' || line === '' || line.startsWith('!') || line.startsWith('[')) continue;
+                    if (!industry) { industry = line; continue; }
+                    if (!location && !line.includes('http')) { location = line; break; }
+                  }
+                }
+
+                // Extract website domain from "[View website]" link first
                 let companyDomain = '';
-                for (const u of allUrls) {
+                const viewWebsite = companyContent.match(/\[View website\]\((https?:\/\/[^\)]+)\)/i);
+                if (viewWebsite) {
                   try {
-                    const h = new URL(u).hostname.replace('www.', '');
-                    if (skipDomains.some(d => h.includes(d))) continue;
-                    if (h.length < 4) continue;
-                    companyDomain = h;
-                    break;
-                  } catch { continue; }
+                    const d = new URL(viewWebsite[1]).hostname.replace('www.', '');
+                    if (d.length >= 4) companyDomain = d;
+                  } catch { /* ignore */ }
+                }
+
+                // Fallback: scan all URLs if no "View website" link
+                if (!companyDomain) {
+                  const allUrls = companyContent.match(/https?:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s"')><]*/g) || [];
+                  const skipDomains = ['welcometothejungle', 'linkedin', 'facebook', 'twitter', 'instagram',
+                    'youtube', 'axeptio', 'imgix', 'gstatic', 'maps.google', 'googleapis', 'cloudflare',
+                    'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager',
+                    'lafrenchtech', 'eurazeo', '83north'];
+
+                  for (const u of allUrls) {
+                    try {
+                      const h = new URL(u).hostname.replace('www.', '');
+                      if (skipDomains.some(d => h.includes(d))) continue;
+                      if (h.length < 4) continue;
+                      companyDomain = h;
+                      break;
+                    } catch { continue; }
+                  }
                 }
 
                 // Extract LinkedIn
                 const liMatch = companyContent.match(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/);
                 const linkedinUrl = liMatch ? `https://www.linkedin.com/company/${liMatch[1]}` : '';
-
-                // Extract company name from content (first heading)
-                const nameMatch = companyContent.match(/^#\s+(.+?)$/m) ||
-                                  companyContent.match(/^##\s+(.+?)$/m);
-                const companyName = nameMatch ? nameMatch[1].trim() : slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
                 // Cross-site dedupe
                 const key = normalizeCompanyKey(companyName);
@@ -515,6 +546,8 @@ export class CompanyFinderAgent extends BaseAgent {
                       wttjSlug: slug,
                       wttjContent: companyContent.slice(0, 8000),
                       linkedinCompanyUrl: linkedinUrl,
+                      ...(industry && { industry }),
+                      ...(location && { location }),
                     },
                   });
                   metrics.saved++;

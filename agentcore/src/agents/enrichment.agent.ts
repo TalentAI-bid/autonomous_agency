@@ -433,6 +433,9 @@ export class EnrichmentAgent extends BaseAgent {
             employeeCount: deepCompany.employeeCount || undefined,
             recentFunding: deepCompany.recentFunding || undefined,
             teamPageUrl: deepCompany.teamPageUrl || undefined,
+            painPoints: deepCompany.painPoints?.length ? deepCompany.painPoints : undefined,
+            techGapScore: deepCompany.techGapScore ?? undefined,
+            outreachAngle: deepCompany.outreachAngle || undefined,
           },
         });
 
@@ -1185,6 +1188,9 @@ export class EnrichmentAgent extends BaseAgent {
           employeeCount: deepCompany.employeeCount || undefined,
           recentFunding: deepCompany.recentFunding || undefined,
           teamPageUrl: deepCompany.teamPageUrl || undefined,
+          painPoints: deepCompany.painPoints?.length ? deepCompany.painPoints : undefined,
+          techGapScore: deepCompany.techGapScore ?? undefined,
+          outreachAngle: deepCompany.outreachAngle || undefined,
         },
       });
 

@@ -38,6 +38,7 @@ interface MissionContext {
   requiredSkills?: string[];
   experienceLevel?: string;
   keywords?: string[];
+  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid';
 }
 
 interface CompanyFinderInput {
@@ -320,21 +321,16 @@ export class CompanyFinderAgent extends BaseAgent {
         ? validSites
         : availableSiteKeys.filter((k) => SITE_CONFIGS[k]!.countries.includes('all'));
 
-    // Exclude company_database sites from recruitment missions
-    if (analysis.missionType === 'recruitment') {
-      const before = sitesToCrawl.length;
-      sitesToCrawl = sitesToCrawl.filter(key => {
-        const config = SITE_CONFIGS[key];
-        if (config?.type === 'company_database') {
-          logger.info({ siteKey: key }, 'CompanyFinder: excluding company_database from recruitment mission');
-          return false;
-        }
-        return true;
-      });
-      if (sitesToCrawl.length < before) {
-        logger.info({ dropped: before - sitesToCrawl.length }, 'CompanyFinder: dropped company_database sites for recruitment');
-      }
+    // Strategy-based site filtering
+    const bdStrategy = missionContext.bdStrategy || 'hiring_signal';
+    if (bdStrategy === 'hiring_signal') {
+      sitesToCrawl = sitesToCrawl.filter(key => SITE_CONFIGS[key]?.type === 'job_board');
+    } else if (bdStrategy === 'industry_target') {
+      sitesToCrawl = sitesToCrawl.filter(key => SITE_CONFIGS[key]?.type === 'company_database');
     }
+    // 'hybrid' keeps both
+
+    logger.info({ bdStrategy, sitesToCrawl }, 'CompanyFinder: sites filtered by BD strategy');
 
     // Hard fallback: if STILL empty, use a hard-coded set of always-on job boards.
     if (sitesToCrawl.length === 0) {

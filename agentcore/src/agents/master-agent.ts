@@ -359,6 +359,26 @@ export class MasterAgent extends BaseAgent {
           keywords: mergedKeywords,
         };
 
+        // Determine BD strategy from mission context
+        type BDStrategy = 'hiring_signal' | 'industry_target' | 'hybrid';
+        let bdStrategy: BDStrategy = 'hiring_signal';
+
+        const missionLower = (agent.mission || '').toLowerCase();
+
+        if (agent.useCase === 'recruitment') {
+          bdStrategy = 'hiring_signal';
+        } else if (agent.useCase === 'sales') {
+          const hasIndustryKeywords = /\b(find|search|all|every|list|companies in|saas|fintech|startup|industry)\b/i.test(missionLower);
+          const hasHiringKeywords = /\b(hiring|recruit|looking for|need|job|position|open role)\b/i.test(missionLower);
+          if (hasHiringKeywords && hasIndustryKeywords) {
+            bdStrategy = 'hybrid';
+          } else if (hasIndustryKeywords) {
+            bdStrategy = 'industry_target';
+          }
+        }
+
+        logger.info({ masterAgentId, bdStrategy, useCase: agent.useCase }, 'Master agent: BD strategy selected');
+
         // LLM picks one or both finders.
         let selection: agentSelectorPrompt.AgentSelection;
         try {
@@ -402,7 +422,7 @@ export class MasterAgent extends BaseAgent {
         for (const agentType of valid) {
           const jobId = await this.dispatchNext(agentType, {
             masterAgentId,
-            missionContext: sharedMissionContext,
+            missionContext: { ...sharedMissionContext, bdStrategy },
             pipelineContext,
             dryRun: dryRun || undefined,
           });

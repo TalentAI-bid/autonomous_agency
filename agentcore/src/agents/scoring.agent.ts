@@ -122,6 +122,9 @@ export class ScoringAgent extends BaseAgent {
             recentNews: ((companyRecord.rawData as Record<string, unknown>)?.recentNews as string[]) ?? undefined,
             products: ((companyRecord.rawData as Record<string, unknown>)?.products as string[]) ?? undefined,
             description: companyRecord.description ?? undefined,
+            painPoints: ((companyRecord.rawData as Record<string, unknown>)?.painPoints as string[]) ?? undefined,
+            techGapScore: ((companyRecord.rawData as Record<string, unknown>)?.techGapScore as number) ?? undefined,
+            outreachAngle: ((companyRecord.rawData as Record<string, unknown>)?.outreachAngle as string) ?? undefined,
           } : undefined,
         }),
       },
@@ -133,6 +136,19 @@ export class ScoringAgent extends BaseAgent {
     if (opportunityData && opportunityData.buyingIntentScore >= 70) {
       rawScore += 10;
       logger.debug({ contactId, opportunityId: opportunityData.id, bonus: 10 }, 'Applied opportunity scoring bonus');
+    }
+
+    // Pain point + tech gap bonus for sales leads
+    if (useCase === 'sales' && companyRecord) {
+      const companyRaw = (companyRecord.rawData as Record<string, unknown>) ?? {};
+      const painPoints = (companyRaw.painPoints as string[]) ?? [];
+      const techGapScore = (companyRaw.techGapScore as number) ?? 0;
+      if (painPoints.length > 0) {
+        rawScore += Math.min(painPoints.length * 5, 20);
+      }
+      if (techGapScore > 0) {
+        rawScore += Math.round(techGapScore * 0.15);
+      }
     }
 
     let score = Math.round(Math.min(100, Math.max(0, rawScore)));

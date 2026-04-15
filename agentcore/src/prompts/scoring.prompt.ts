@@ -92,6 +92,9 @@ export function buildUserPrompt(data: {
     recentNews?: string[];
     products?: string[];
     description?: string;
+    painPoints?: string[];
+    techGapScore?: number;
+    outreachAngle?: string;
   };
 }): string {
   const yearsExp = data.contact.totalYearsExperience ?? data.contact.experience.reduce((total, exp) => {
@@ -136,7 +139,10 @@ COMPANY ENRICHMENT:
 - Size: ${data.companyEnrichment.size ?? 'Unknown'}
 - Products: ${data.companyEnrichment.products?.join(', ') ?? 'Unknown'}
 - Description: ${data.companyEnrichment.description?.slice(0, 200) ?? 'N/A'}
-- Recent News: ${data.companyEnrichment.recentNews?.slice(0, 3).join('; ') ?? 'N/A'}` : ''}
+- Recent News: ${data.companyEnrichment.recentNews?.slice(0, 3).join('; ') ?? 'N/A'}
+- Pain Points: ${data.companyEnrichment.painPoints?.join(', ') ?? 'Unknown'}
+- Tech Gap Score: ${data.companyEnrichment.techGapScore ?? 'Unknown'}/100
+- Outreach Angle: ${data.companyEnrichment.outreachAngle ?? 'N/A'}` : ''}
 ${data.opportunity ? `
 LINKED OPPORTUNITY:
 - Type: ${data.opportunity.type ?? 'None'}

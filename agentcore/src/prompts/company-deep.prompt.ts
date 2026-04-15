@@ -28,6 +28,9 @@ export interface DeepCompanyProfile {
   employeeCount: string;
   recentFunding: string;
   teamPageUrl: string;
+  painPoints: string[];
+  techGapScore: number;
+  outreachAngle: string;
 }
 
 export function buildSystemPrompt(missionContext?: string): string {
@@ -77,6 +80,17 @@ Rules:
 - Extract culture values from about page or careers page.
 - Extract contactEmail (general company contact email) and hiringContactEmails (HR/recruiting emails found on careers pages, job posts, or contact pages). Use empty string / empty array if not found.
 - For competitors, infer from industry and product descriptions.
+- painPoints: Analyze the company's website, job postings, and available information to detect potential pain points. Look for signals like:
+  * Hiring many engineers → scaling fast, might need external help
+  * Job posts mention 'legacy', 'migration', 'modernization' → tech debt
+  * Website loads slow or looks dated → needs web modernization
+  * Many open DevOps/Cloud roles → infrastructure challenges
+  * Small team but ambitious product → resource constrained
+  * No blog or developer docs → needs developer experience
+  * Job posts mention specific tech you offer → direct match
+  Return as array of short strings. If no pain points detected, return [].
+- techGapScore: Rate 0-100 how likely this company needs external tech services. 0 = big tech company with everything in-house, 50 = medium company that might outsource, 100 = small company with many tech needs and few engineers.
+- outreachAngle: Suggest ONE sentence describing the best angle to approach this company based on detected signals. If not enough data, return empty string.
 
 Always respond with valid JSON.`;
 }

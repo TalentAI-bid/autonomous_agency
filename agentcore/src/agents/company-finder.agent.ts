@@ -439,6 +439,115 @@ export class CompanyFinderAgent extends BaseAgent {
       );
 
       for (const page of pages) {
+        // ── WTTJ: extract company slugs directly from search results HTML ──
+        if (siteKey === 'welcometothejungle') {
+          const slugRegex = /welcometothejungle\.com\/fr\/companies\/([a-zA-Z0-9_-]+)/g;
+          const slugs = new Set<string>();
+          let slugMatch;
+          while ((slugMatch = slugRegex.exec(page.content)) !== null) {
+            const slug = slugMatch[1];
+            if (slug && slug.length > 1 && !['jobs', 'pages', 'media', 'login'].includes(slug)) {
+              slugs.add(slug);
+            }
+          }
+
+          logger.info({ siteKey, slugCount: slugs.size, slugs: Array.from(slugs) },
+            'CompanyFinder: extracted company slugs from WTTJ');
+
+          const wttjCompanyConfig = SITE_CONFIGS['welcometothejungle_company'];
+          if (wttjCompanyConfig) {
+            for (const slug of Array.from(slugs).slice(0, 15)) {
+              const companyPageUrl = `https://www.welcometothejungle.com/fr/companies/${slug}`;
+
+              try {
+                const companyContent = await crawlPage(companyPageUrl, wttjCompanyConfig);
+                if (!companyContent || companyContent.length < 500) continue;
+                if (companyContent.includes('ne fait plus partie de la jungle')) continue;
+
+                // Extract website domain
+                const allUrls = companyContent.match(/https?:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s"')><]*/g) || [];
+                const skipDomains = ['welcometothejungle', 'linkedin', 'facebook', 'twitter', 'instagram',
+                  'youtube', 'axeptio', 'imgix', 'gstatic', 'maps.google', 'googleapis', 'cloudflare',
+                  'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager',
+                  'lafrenchtech', 'eurazeo', '83north'];
+
+                let companyDomain = '';
+                for (const u of allUrls) {
+                  try {
+                    const h = new URL(u).hostname.replace('www.', '');
+                    if (skipDomains.some(d => h.includes(d))) continue;
+                    if (h.length < 4) continue;
+                    companyDomain = h;
+                    break;
+                  } catch { continue; }
+                }
+
+                // Extract LinkedIn
+                const liMatch = companyContent.match(/linkedin\.com\/company\/([a-zA-Z0-9_-]+)/);
+                const linkedinUrl = liMatch ? `https://www.linkedin.com/company/${liMatch[1]}` : '';
+
+                // Extract company name from content (first heading)
+                const nameMatch = companyContent.match(/^#\s+(.+?)$/m) ||
+                                  companyContent.match(/^##\s+(.+?)$/m);
+                const companyName = nameMatch ? nameMatch[1].trim() : slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+                // Cross-site dedupe
+                const key = normalizeCompanyKey(companyName);
+                if (savedCompanyKeys.has(key)) continue;
+                if (isBlockedCompanyName(companyName)) continue;
+                if (companyDomain && (shouldSkipDomain(companyDomain) || isMegaCorp(companyDomain))) continue;
+                savedCompanyKeys.add(key);
+                metrics.uniqueCompanies++;
+
+                try {
+                  const saved = await this.saveOrUpdateCompany({
+                    name: companyName,
+                    domain: companyDomain || undefined,
+                    linkedinUrl: linkedinUrl || undefined,
+                    description: companyContent.slice(0, 500),
+                    dataCompleteness: 15,
+                    rawData: {
+                      discoverySource: 'company-finder',
+                      discoverySite: 'welcometothejungle',
+                      discoveryUrl: companyPageUrl,
+                      sourceType: 'job_board',
+                      hiringSignal: 'job_posting',
+                      wttjSlug: slug,
+                      wttjContent: companyContent.slice(0, 8000),
+                      linkedinCompanyUrl: linkedinUrl,
+                    },
+                  });
+                  metrics.saved++;
+                  metrics.listingsExtracted++;
+
+                  if (!dryRun) {
+                    await this.dispatchNext('enrichment', {
+                      companyId: saved.id,
+                      masterAgentId,
+                      pipelineContext,
+                      dryRun,
+                    });
+                    metrics.dispatched++;
+                  }
+
+                  logger.info({ company: companyName, slug, domain: companyDomain },
+                    'CompanyFinder: saved WTTJ company from profile page');
+                } catch (err) {
+                  logger.warn(
+                    { err: err instanceof Error ? err.message : String(err), company: companyName, slug },
+                    'CompanyFinder: WTTJ company save/dispatch failed',
+                  );
+                }
+              } catch (err) {
+                logger.debug({ slug, err: err instanceof Error ? err.message : String(err) },
+                  'CompanyFinder: WTTJ company page crawl failed');
+              }
+            }
+          }
+          // Skip LLM extraction for WTTJ — slugs give us everything
+          continue;
+        }
+
         const systemPrompt = cfPrompt.buildExtractionSystemPrompt(config.type, allKeywords, {
           industries: missionContext.industries,
           targetCountry,
@@ -533,64 +642,6 @@ export class CompanyFinderAgent extends BaseAgent {
               'CompanyFinder: extracted from page',
             );
 
-            // Deep crawl WTTJ company pages to get domain, team, LinkedIn
-            if (siteKey === 'welcometothejungle') {
-              const wttjCompanyConfig = SITE_CONFIGS['welcometothejungle_company'];
-              if (wttjCompanyConfig) {
-                for (const listing of extracted.slice(0, 10)) {
-                  const slug = listing.companyName
-                    .toLowerCase()
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    .replace(/[^a-z0-9]+/g, '-')
-                    .replace(/^-+|-+$/g, '');
-
-                  if (!slug || slug.length < 2) continue;
-
-                  const companyPageUrl = `https://www.welcometothejungle.com/fr/companies/${slug}`;
-
-                  try {
-                    logger.info({ company: listing.companyName, slug, url: companyPageUrl },
-                      'CompanyFinder: crawling WTTJ company page');
-
-                    const companyContent = await crawlPage(companyPageUrl, wttjCompanyConfig);
-
-                    if (companyContent && companyContent.length > 300) {
-                      // Extract website/domain
-                      const websitePatterns = [
-                        /(?:Site web|Website|site internet)[:\s]*\[?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
-                        /(?:Site web|Website|site internet)[:\s]*\[?(https?:\/\/[^\s\]"')]+)/i,
-                        /\bhttps?:\/\/(?!(?:www\.)?(?:linkedin|facebook|twitter|instagram|youtube|welcometothejungle))[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/,
-                      ];
-
-                      for (const pattern of websitePatterns) {
-                        const match = companyContent.match(pattern);
-                        if (match) {
-                          let domain = (match[1] || match[0]).replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').trim();
-                          if (domain.includes('.') && !domain.includes(' ') && domain.length >= 4) {
-                            listing.companyDomain = domain;
-                            logger.info({ company: listing.companyName, domain, source: 'wttj-company-page' },
-                              'Domain found on WTTJ company page');
-                            break;
-                          }
-                        }
-                      }
-
-                      // Extract LinkedIn
-                      const liMatch = companyContent.match(/https?:\/\/(www\.)?linkedin\.com\/company\/[a-zA-Z0-9_-]+/);
-                      if (liMatch) {
-                        (listing as any).linkedinCompanyUrl = liMatch[0];
-                      }
-
-                      // Store WTTJ content for enrichment to use
-                      (listing as any).wttjContent = companyContent.slice(0, 5000);
-                    }
-                  } catch (err) {
-                    logger.debug({ company: listing.companyName, slug }, 'WTTJ company page crawl failed');
-                  }
-                }
-              }
-            }
-
             // Inline dedupe + filter + save + dispatch per job listing
             for (const l of extracted) {
               if (isBlockedCompanyName(l.companyName)) {
@@ -627,8 +678,6 @@ export class CompanyFinderAgent extends BaseAgent {
                     ...(l.jobTitle && { jobTitle: l.jobTitle }),
                     ...(l.jobLocation && { jobLocation: l.jobLocation }),
                     ...(l.relevanceScore != null && { relevanceScore: l.relevanceScore }),
-                    ...((l as any).wttjContent && { wttjContent: (l as any).wttjContent }),
-                    ...((l as any).linkedinCompanyUrl && { linkedinCompanyUrl: (l as any).linkedinCompanyUrl }),
                   },
                 });
                 metrics.saved++;

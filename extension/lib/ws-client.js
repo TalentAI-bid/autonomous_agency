@@ -25,23 +25,29 @@ export class TalentAIWebSocket {
     try {
       const base = this.serverUrl.replace(/^http/, 'ws').replace(/\/$/, '');
       const url = `${base}/ws/extension?apiKey=${encodeURIComponent(this.apiKey)}`;
+      console.log('[TalentAI ws] opening', { url });
       this.ws = new WebSocket(url);
       this._emitStatus('connecting');
 
       this.ws.addEventListener('open', () => {
         this.reconnectAttempts = 0;
         this.missedPongs = 0;
+        console.log('[TalentAI ws] open ok');
         this._emitStatus('connected');
         this._startHeartbeat();
       });
 
       this.ws.addEventListener('message', (ev) => {
         try {
+          const size = typeof ev.data === 'string' ? ev.data.length : (ev.data?.byteLength ?? -1);
+          const preview = typeof ev.data === 'string' ? ev.data.slice(0, 120) : '[non-string]';
+          console.log('[TalentAI ws] recv', { size, preview });
           const msg = JSON.parse(ev.data);
           if (msg.type === 'pong') {
             this.missedPongs = 0;
             return;
           }
+          console.log('[TalentAI ws] recv_parsed', { type: msg.type });
           this.onMessage?.(msg);
         } catch (err) {
           console.error('[TalentAI] bad message', err, ev.data);
@@ -49,6 +55,7 @@ export class TalentAIWebSocket {
       });
 
       this.ws.addEventListener('close', (ev) => {
+        console.log('[TalentAI ws] close', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
         this._stopHeartbeat();
         this.ws = null;
         if (ev.code === 4401) {
@@ -104,9 +111,11 @@ export class TalentAIWebSocket {
 
   send(obj) {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      console.log('[TalentAI ws] send', { type: obj?.type, taskId: obj?.taskId ?? '-' });
       this.ws.send(JSON.stringify(obj));
       return true;
     }
+    console.log('[TalentAI ws] send_skipped', { readyState: this.ws?.readyState, type: obj?.type });
     return false;
   }
 

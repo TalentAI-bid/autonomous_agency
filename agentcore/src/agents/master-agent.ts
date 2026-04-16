@@ -410,7 +410,30 @@ export class MasterAgent extends BaseAgent {
     //    When true: single company-finder job reads SITE_CONFIGS directly.
     //    When false: legacy SearXNG-based discovery batches (preserved for rollback).
     if (hasDiscovery) {
-      if (env.USE_COMPANY_FINDER) {
+      // Extension-primary regions: the strategist already queued search_companies
+      // tasks against the user's Chrome extension (see block around line 190).
+      // If the extension is actually online, don't *also* fan out crawler-based
+      // discovery — it would re-do the same work via SearxNG/Crawl4AI and pollute
+      // the pipeline with low-signal rows. If the extension is flagged but
+      // offline, fall through to the crawler path so missions don't silently stall.
+      const { isExtensionConnected } = await import('../services/extension-dispatcher.js');
+      const needsExtension =
+        pipelineContext?.sales?.salesStrategy?.dataSourceStrategy?.needsChromeExtension === true;
+      const extensionOnline = needsExtension ? await isExtensionConnected(this.tenantId) : false;
+      const skipCrawlerDiscovery = needsExtension && extensionOnline;
+
+      if (skipCrawlerDiscovery) {
+        logger.info(
+          { masterAgentId, tenantId: this.tenantId },
+          'Extension-primary region with live extension — skipping crawler discovery/company-finder dispatch',
+        );
+        this.sendMessage(null, 'system_alert', {
+          action: 'crawler_discovery_skipped',
+          severity: 'info',
+          message:
+            'Region is extension-primary and the Chrome extension is live. Discovery will run through the extension only.',
+        });
+      } else if (env.USE_COMPANY_FINDER) {
         // New path: LLM-based agent selector picks company-finder and/or candidate-finder.
         // Keyword hints pulled from requirements + any opportunity-focused strategy queries.
         const strategyQueries = pipelineContext?.sales?.salesStrategy?.opportunitySearchQueries ?? [];

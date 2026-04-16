@@ -5,7 +5,7 @@
 
 const DEFAULT_LIMITS = {
   linkedin: {
-    search_companies: { dailyCap: 10, minDelayMs: 4000 },
+    search_companies: { dailyCap: 30, minDelayMs: 4000 },
     fetch_company:    { dailyCap: 100, minDelayMs: 4000 },
   },
   gmaps: {

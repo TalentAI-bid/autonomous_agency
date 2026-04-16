@@ -62,6 +62,8 @@ async function extensionPlugin(fastify: FastifyInstance) {
         return;
       }
 
+      logger.debug({ sessionId: session.id, type: msg.type }, 'extension_ws_recv');
+
       if (msg.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
         return;
@@ -71,8 +73,22 @@ async function extensionPlugin(fastify: FastifyInstance) {
         const taskId = msg.taskId as string;
         const status = msg.status as 'completed' | 'failed';
         if (!taskId || !status) return;
+        logger.info(
+          {
+            sessionId: session.id,
+            taskId,
+            status,
+            hasResult: !!msg.result,
+            errorPreview: typeof msg.error === 'string' ? msg.error.slice(0, 200) : undefined,
+          },
+          'extension_task_result_received',
+        );
         try {
           if (status === 'completed') {
+            logger.debug(
+              { taskId, resultKeys: Object.keys((msg.result as Record<string, unknown>) ?? {}) },
+              'extension_task_result_ingesting',
+            );
             await onExtensionTaskComplete(taskId, {
               status: 'completed',
               result: (msg.result as Record<string, unknown>) ?? {},

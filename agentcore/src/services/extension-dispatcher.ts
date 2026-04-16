@@ -1,6 +1,6 @@
 import { eq, and, asc, desc, isNull } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
+import { companies, extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
 import type { ExtensionTask } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
@@ -200,6 +200,10 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
   const [task] = await import('../config/database.js').then(({ db }) =>
     db.select().from(extensionTasks).where(eq(extensionTasks.id, taskId)).limit(1),
   );
+  logger.debug(
+    { taskId, found: !!task, tenantId: task?.tenantId, site: task?.site, type: task?.type },
+    'extension_task_complete_start',
+  );
   if (!task) {
     logger.warn({ taskId }, 'Extension task_result for unknown task');
     return;
@@ -219,6 +223,7 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
       })
       .where(eq(extensionTasks.id, task.id));
   });
+  logger.debug({ taskId: task.id, newStatus: payload.status }, 'extension_task_status_updated');
 
   if (payload.status !== 'completed') return;
 
@@ -262,12 +267,49 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
   const site = task.site as ExtensionSite;
   const type = task.type as ExtensionTaskType;
 
+  logger.debug(
+    { taskId: task.id, site, type, resultKeys: Object.keys(result ?? {}) },
+    'ingest_start',
+  );
+
   if (site === 'linkedin' && type === 'search_companies') {
-    const companies = (result.companies ?? []) as Array<Record<string, unknown>>;
+    const rawCompanies = (result.companies ?? []) as Array<Record<string, unknown>>;
+    logger.info({ taskId: task.id, rawCount: rawCompanies.length }, 'ingest_linkedin_search_companies_raw');
     let saved = 0;
-    for (const c of companies) {
+    for (const c of rawCompanies) {
       const name = String(c.name ?? '').trim();
       if (!name || name.length < 2) continue;
+
+      // Dedup by linkedinUrl first. saveOrUpdateCompanyStatic only dedupes by
+      // domain/name, and search results rarely carry a domain, so two sessions
+      // that return "Acme Corp." and "Acme Corporation" with the same
+      // linkedin_url would otherwise produce two rows. Skipping entirely also
+      // preserves enriched fields (description, website, funding) that an
+      // earlier fetch_company run may already have populated on the existing
+      // row — the search-result payload is strictly slimmer.
+      const linkedinUrl = typeof c.linkedinUrl === 'string' ? c.linkedinUrl : undefined;
+      if (linkedinUrl) {
+        const [existing] = await withTenant(task.tenantId, async (tx) => {
+          return tx
+            .select({ id: companies.id })
+            .from(companies)
+            .where(
+              and(
+                eq(companies.tenantId, task.tenantId),
+                eq(companies.linkedinUrl, linkedinUrl),
+              ),
+            )
+            .limit(1);
+        });
+        if (existing) {
+          logger.debug(
+            { linkedinUrl, existingId: existing.id },
+            'Skipped duplicate company from LinkedIn extension (dedup by linkedinUrl)',
+          );
+          continue;
+        }
+      }
+
       try {
         const savedRow = await saveOrUpdateCompanyStatic(
           task.tenantId,
@@ -276,7 +318,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
             domain: typeof c.website === 'string' ? extractDomain(c.website) : undefined,
             industry: (c.industry as string) ?? undefined,
             size: (c.size as string) ?? undefined,
-            linkedinUrl: (c.linkedinUrl as string) ?? undefined,
+            linkedinUrl,
             rawData: { source: 'linkedin_extension', ...c },
           },
           task.masterAgentId ?? undefined,
@@ -286,26 +328,58 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
           masterAgentId: task.masterAgentId ?? undefined,
           source: 'linkedin_extension',
         });
+        logger.debug(
+          { taskId: task.id, companyId: savedRow.id, name, linkedinUrl },
+          'ingest_saved_company',
+        );
+
+        // Auto-chain the LinkedIn About-page fetch so enrichment gets a real
+        // website/domain instead of having to guess from the name. Runs
+        // inside the existing fetch_company daily cap (100); no cap change.
+        // companyId threads through so the detail task updates this exact
+        // row by id rather than re-running fuzzy domain/name dedup.
+        if (linkedinUrl) {
+          try {
+            await enqueueExtensionTask({
+              tenantId: task.tenantId,
+              masterAgentId: task.masterAgentId ?? undefined,
+              site: 'linkedin',
+              type: 'fetch_company',
+              params: { linkedinUrl, companyId: savedRow.id },
+              priority: 3,
+            });
+          } catch (err) {
+            logger.debug({ err, linkedinUrl }, 'Failed to auto-queue fetch_company (non-fatal)');
+          }
+        }
+
         saved++;
       } catch (err) {
         logger.debug({ err, name }, 'Skipped invalid company from LinkedIn extension');
       }
     }
-    return { extracted: companies.length, saved };
+    return { extracted: rawCompanies.length, saved };
   }
 
   if (site === 'linkedin' && type === 'fetch_company') {
     const c = result as Record<string, unknown>;
     const name = String(c.name ?? '').trim();
     if (!name) return { extracted: 0, saved: 0 };
+    const p = task.params as { linkedinUrl?: string; companyId?: string };
+    // When auto-queued by the search_companies branch, params.companyId is
+    // set — pass it through so the detail update targets the exact row
+    // rather than re-running fuzzy domain/name dedup. If absent (e.g.
+    // manual enqueue), saveOrUpdateCompanyStatic falls back to its usual
+    // id → domain → name match.
     await saveOrUpdateCompanyStatic(
       task.tenantId,
       {
+        id: p.companyId,
         name,
         domain: typeof c.website === 'string' ? extractDomain(c.website) : undefined,
         industry: (c.industry as string) ?? undefined,
         size: (c.size as string) ?? undefined,
-        linkedinUrl: (c.linkedinUrl as string) ?? (task.params as { linkedinUrl?: string }).linkedinUrl,
+        linkedinUrl: (c.linkedinUrl as string) ?? p.linkedinUrl,
         description: (c.description as string) ?? undefined,
         rawData: { source: 'linkedin_extension_detail', ...c },
       },
@@ -415,5 +489,26 @@ export async function findSessionByApiKeyHash(apiKeyHash: string): Promise<{ id:
     .where(and(eq(extensionSessions.apiKeyHash, apiKeyHash), isNull(extensionSessions.revokedAt)))
     .limit(1);
   return row ?? null;
+}
+
+// Returns true iff the tenant currently has ≥1 live (connected, non-revoked)
+// extension session. Used by the master-agent to decide whether to skip
+// crawler-based discovery when the strategist has marked the mission as
+// extension-primary. Scoped by tenantId in the WHERE clause; no RLS helper
+// needed because only a boolean leaks.
+export async function isExtensionConnected(tenantId: string): Promise<boolean> {
+  const { db } = await import('../config/database.js');
+  const [row] = await db
+    .select({ id: extensionSessions.id })
+    .from(extensionSessions)
+    .where(
+      and(
+        eq(extensionSessions.tenantId, tenantId),
+        eq(extensionSessions.connected, true),
+        isNull(extensionSessions.revokedAt),
+      ),
+    )
+    .limit(1);
+  return !!row;
 }
 

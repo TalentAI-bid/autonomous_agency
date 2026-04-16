@@ -12,6 +12,7 @@
 
   window.__talentaiRun = async function run(params) {
     const limit = Math.min(50, params.limit || 20);
+    console.log('[TalentAI cs] li/search start', { limit, url: location.href, params });
 
     // Wait for the search results container (selector varies across LI redesigns).
     const container = await Promise.race([
@@ -21,6 +22,11 @@
       u.waitForSelector('div.search-results__list', { timeout: 10000 }).catch(() => null),
       u.waitForSelector('main', { timeout: 10000 }),
     ]);
+    console.log('[TalentAI cs] li/search container', {
+      matched: !!container,
+      url: location.href,
+      title: document.title,
+    });
 
     if (!container) {
       return { companies: [], debug: collectDebug({ reason: 'no_container_found' }) };
@@ -48,6 +54,7 @@
         break;
       }
     }
+    console.log('[TalentAI cs] li/search cards', { count: cards.length, selector: matchedSelector });
 
     // Last-ditch fallback: any anchor pointing at a /company/ URL.
     if (cards.length === 0) {
@@ -62,9 +69,13 @@
           return true;
         });
       if (cards.length > 0) matchedSelector = 'fallback_a_company_href';
+      if (cards.length > 0) {
+        console.log('[TalentAI cs] li/search fallback_anchors', { count: cards.length });
+      }
     }
 
     if (cards.length === 0) {
+      console.log('[TalentAI cs] li/search zero_data', { cardCount: 0, matchedSelector });
       return { companies: [], debug: collectDebug({ reason: 'no_cards_matched', triedSelectors: cardSelectors }) };
     }
 
@@ -111,9 +122,12 @@
         logoUrl,
         rawMeta: metaLines,
       });
+      const pushed = companies[companies.length - 1];
+      console.log('[TalentAI cs] li/search extracted', { name: pushed.name, linkedinUrl: pushed.linkedinUrl });
     }
 
     if (companies.length === 0) {
+      console.log('[TalentAI cs] li/search zero_data', { cardCount: cards.length, matchedSelector });
       return {
         companies: [],
         debug: collectDebug({
@@ -125,6 +139,7 @@
       };
     }
 
+    console.log('[TalentAI cs] li/search done', { extracted: companies.length, matchedSelector });
     return { companies, debug: { matchedSelector, cardsScanned: cards.length, extracted: companies.length } };
   };
 

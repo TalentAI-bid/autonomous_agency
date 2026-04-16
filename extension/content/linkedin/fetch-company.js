@@ -5,6 +5,7 @@
   const u = window.__talentaiUtils;
 
   window.__talentaiRun = async function run(params) {
+    console.log('[TalentAI cs] li/fetch start', { href: location.href, linkedinUrl: params?.linkedinUrl });
     // Expect we're already on /company/<slug>/. Navigate to /about/ for fuller detail.
     const currentUrl = new URL(location.href);
     if (!currentUrl.pathname.includes('/about')) {
@@ -25,6 +26,7 @@
       u.waitForSelector('.org-about-company-module__company-details', { timeout: 10000 }).catch(() => null),
       u.waitForSelector('main', { timeout: 10000 }),
     ]);
+    console.log('[TalentAI cs] li/fetch container_ready', { title: document.title, url: location.href });
 
     const name =
       u.extractText(document, 'h1.org-top-card-summary__title') ||
@@ -52,6 +54,16 @@
       .find((a) => /employee/i.test((a.textContent || '')));
     const employeeCountMatch = (empLink?.textContent || '').match(/([\d,]+)\s*employee/i);
     const currentEmployees = employeeCountMatch ? parseInt(employeeCountMatch[1].replace(/,/g, ''), 10) : null;
+
+    console.log('[TalentAI cs] li/fetch extracted', {
+      name,
+      website,
+      industry,
+      size,
+      headquarters,
+      hasDescription: !!description,
+      currentEmployees,
+    });
 
     return {
       name,

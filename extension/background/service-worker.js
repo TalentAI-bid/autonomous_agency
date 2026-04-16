@@ -62,6 +62,7 @@ function setStatus(status) {
 }
 
 async function handleMessage(msg) {
+  console.log('[TalentAI sw] ws_recv', { type: msg?.type, taskId: msg?.taskId });
   if (msg.type === 'welcome') return;
   if (msg.type === 'revoked') {
     // WS-side key is dead, but keep the JWT so the popup can auto re-provision
@@ -76,6 +77,7 @@ async function handleMessage(msg) {
     return;
   }
   if (msg.type === 'task') {
+    console.log('[TalentAI sw] routing', { taskId: msg.taskId, site: msg.site, taskType: msg.taskType });
     await processTask(msg);
     return;
   }
@@ -94,6 +96,7 @@ async function processTask(msg) {
   const { taskId, site, taskType, params, masterAgentName } = msg;
   const adapterKey = `${site}:${taskType}`;
   const files = ADAPTER_FILES[adapterKey];
+  console.log('[TalentAI sw] adapter', { adapterKey, hasFiles: !!files, taskId });
 
   if (!files) {
     ws?.send({ type: 'task_result', taskId, status: 'failed', error: `no_adapter_for:${adapterKey}` });
@@ -123,6 +126,7 @@ async function processTask(msg) {
   try {
     const target = buildUrl(site, taskType, params);
     tab = await openOrFocusTab(target, site);
+    console.log('[TalentAI sw] tab', { tabId: tab?.id, url: target });
 
     // Stash params for the injected adapter (via chrome.storage.session if available)
     const storageKey = `task_${taskId}`;
@@ -132,6 +136,12 @@ async function processTask(msg) {
     const resultMsg = await new Promise(async (resolve) => {
       const listener = (m, _sender, _sendResponse) => {
         if (m && m.kind === 'scrape_result' && m.taskId === taskId) {
+          console.log('[TalentAI sw] adapter_result', {
+            taskId: m.taskId,
+            status: m.status,
+            hasResult: !!m.result,
+            error: m.error ?? null,
+          });
           chrome.runtime.onMessage.removeListener(listener);
           clearTimeout(timeout);
           resolve(m);
@@ -145,6 +155,7 @@ async function processTask(msg) {
       }, 180_000);
 
       try {
+        console.log('[TalentAI sw] inject', { files, taskId });
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           files,
@@ -183,6 +194,7 @@ async function processTask(msg) {
 
     await rateLimiter.record(site, taskType);
 
+    console.log('[TalentAI sw] ws_send_task_result', { taskId, status: resultMsg.status });
     ws?.send({
       type: 'task_result',
       taskId,

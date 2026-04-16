@@ -113,8 +113,23 @@
 
     const companies = [];
     for (const card of cards.slice(0, limit)) {
-      const anchor = card.querySelector('a[href*="/company/"]');
-      if (!anchor) continue;
+      // LinkedIn renders two a[href*="/company/"] per card: the logo link
+      // (aria-hidden, empty text) and the name link (has actual company name).
+      // querySelector returns the first match — the logo — so we loop to find
+      // the one with actual text content.
+      const allAnchors = card.querySelectorAll('a[href*="/company/"]');
+      let anchor = null;
+      for (const a of allAnchors) {
+        const text = (a.textContent || '').trim();
+        if (text.length > 1 && a.getAttribute('aria-hidden') !== 'true') {
+          anchor = a;
+          break;
+        }
+      }
+      if (!anchor) {
+        anchor = allAnchors[0];
+        if (!anchor) continue;
+      }
       const linkedinUrl = u.absoluteUrl(anchor.getAttribute('href') || '').split('?')[0];
       const name =
         u.extractText(card, '.entity-result__title-text a span[aria-hidden="true"]') ||

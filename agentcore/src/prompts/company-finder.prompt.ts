@@ -99,12 +99,27 @@ BAD examples (NEVER produce these):
   ✗ "best devops engineer 2025"                         ← contains year + superlative
   ✗ any keyword > 4 words, > 60 chars, or containing the word "best", "top", "largest", "list of", or any 4-digit year between 2020 and 2039
 
+KEYWORD ADAPTATION BY STRATEGY:
+The \`BD Strategy\` field in the user message tells you which source we're scraping. Adapt keywords accordingly:
+
+- \`bdStrategy = "hiring_signal"\` (searching JOB BOARDS — WTTJ, freework, glassdoor, stepstone, etc.):
+  Keywords MUST be SHORT JOB TITLES: "devops engineer", "cloud architect", "SRE", "data engineer", "frontend developer", "account executive", "BDR".
+
+- \`bdStrategy = "industry_target"\` (searching COMPANY REGISTRIES — societe_com, uk_companies_house, northdata, einforma, ariregister):
+  Keywords MUST be INDUSTRY / SECTOR TERMS: "technology consulting", "software development", "artificial intelligence", "blockchain", "cloud computing", "IT services", "data analytics", "cybersecurity", "fintech", "SaaS", "managed services", "digital transformation".
+  Do NOT use job titles for this mode — company registries index companies by name/sector, not by the roles they employ. Job titles will produce ZERO results.
+
+- \`bdStrategy = "hybrid"\` (both sources):
+  Put SHORT JOB TITLES in \`en\` and INDUSTRY/SECTOR TERMS in \`local\` (or the reverse when the target country's primary language isn't English). The agent will mix them.
+
+If \`BD Strategy\` is not supplied, default to \`hybrid\`.
+
 CRITICAL RULES FOR \`sitesToCrawl\`:
 - Each entry MUST be a key from this list (the agent will look it up in its in-process SITE_CONFIGS registry and refuse to use any unlisted key):
   ${siteList}
 - These are REAL job boards / company databases that the agent will scrape DIRECTLY via Crawl4AI. The agent does NOT and will not perform Google searches for primary discovery — it goes to these sites and uses their built-in search.
 - Pick 3–6 sites maximum that match \`targetCountry\` (i.e., the site's \`countries\` field includes targetCountry or 'all').
-- For recruitment missions: prefer job boards (welcometothejungle, freework, linkedin_jobs, glassdoor, stepstone, dice, jobbank_ca, etc).
+- For recruitment missions: prefer job boards (welcometothejungle, freework, glassdoor, stepstone, dice, jobbank_ca, etc).
 - For b2b_sales / startup_sales: include BOTH job boards (signals of hiring = budget + pain) AND company databases (societe_com, uk_companies_house, northdata, einforma, ariregister).
 
 Return JSON ONLY — no prose, no markdown fences, no commentary.
@@ -118,7 +133,7 @@ EXAMPLE RESPONSE (this is the EXACT shape you must return — return an OBJECT, 
   },
   "targetCountry": "fr",
   "targetCities": ["Paris", "Lyon"],
-  "sitesToCrawl": ["welcometothejungle", "freework", "linkedin_jobs", "glassdoor"],
+  "sitesToCrawl": ["welcometothejungle", "freework", "glassdoor"],
   "reasoning": "Recruitment mission targeting French companies hiring DevOps roles"
 }
 
@@ -132,10 +147,12 @@ export function buildMissionAnalyzerUserPrompt(
     industries?: string[];
     targetRoles?: string[];
     keywords?: string[];
+    bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid';
   },
 ): string {
   const lines: string[] = [];
   lines.push(`Mission: ${missionContext.mission}`);
+  lines.push(`BD Strategy: ${missionContext.bdStrategy ?? 'hybrid'}`);
   if (missionContext.locations?.length) {
     lines.push(`Target locations: ${missionContext.locations.join(', ')}`);
   }

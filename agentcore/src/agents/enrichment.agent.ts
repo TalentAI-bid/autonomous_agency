@@ -207,8 +207,8 @@ export class EnrichmentAgent extends BaseAgent {
     if (contactCompanyName) {
       try {
         // Domain from company-finder — no SERP needed
-        const companyDomain = knownCompanyDomain;
-        const companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
+        let companyDomain: string | undefined = knownCompanyDomain;
+        let companyUrl: string | undefined = companyDomain ? `https://${companyDomain}` : undefined;
 
         let homepageContent = '';
         let aboutPageContent = '';
@@ -216,6 +216,29 @@ export class EnrichmentAgent extends BaseAgent {
         let teamPageContent = '';
         let linkedinCompanyContent = '';
         let linkedinCompanyUrl = '';
+
+        // Last-resort: Brave search to find the company website when neither
+        // the job board nor the company registry provided a domain.
+        if (!companyDomain && contactCompanyName.length > 2) {
+          const resolved = await this.resolveDomainViaBrave(contactCompanyName);
+          if (resolved) {
+            companyDomain = resolved;
+            companyUrl = `https://${resolved}`;
+            if (contact.companyId) {
+              try {
+                await withTenant(this.tenantId, async (tx) => {
+                  await tx.update(companies)
+                    .set({ domain: resolved, updatedAt: new Date() })
+                    .where(eq(companies.id, contact.companyId!));
+                });
+              } catch (err) {
+                logger.debug({ err, contactId, companyId: contact.companyId }, 'Failed to persist Brave-resolved domain');
+              }
+            }
+            logger.info({ contactId, companyName: contactCompanyName, domain: resolved, source: 'brave' },
+              'Domain resolved via Brave search');
+          }
+        }
 
         if (companyUrl) {
           homepageContent = await this.scrapeUrl(companyUrl);
@@ -981,7 +1004,27 @@ export class EnrichmentAgent extends BaseAgent {
     // Domain from company-finder — no SERP needed
     let companyDomain = company.domain ?? undefined;
     if (!companyDomain) {
-      logger.info({ companyId, companyName }, 'No domain from company-finder — proceeding without domain');
+      logger.info({ companyId, companyName }, 'No domain from company-finder — trying Brave fallback');
+    }
+
+    // Last-resort: Brave search to find the company website when neither
+    // the job board nor the company registry provided a domain.
+    if (!companyDomain && companyName.length > 2) {
+      const resolved = await this.resolveDomainViaBrave(companyName);
+      if (resolved) {
+        companyDomain = resolved;
+        try {
+          await withTenant(this.tenantId, async (tx) => {
+            await tx.update(companies)
+              .set({ domain: resolved, updatedAt: new Date() })
+              .where(eq(companies.id, companyId));
+          });
+        } catch (err) {
+          logger.debug({ err, companyId }, 'Failed to persist Brave-resolved domain');
+        }
+        logger.info({ companyId, companyName, domain: resolved, source: 'brave' },
+          'Domain resolved via Brave search');
+      }
     }
     const companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
 
@@ -1453,6 +1496,74 @@ export class EnrichmentAgent extends BaseAgent {
         }
       })(),
     ]);
+  }
+
+  /**
+   * Last-resort domain resolver via Brave HTML search.
+   * Used only when neither the job-board nor the company-registry gave us a
+   * domain. Pure native fetch — no Crawl4AI, no SearXNG. Returns null on any
+   * failure. The candidate host must match at least one ≥3-char token from
+   * the company name (prevents picking random listicle hosts).
+   */
+  private async resolveDomainViaBrave(companyName: string): Promise<string | null> {
+    const BRAVE_SKIP_HOSTS = new Set([
+      'search.brave.com', 'brave.com', 'google.com', 'linkedin.com',
+      'facebook.com', 'twitter.com', 'x.com', 'instagram.com', 'youtube.com',
+      'indeed.com', 'glassdoor.com', 'glassdoor.co.uk', 'welcometothejungle.com',
+      'monster.com', 'wikipedia.org', 'reddit.com', 'crunchbase.com',
+      'bloomberg.com', 'companieshouse.gov.uk', 'northdata.com',
+      'amazon.com', 'apple.com', 'microsoft.com',
+      'w3.org', 'wikidata.org', 'schema.org',
+      'googleapis.com', 'gstatic.com',
+      'stepstone.de', 'irishjobs.ie', 'infojobs.net',
+      'dice.com', 'jobbank.gc.ca', 'societe.com',
+    ]);
+    const BRAVE_SKIP_SUBSTRINGS = [
+      'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager',
+      'intercomcdn', 'intercomassets', 'sj-cdn.net',
+    ];
+
+    try {
+      const braveUrl = `https://search.brave.com/search?q=${encodeURIComponent(companyName + ' official website')}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const braveResponse = await fetch(braveUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Accept': 'text/html',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!braveResponse.ok) return null;
+      const html = await braveResponse.text();
+      const urlMatches = html.match(/https?:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) ?? [];
+
+      const nameWords = companyName.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+      if (nameWords.length === 0) return null;
+
+      for (const u of urlMatches) {
+        try {
+          const h = new URL(u).hostname.replace(/^www\./, '').toLowerCase();
+          if (h.length < 4) continue;
+          if (BRAVE_SKIP_HOSTS.has(h)) continue;
+          if (BRAVE_SKIP_SUBSTRINGS.some((s) => h.includes(s))) continue;
+
+          const domainBase = h.replace(/\.[a-z]+$/, '').replace(/[^a-z0-9]/g, '');
+          const matches = nameWords.some((w) => domainBase.includes(w));
+          if (!matches) continue;
+
+          return h;
+        } catch {
+          continue;
+        }
+      }
+      return null;
+    } catch (err) {
+      logger.debug({ err, companyName }, 'Brave domain resolution failed');
+      return null;
+    }
   }
 
   private async runSalesSourceSearches(

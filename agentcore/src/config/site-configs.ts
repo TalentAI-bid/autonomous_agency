@@ -171,7 +171,7 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     nextPageParam: 'p',
     nextPageIncrement: 1,
     delayBetweenPages: 8000,
-    countries: ['us', 'gb', 'ca', 'au'],
+    countries: ['us'],
     headers: { 'Accept-Language': 'en-US,en;q=0.9' },
   },
 

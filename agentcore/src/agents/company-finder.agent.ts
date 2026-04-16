@@ -237,7 +237,7 @@ export class CompanyFinderAgent extends BaseAgent {
         },
         targetCountry: ((missionContext.locations?.[0] ?? '').toLowerCase().slice(0, 2)) || '',
         targetCities: missionContext.locations ?? [],
-        sitesToCrawl: ['welcometothejungle', 'linkedin_jobs', 'glassdoor'],
+        sitesToCrawl: ['welcometothejungle', 'glassdoor'],
         reasoning: 'Recovered from malformed LLM response (array instead of object)',
       };
     }
@@ -251,7 +251,7 @@ export class CompanyFinderAgent extends BaseAgent {
         searchKeywords: { en: [], local: [] },
         targetCountry: '',
         targetCities: missionContext.locations ?? [],
-        sitesToCrawl: ['welcometothejungle', 'linkedin_jobs', 'glassdoor'],
+        sitesToCrawl: ['welcometothejungle', 'glassdoor'],
         reasoning: 'Defaulted from null analysis',
       };
     }
@@ -266,7 +266,7 @@ export class CompanyFinderAgent extends BaseAgent {
     }
     if (!Array.isArray(analysis.sitesToCrawl) || analysis.sitesToCrawl.length === 0) {
       logger.warn('CompanyFinder: analysis.sitesToCrawl missing — using defaults');
-      analysis.sitesToCrawl = ['welcometothejungle', 'linkedin_jobs', 'glassdoor'];
+      analysis.sitesToCrawl = ['welcometothejungle', 'glassdoor'];
     }
     if (typeof analysis.targetCountry !== 'string') {
       analysis.targetCountry = '';
@@ -334,7 +334,7 @@ export class CompanyFinderAgent extends BaseAgent {
 
     // Hard fallback: if STILL empty, use a hard-coded set of always-on job boards.
     if (sitesToCrawl.length === 0) {
-      const hardFallback = ['linkedin_jobs', 'glassdoor'].filter((k) => SITE_CONFIGS[k]);
+      const hardFallback = ['welcometothejungle', 'glassdoor'].filter((k) => SITE_CONFIGS[k]);
       if (hardFallback.length > 0) {
         sitesToCrawl = hardFallback;
         logger.warn(
@@ -521,19 +521,25 @@ export class CompanyFinderAgent extends BaseAgent {
                   }
                 }
 
-                // Fallback: scan all URLs if no "View website" link
+                // Fallback: scan all URLs if no "View website" link.
+                // Require the candidate host to contain at least one ≥3-char token
+                // from the company name — prevents picking intercom/w3/sj-cdn hosts.
                 if (!companyDomain) {
                   const allUrls = companyContent.match(/https?:\/\/[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s"')><]*/g) || [];
                   const skipDomains = ['welcometothejungle', 'wttj', 'solutions.welcometothejungle',
                     'linkedin', 'facebook', 'twitter', 'instagram',
                     'youtube', 'axeptio', 'imgix', 'gstatic', 'maps.google', 'googleapis', 'cloudflare',
-                    'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager'];
+                    'amazonaws', 'cdn.', 'fonts.', 'analytics', 'doubleclick', 'googletagmanager',
+                    'w3.org', 'schema.org', 'sj-cdn.net', 'intercomcdn', 'intercomassets'];
+                  const nameWords = companyName.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);
 
                   for (const u of allUrls) {
                     try {
-                      const h = new URL(u).hostname.replace('www.', '');
+                      const h = new URL(u).hostname.replace('www.', '').toLowerCase();
                       if (skipDomains.some(d => h.includes(d))) continue;
                       if (h.length < 4) continue;
+                      const domainBase = h.replace(/\.[a-z]+$/, '').replace(/[^a-z0-9]/g, '');
+                      if (nameWords.length > 0 && !nameWords.some(w => domainBase.includes(w))) continue;
                       companyDomain = h;
                       break;
                     } catch { continue; }

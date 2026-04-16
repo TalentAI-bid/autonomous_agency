@@ -8,6 +8,7 @@ import {
 } from '../prompts/strategist.prompt.js';
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
 import { createRedisConnection } from '../queues/setup.js';
+import { SMART_MODEL } from '../tools/together-ai.tool.js';
 import logger from '../utils/logger.js';
 
 const redis = createRedisConnection();
@@ -53,7 +54,7 @@ export class StrategistAgent extends BaseAgent {
     const strategy = await this.extractJSON<SalesStrategy>([
       { role: 'system', content: buildInitialStrategySystemPrompt() },
       { role: 'user', content: buildInitialStrategyUserPrompt(ctx, mission) },
-    ], undefined, { model: 'deepseek.v3.2', temperature: 0.4 });
+    ], undefined, { model: SMART_MODEL, temperature: 0.4 });
 
     // Save to masterAgent.config.salesStrategy
     await withTenant(this.tenantId, async (tx) => {

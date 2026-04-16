@@ -81,4 +81,11 @@ export interface SalesStrategy {
     targetReplyRate?: number;
     targetConversionRate?: number;
   };
+  dataSourceStrategy?: {
+    primaryRegion: string;
+    availableSources: string[];
+    expectedQuality: 'excellent' | 'good' | 'medium' | 'limited';
+    needsChromeExtension: boolean;
+    userNotes: string;
+  };
 }

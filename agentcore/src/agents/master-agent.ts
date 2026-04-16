@@ -157,6 +157,34 @@ export class MasterAgent extends BaseAgent {
             pipelineContext.sales.salesStrategy = strategy;
             logger.info({ masterAgentId, queryCount: strategy.opportunitySearchQueries?.length ?? 0 }, 'StrategistAgent initial strategy completed (inline)');
 
+            // Always tell the user which data sources the strategist picked.
+            // If the region requires the Chrome-extension LinkedIn scraper, flag it.
+            if (strategy.dataSourceStrategy) {
+              const ds = strategy.dataSourceStrategy;
+              this.sendMessage(null, 'system_alert', {
+                action: 'data_sources_selected',
+                severity: ds.needsChromeExtension ? 'warning' : 'info',
+                region: ds.primaryRegion,
+                expectedQuality: ds.expectedQuality,
+                availableSources: ds.availableSources,
+                needsChromeExtension: ds.needsChromeExtension,
+                message: ds.userNotes ||
+                  `For the ${(ds.primaryRegion ?? '').toUpperCase()} mission I'll use: ${(ds.availableSources || []).join(', ') || '(no public sources available)'}` +
+                  (ds.needsChromeExtension
+                    ? ` — please activate the Chrome-extension LinkedIn scraper for viable coverage.`
+                    : ''),
+              });
+              logger.info(
+                {
+                  masterAgentId,
+                  region: ds.primaryRegion,
+                  availableSources: ds.availableSources,
+                  needsChromeExtension: ds.needsChromeExtension,
+                },
+                'Data-sources-selected notice sent to user',
+              );
+            }
+
             // If strategist recommended a BD strategy and user didn't set one, save it to config
             if (strategy.bdStrategy && !agentConfig.bdStrategy) {
               try {

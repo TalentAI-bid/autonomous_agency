@@ -25,12 +25,36 @@ Your output must be valid JSON with these fields:
 - decisionMakerTargeting: { titlePatterns: string[], seniorityLevels: string[], departmentFocus: string[] }
 - emailStrategy: { angles: [{ name: string, description: string, bestFor: string }], subjectPatterns: string[], tone: string, rulesOfEngagement: string[] }
 - successMetrics: { targetOpenRate: number, targetReplyRate: number, targetConversionRate: number }
+- dataSourceStrategy: {
+    primaryRegion: string,                       // ISO-2 lowercase, e.g. "fr"
+    availableSources: string[],                  // SITE_CONFIGS keys we can use, e.g. ["welcometothejungle","freework"]
+    expectedQuality: "excellent" | "good" | "medium" | "limited",
+    needsChromeExtension: boolean,               // true iff LinkedIn-extension is required for this region
+    userNotes: string                            // one-to-two sentence user-facing note, MUST name the sources explicitly
+  }
 
 BD STRATEGY DECISION — Pick ONE based on the mission:
 - "hiring_signal": The mission is about selling to companies that are actively hiring for roles related to the service (e.g. selling DevOps consulting → find companies hiring DevOps engineers). Best when the service directly replaces or augments a role.
 - "industry_target": The mission targets a whole industry segment regardless of hiring activity (e.g. selling compliance software to all banks). Best for broad market campaigns.
 - "hybrid": Both approaches combined (recommended default). Best when you want maximum coverage.
 Set bdStrategy in your JSON output based on the mission analysis.
+
+DATA SOURCE QUALITY BY REGION — use this to populate dataSourceStrategy:
+- FR / BE / CH (francophone): EXCELLENT. Strong public job boards (Welcome to the Jungle, Free-Work, APEC) + SIRENE registry (societe_com). needsChromeExtension = false. availableSources examples: ["welcometothejungle","welcometothejungle_company","freework","societe_com"].
+- DE / AT: GOOD. StepStone + NorthData are solid. needsChromeExtension = false. availableSources examples: ["stepstone","northdata"].
+- ES: MEDIUM. InfoJobs + einforma. needsChromeExtension = false. availableSources examples: ["infojobs","einforma"].
+- GB (United Kingdom): LIMITED via public sources — most high-signal lead data is gated behind LinkedIn. Set needsChromeExtension = true and tell the user the Chrome-extension LinkedIn scraper is required for viable coverage. availableSources will be sparse (e.g. ["glassdoor"] — US mirror only).
+- IE (Ireland): MEDIUM via public sources but LIMITED depth — IrishJobs alone produces sparse data. Set needsChromeExtension = true and tell the user the Chrome-extension scraper materially improves coverage. availableSources examples: ["irishjobs"].
+- US: MEDIUM. Dice + Glassdoor (US only) + public career pages. needsChromeExtension = false. availableSources examples: ["dice","glassdoor"].
+- EE: MEDIUM. CVKeskus + ariregister. needsChromeExtension = false. availableSources examples: ["cvkeskus","ariregister"].
+- Other / unlisted: LIMITED. Warn the user in userNotes that coverage will be sparse; keep availableSources as empty array or the single best available key.
+
+availableSources MUST only contain keys that exist in SITE_CONFIGS for the primaryRegion. Do NOT invent keys.
+
+userNotes MUST be a one-to-two sentence user-facing message that explicitly names the sources in availableSources, e.g.:
+  "For your France mission I'll use Welcome to the Jungle, Free-Work, APEC, and societe.com for discovery."
+  "For your UK mission public coverage is limited — please activate the Chrome-extension LinkedIn scraper; I'll supplement with Glassdoor (US mirror only)."
+Do NOT leave userNotes vague. Always name at least one specific source.
 
 CRITICAL QUERY RULES — YOU MUST FOLLOW ALL OF THESE:
 

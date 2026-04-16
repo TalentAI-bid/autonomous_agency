@@ -105,7 +105,7 @@ The \`BD Strategy\` field in the user message tells you which source we're scrap
 - \`bdStrategy = "hiring_signal"\` (searching JOB BOARDS — WTTJ, freework, glassdoor, stepstone, etc.):
   Keywords MUST be SHORT JOB TITLES: "devops engineer", "cloud architect", "SRE", "data engineer", "frontend developer", "account executive", "BDR".
 
-- \`bdStrategy = "industry_target"\` (searching COMPANY REGISTRIES — societe_com, uk_companies_house, northdata, einforma, ariregister):
+- \`bdStrategy = "industry_target"\` (searching COMPANY REGISTRIES — societe_com, northdata, einforma, ariregister):
   Keywords MUST be INDUSTRY / SECTOR TERMS: "technology consulting", "software development", "artificial intelligence", "blockchain", "cloud computing", "IT services", "data analytics", "cybersecurity", "fintech", "SaaS", "managed services", "digital transformation".
   Do NOT use job titles for this mode — company registries index companies by name/sector, not by the roles they employ. Job titles will produce ZERO results.
 
@@ -120,7 +120,7 @@ CRITICAL RULES FOR \`sitesToCrawl\`:
 - These are REAL job boards / company databases that the agent will scrape DIRECTLY via Crawl4AI. The agent does NOT and will not perform Google searches for primary discovery — it goes to these sites and uses their built-in search.
 - Pick 3–6 sites maximum that match \`targetCountry\` (i.e., the site's \`countries\` field includes targetCountry or 'all').
 - For recruitment missions: prefer job boards (welcometothejungle, freework, glassdoor, stepstone, dice, jobbank_ca, etc).
-- For b2b_sales / startup_sales: include BOTH job boards (signals of hiring = budget + pain) AND company databases (societe_com, uk_companies_house, northdata, einforma, ariregister).
+- For b2b_sales / startup_sales: include BOTH job boards (signals of hiring = budget + pain) AND company databases (societe_com, northdata, einforma, ariregister).
 
 Return JSON ONLY — no prose, no markdown fences, no commentary.
 

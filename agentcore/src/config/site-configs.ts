@@ -317,27 +317,6 @@ export const SITE_CONFIGS: Record<string, SiteConfig> = {
     headers: { 'Accept-Language': 'fr-FR,fr;q=0.9' },
   },
 
-  uk_companies_house: {
-    name: 'UK Companies House',
-    baseUrl: 'https://find-and-update.company-information.service.gov.uk/search/companies',
-    type: 'company_database',
-    searchParam: 'q',
-    cookieDismiss: `
-      const btn = document.querySelector('button[data-module="cookie-banner-accept"]');
-      if (btn) btn.click();
-      await new Promise(r => setTimeout(r, 1000));
-    `,
-    genericCookieFallback: true,
-    waitForSelector: '.results-list, #results',
-    waitMs: 2000,
-    maxPages: 2,
-    nextPageParam: 'page',
-    nextPageIncrement: 1,
-    delayBetweenPages: 5000,
-    countries: ['gb'],
-    headers: { 'Accept-Language': 'en-GB,en;q=0.9' },
-  },
-
   northdata: {
     name: 'NorthData',
     baseUrl: 'https://www.northdata.com/_search',

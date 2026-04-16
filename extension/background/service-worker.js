@@ -359,15 +359,24 @@ chrome.runtime.onStartup.addListener(() => { ensureConnected(); });
 // Also attempt a connection when the worker first wakes up.
 ensureConnected();
 
-// Keepalive alarm — MV3 workers get terminated after 30s of inactivity; this
-// ping wakes us periodically so the WS stays up.
-chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
+// Keepalive alarm — MV3 workers get terminated after 30s of inactivity; fire
+// at ~24s so we always beat Chrome's idle-kill timer with a healthy margin.
+chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
 // Token refresh alarm — checked every 10 minutes; refreshes if within the 3-min window.
 chrome.alarms.create('refresh-token', { periodInMinutes: 10 });
 
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'keepalive') {
+    // Touching a chrome.* API resets the idle-kill timer defensively.
+    chrome.storage.local.get(['session'], () => { /* no-op */ });
+    // Reconnect if the socket dropped since last tick.
     ensureConnected();
+    // Proactive WS ping — surfaces half-open sockets before the server times us out.
+    try {
+      if (ws && ws.readyState === 1 /* OPEN */) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    } catch (_) { /* ignore — next ensureConnected will rebuild */ }
     return;
   }
   if (a.name === 'refresh-token') {

@@ -271,26 +271,34 @@ export class MasterAgent extends BaseAgent {
             if (strategy.dataSourceStrategy?.needsChromeExtension) {
               try {
                 const { enqueueExtensionTask } = await import('../services/extension-dispatcher.js');
-                const industries = pipelineContext.sales?.industries ?? [undefined];
-                const sizes = pipelineContext.sales?.companySizes ?? [undefined];
-                const roles = pipelineContext.targetRoles ?? [];
+                // Search companies by INDUSTRY × LOCATION, not by roles. Roles get applied
+                // later in the per-company contact search. Using role as a company-search
+                // keyword silently excludes target companies whose LinkedIn headline
+                // doesn't contain the exact role string.
+                const services = (agentConfig.services as string[]) ?? [];
+                const industries = pipelineContext.sales?.industries ?? [];
+                const searchTerms = services.length > 0
+                  ? services.slice(0, 5)
+                  : industries.length > 0
+                    ? industries.slice(0, 5)
+                    : ['technology consulting'];
                 const locs = pipelineContext.locations ?? [];
 
                 let dispatched = 0;
-                for (const role of roles) {
+                for (const term of searchTerms) {
                   for (const loc of locs) {
                     await enqueueExtensionTask({
                       tenantId: this.tenantId,
                       masterAgentId,
                       site: 'linkedin',
                       type: 'search_companies',
-                      params: { role, location: loc, industry: industries[0], size: sizes[0], limit: 20 },
+                      params: { industry: term, location: loc, limit: 20 },
                       priority: 7,
                     });
                     dispatched++;
                   }
                 }
-                logger.info({ masterAgentId, dispatched }, 'Chrome-extension LinkedIn tasks enqueued');
+                logger.info({ masterAgentId, dispatched, searchTerms, locs }, 'Chrome-extension LinkedIn tasks enqueued');
                 if (dispatched > 0) {
                   this.sendMessage(null, 'system_alert', {
                     action: 'extension_tasks_enqueued',

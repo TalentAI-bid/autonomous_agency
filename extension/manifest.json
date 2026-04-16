@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "TalentAI Scraper",
+  "version": "0.1.0",
+  "description": "Feeds LinkedIn, Google Maps, and Crunchbase data from your authenticated browser sessions into your TalentAI backend.",
+  "permissions": ["storage", "activeTab", "scripting", "alarms", "tabs"],
+  "host_permissions": [
+    "*://*.linkedin.com/*",
+    "*://*.google.com/maps*",
+    "*://www.google.com/maps*",
+    "*://*.crunchbase.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html"
+  }
+}

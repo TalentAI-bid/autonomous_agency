@@ -162,6 +162,20 @@ CREATE POLICY interviews_insert ON interviews FOR INSERT WITH CHECK (tenant_id =
 CREATE POLICY interviews_update ON interviews FOR UPDATE USING (tenant_id = current_tenant_id()) WITH CHECK (tenant_id = current_tenant_id());
 CREATE POLICY interviews_delete ON interviews FOR DELETE USING (tenant_id = current_tenant_id());
 
+-- Extension Sessions
+ALTER TABLE extension_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY extension_sessions_select ON extension_sessions FOR SELECT USING (tenant_id = current_tenant_id());
+CREATE POLICY extension_sessions_insert ON extension_sessions FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY extension_sessions_update ON extension_sessions FOR UPDATE USING (tenant_id = current_tenant_id()) WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY extension_sessions_delete ON extension_sessions FOR DELETE USING (tenant_id = current_tenant_id());
+
+-- Extension Tasks
+ALTER TABLE extension_tasks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY extension_tasks_select ON extension_tasks FOR SELECT USING (tenant_id = current_tenant_id());
+CREATE POLICY extension_tasks_insert ON extension_tasks FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY extension_tasks_update ON extension_tasks FOR UPDATE USING (tenant_id = current_tenant_id()) WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY extension_tasks_delete ON extension_tasks FOR DELETE USING (tenant_id = current_tenant_id());
+
 -- Allow the application user to bypass RLS when needed (e.g., for migrations, admin ops)
 -- The app should use SET LOCAL to set the tenant context for normal operations
 -- For superuser operations (like seeding), RLS is bypassed automatically

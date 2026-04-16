@@ -87,3 +87,6 @@ export type { Opportunity, NewOpportunity } from './opportunities.js';
 
 export { agentMessages } from './agent-messages.js';
 export type { AgentMessage, NewAgentMessage } from './agent-messages.js';
+
+export { extensionSessions, extensionTasks, extensionSiteEnum, extensionTaskTypeEnum, extensionTaskStatusEnum } from './extension.js';
+export type { ExtensionSession, NewExtensionSession, ExtensionTask, NewExtensionTask } from './extension.js';

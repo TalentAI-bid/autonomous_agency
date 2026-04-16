@@ -185,6 +185,44 @@ export class MasterAgent extends BaseAgent {
               );
             }
 
+            // If strategist says we need the Chrome extension, enqueue LinkedIn search tasks.
+            // They stay 'pending' until the user connects their extension; then drain-on-reconnect dispatches them.
+            if (strategy.dataSourceStrategy?.needsChromeExtension) {
+              try {
+                const { enqueueExtensionTask } = await import('../services/extension-dispatcher.js');
+                const industries = pipelineContext.sales?.industries ?? [undefined];
+                const sizes = pipelineContext.sales?.companySizes ?? [undefined];
+                const roles = pipelineContext.targetRoles ?? [];
+                const locs = pipelineContext.locations ?? [];
+
+                let dispatched = 0;
+                for (const role of roles) {
+                  for (const loc of locs) {
+                    await enqueueExtensionTask({
+                      tenantId: this.tenantId,
+                      masterAgentId,
+                      site: 'linkedin',
+                      type: 'search_companies',
+                      params: { role, location: loc, industry: industries[0], size: sizes[0], limit: 20 },
+                      priority: 7,
+                    });
+                    dispatched++;
+                  }
+                }
+                logger.info({ masterAgentId, dispatched }, 'Chrome-extension LinkedIn tasks enqueued');
+                if (dispatched > 0) {
+                  this.sendMessage(null, 'system_alert', {
+                    action: 'extension_tasks_enqueued',
+                    severity: 'info',
+                    count: dispatched,
+                    message: `Queued ${dispatched} LinkedIn searches for the Chrome extension. They will run as soon as the extension connects.`,
+                  });
+                }
+              } catch (extErr) {
+                logger.warn({ err: extErr, masterAgentId }, 'Failed to enqueue Chrome-extension tasks');
+              }
+            }
+
             // If strategist recommended a BD strategy and user didn't set one, save it to config
             if (strategy.bdStrategy && !agentConfig.bdStrategy) {
               try {

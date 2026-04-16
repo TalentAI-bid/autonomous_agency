@@ -8,6 +8,7 @@ import authPlugin from './middleware/auth.js';
 import tenantPlugin from './middleware/tenant.js';
 import rateLimitPlugin from './middleware/rate-limit.js';
 import realtimePlugin, { startRealtimeRelay } from './websocket/realtime.js';
+import extensionWsPlugin, { startExtensionRelay } from './websocket/extension.js';
 import { closeAllQueues } from './queues/queues.js';
 import { closeAllWorkers, registerTenantWorkers, scheduleAgentJobs } from './queues/workers.js';
 import { closeRedisConnections } from './queues/setup.js';
@@ -41,6 +42,7 @@ import strategyRoutes from './routes/strategy.routes.js';
 import opportunityRoutes from './routes/opportunity.routes.js';
 import agentRoomRoutes from './routes/agent-room.routes.js';
 import linkedinRoutes from './routes/linkedin.routes.js';
+import extensionRoutes from './routes/extension.routes.js';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -80,6 +82,7 @@ async function buildApp() {
 
   // WebSocket
   await fastify.register(realtimePlugin);
+  await fastify.register(extensionWsPlugin);
 
   // Health check (unauthenticated)
   fastify.get('/api/health', async () => ({
@@ -161,6 +164,7 @@ async function buildApp() {
   await fastify.register(opportunityRoutes, { prefix: '/api/opportunities' });
   await fastify.register(agentRoomRoutes, { prefix: '/api/agent-room' });
   await fastify.register(linkedinRoutes, { prefix: '/api/linkedin' });
+  await fastify.register(extensionRoutes, { prefix: '/api/extension' });
 
   // Tracking pixel route — registered WITHOUT /api prefix (email clients hit this directly)
   await fastify.register(trackingRoutes, { prefix: '/track' });
@@ -173,6 +177,7 @@ async function start() {
 
   // Start real-time relay (Redis PubSub → WebSocket)
   await startRealtimeRelay();
+  await startExtensionRelay();
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

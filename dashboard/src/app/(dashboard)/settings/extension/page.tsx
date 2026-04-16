@@ -37,6 +37,9 @@ type RecentTask = {
   priority: number;
   attempts: number;
   error: string | null;
+  params: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  itemCount: number;
   createdAt: string;
   dispatchedAt: string | null;
   completedAt: string | null;
@@ -217,24 +220,17 @@ export default function ExtensionSettingsPage() {
           ) : (
             <div className="divide-y divide-border">
               {(recentQ.data?.tasks ?? []).map((t) => (
-                <div key={t.id} className="py-2 flex items-center justify-between text-xs gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px]">{t.site}</Badge>
-                      <span className="font-mono truncate">{t.type}</span>
-                    </div>
-                    {t.error && (
-                      <p className="text-red-400 mt-0.5 truncate" title={t.error}>{t.error}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={t.status} />
-                    <span className="text-muted-foreground tabular-nums">{fmtDate(t.createdAt)}</span>
-                  </div>
-                </div>
+                <RecentTaskRow key={t.id} task={t} />
               ))}
             </div>
           )}
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Click a row to see the full request params and the raw response from the
+            extension. If a task shows "completed" with <span className="font-mono">items: 0</span>,
+            the page loaded but the adapter didn't recognise it — inspect{' '}
+            <span className="font-mono">result.debug</span> to see why
+            (login wall, captcha, new DOM, etc.).
+          </p>
         </CardContent>
       </Card>
 
@@ -314,6 +310,67 @@ export default function ExtensionSettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function RecentTaskRow({ task }: { task: RecentTask }) {
+  const [open, setOpen] = React.useState(false);
+  const completed = task.status === 'completed';
+  const empty = completed && task.itemCount === 0;
+
+  return (
+    <div className="py-2 text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 text-left hover:bg-muted/30 -mx-2 px-2 py-1 rounded"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-[10px]">{task.site}</Badge>
+            <span className="font-mono truncate">{task.type}</span>
+            {completed && (
+              <span
+                className={`tabular-nums text-[10px] ${empty ? 'text-amber-400' : 'text-emerald-400'}`}
+                title="Items extracted by the adapter from the result blob"
+              >
+                items: {task.itemCount}
+              </span>
+            )}
+          </div>
+          {task.error && (
+            <p className="text-red-400 mt-0.5 truncate" title={task.error}>{task.error}</p>
+          )}
+          {empty && !task.error && (
+            <p className="text-amber-400 mt-0.5 truncate">
+              Completed but extracted nothing — expand to inspect the page diagnostics.
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <StatusBadge status={task.status} />
+          <span className="text-muted-foreground tabular-nums">{fmtDate(task.createdAt)}</span>
+          <span className="text-muted-foreground">{open ? '▾' : '▸'}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="mt-2 ml-2 grid gap-2 sm:grid-cols-2">
+          <PayloadBlock label="Params" value={task.params} />
+          <PayloadBlock label="Result" value={task.result} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PayloadBlock({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div className="rounded border border-border bg-muted/30 p-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
+      <pre className="text-[10px] font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">
+        {value ? JSON.stringify(value, null, 2) : '—'}
+      </pre>
     </div>
   );
 }

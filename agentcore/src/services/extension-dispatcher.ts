@@ -222,25 +222,54 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
 
   if (payload.status !== 'completed') return;
 
-  // Ingest results into the existing pipeline
+  // Ingest results. Track extracted-vs-saved so we can log a clear WARN when
+  // a task completed but produced zero saves (the most common silent-failure
+  // mode — usually means the site's DOM changed and the adapter selectors
+  // need updating).
   try {
-    await ingestResult(task, payload.result);
+    const summary = await ingestResult(task, payload.result);
+    if (summary.extracted === 0) {
+      logger.warn(
+        {
+          taskId: task.id,
+          tenantId: task.tenantId,
+          site: task.site,
+          type: task.type,
+          resultKeys: Object.keys(payload.result ?? {}),
+          resultSample: JSON.stringify(payload.result).slice(0, 500),
+        },
+        'Extension task completed with ZERO items extracted — likely DOM selectors out of date',
+      );
+    } else if (summary.saved === 0) {
+      logger.warn(
+        { taskId: task.id, extracted: summary.extracted },
+        'Extension task extracted items but saved zero — all rejected by saveOrUpdateCompanyStatic',
+      );
+    } else {
+      logger.info(
+        { taskId: task.id, site: task.site, type: task.type, extracted: summary.extracted, saved: summary.saved },
+        'Extension task ingested',
+      );
+    }
   } catch (err) {
     logger.warn({ err, taskId: task.id }, 'Failed to ingest extension task result into pipeline');
   }
 }
 
-async function ingestResult(task: ExtensionTask, result: Record<string, unknown>): Promise<void> {
+type IngestSummary = { extracted: number; saved: number };
+
+async function ingestResult(task: ExtensionTask, result: Record<string, unknown>): Promise<IngestSummary> {
   const site = task.site as ExtensionSite;
   const type = task.type as ExtensionTaskType;
 
   if (site === 'linkedin' && type === 'search_companies') {
     const companies = (result.companies ?? []) as Array<Record<string, unknown>>;
+    let saved = 0;
     for (const c of companies) {
       const name = String(c.name ?? '').trim();
       if (!name || name.length < 2) continue;
       try {
-        const saved = await saveOrUpdateCompanyStatic(
+        const savedRow = await saveOrUpdateCompanyStatic(
           task.tenantId,
           {
             name,
@@ -253,21 +282,22 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
           task.masterAgentId ?? undefined,
         );
         await dispatchJob(task.tenantId, 'enrichment', {
-          companyId: saved.id,
+          companyId: savedRow.id,
           masterAgentId: task.masterAgentId ?? undefined,
           source: 'linkedin_extension',
         });
+        saved++;
       } catch (err) {
         logger.debug({ err, name }, 'Skipped invalid company from LinkedIn extension');
       }
     }
-    return;
+    return { extracted: companies.length, saved };
   }
 
   if (site === 'linkedin' && type === 'fetch_company') {
     const c = result as Record<string, unknown>;
     const name = String(c.name ?? '').trim();
-    if (!name) return;
+    if (!name) return { extracted: 0, saved: 0 };
     await saveOrUpdateCompanyStatic(
       task.tenantId,
       {
@@ -281,16 +311,17 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       },
       task.masterAgentId ?? undefined,
     );
-    return;
+    return { extracted: 1, saved: 1 };
   }
 
   if (site === 'gmaps') {
     const items = (result.businesses ?? (type === 'fetch_business' ? [result] : [])) as Array<Record<string, unknown>>;
+    let saved = 0;
     for (const b of items) {
       const name = String(b.name ?? '').trim();
       if (!name) continue;
       try {
-        const saved = await saveOrUpdateCompanyStatic(
+        const savedRow = await saveOrUpdateCompanyStatic(
           task.tenantId,
           {
             name,
@@ -301,25 +332,27 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         );
         if (type === 'search_businesses') {
           await dispatchJob(task.tenantId, 'enrichment', {
-            companyId: saved.id,
+            companyId: savedRow.id,
             masterAgentId: task.masterAgentId ?? undefined,
             source: 'gmaps_extension',
           });
         }
+        saved++;
       } catch (err) {
         logger.debug({ err, name }, 'Skipped invalid gmaps business');
       }
     }
-    return;
+    return { extracted: items.length, saved };
   }
 
   if (site === 'crunchbase') {
     const items = (result.companies ?? (type === 'fetch_company' ? [result] : [])) as Array<Record<string, unknown>>;
+    let saved = 0;
     for (const c of items) {
       const name = String(c.name ?? '').trim();
       if (!name) continue;
       try {
-        const saved = await saveOrUpdateCompanyStatic(
+        const savedRow = await saveOrUpdateCompanyStatic(
           task.tenantId,
           {
             name,
@@ -331,16 +364,20 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         );
         if (type === 'search_companies') {
           await dispatchJob(task.tenantId, 'enrichment', {
-            companyId: saved.id,
+            companyId: savedRow.id,
             masterAgentId: task.masterAgentId ?? undefined,
             source: 'crunchbase_extension',
           });
         }
+        saved++;
       } catch (err) {
         logger.debug({ err, name }, 'Skipped invalid crunchbase company');
       }
     }
+    return { extracted: items.length, saved };
   }
+
+  return { extracted: 0, saved: 0 };
 }
 
 function extractDomain(url: string): string | undefined {

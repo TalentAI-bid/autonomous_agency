@@ -216,6 +216,9 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
     });
 
     // GET /api/extension/tasks/recent?limit=50
+    // Returns the full params + result blobs so the dashboard can show what
+    // each task actually sent and received — this is how you debug "why did
+    // 11 LinkedIn searches save zero companies?".
     authScope.get<{ Querystring: { limit?: string } }>('/tasks/recent', async (request) => {
       const limit = Math.min(parseInt(request.query.limit ?? '50', 10), 200);
       const rows = await withTenant(request.tenantId, async (tx) => {
@@ -228,6 +231,8 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
             priority: extensionTasks.priority,
             attempts: extensionTasks.attempts,
             error: extensionTasks.error,
+            params: extensionTasks.params,
+            result: extensionTasks.result,
             createdAt: extensionTasks.createdAt,
             dispatchedAt: extensionTasks.dispatchedAt,
             completedAt: extensionTasks.completedAt,
@@ -237,7 +242,19 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           .orderBy(desc(extensionTasks.createdAt))
           .limit(limit);
       });
-      return { data: { tasks: rows, count: rows.length } };
+
+      // Cheap derived summary so the dashboard doesn't have to reimplement
+      // the result-shape logic (linkedin.companies vs gmaps.businesses etc.).
+      const tasks = rows.map((t) => {
+        const r = (t.result ?? {}) as Record<string, unknown>;
+        const itemCount =
+          Array.isArray(r.companies) ? r.companies.length :
+          Array.isArray(r.businesses) ? r.businesses.length :
+          0;
+        return { ...t, itemCount };
+      });
+
+      return { data: { tasks, count: tasks.length } };
     });
   });
 }

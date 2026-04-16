@@ -1,5 +1,5 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
-import { env } from '../config/env.js';
+import { isOriginAllowed } from './cors.js';
 
 export class AppError extends Error {
   public readonly statusCode: number;
@@ -87,9 +87,10 @@ export function errorHandler(
 
   // Ensure CORS headers are present on error responses
   const origin = request.headers.origin;
-  if (origin && origin === env.CORS_ORIGIN) {
+  if (origin && isOriginAllowed(origin)) {
     reply.header('Access-Control-Allow-Origin', origin);
     reply.header('Access-Control-Allow-Credentials', 'true');
+    reply.header('Vary', 'Origin');
   }
 
   reply.status(statusCode).send({

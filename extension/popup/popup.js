@@ -6,7 +6,6 @@ const els = {
   statusBadge: $('status-badge'),
   // signed-out
   signinSection: $('signin-section'),
-  serverUrl: $('server-url'),
   email: $('email'),
   password: $('password'),
   signinBtn: $('signin-btn'),
@@ -24,8 +23,6 @@ const els = {
   usageBody: $('usage-body'),
 };
 
-const DEFAULT_SERVER = 'http://localhost:3000';
-
 async function refresh() {
   try {
     const state = await chrome.runtime.sendMessage({ kind: 'popup_get_state' });
@@ -34,14 +31,12 @@ async function refresh() {
     setBadge(state.status || 'idle');
 
     if (!state.signedIn) {
-      // Signed-out state
+      // Signed-out state — only Email + Password. Backend URL is hardcoded
+      // in extension/config.js (no input field).
       els.signinSection.hidden = false;
       els.accountSection.hidden = true;
       els.taskSection.hidden = true;
       els.usageSection.hidden = true;
-      if (!els.serverUrl.value) {
-        els.serverUrl.value = state.serverUrl || DEFAULT_SERVER;
-      }
       return;
     }
 
@@ -137,7 +132,6 @@ function clearSigninError() {
 // ─── Events ────────────────────────────────────────────────────────────────
 els.signinBtn.addEventListener('click', async () => {
   clearSigninError();
-  const serverUrl = els.serverUrl.value.trim() || DEFAULT_SERVER;
   const email = els.email.value.trim();
   const password = els.password.value;
   if (!email || !password) {
@@ -149,7 +143,7 @@ els.signinBtn.addEventListener('click', async () => {
   try {
     const res = await chrome.runtime.sendMessage({
       kind: 'popup_signin',
-      serverUrl, email, password,
+      email, password,
     });
     if (!res?.ok) {
       showSigninError(res?.error || 'unknown_error');

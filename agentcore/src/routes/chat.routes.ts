@@ -7,7 +7,7 @@ import {
   getConversation,
 } from '../services/chat.service.js';
 import { ValidationError } from '../utils/errors.js';
-import { env } from '../config/env.js';
+import { isOriginAllowed } from '../utils/cors.js';
 
 export default async function chatRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
@@ -95,13 +95,19 @@ export default async function chatRoutes(fastify: FastifyInstance) {
       throw new ValidationError('Message content or file attachment is required');
     }
 
-    const allowedOrigin = env.CORS_ORIGIN;
+    // SSE bypasses the @fastify/cors plugin (we write raw headers below), so
+    // we re-implement the same allow-list check here. Echo the request's
+    // actual origin if it's permitted; otherwise omit the header entirely so
+    // the browser blocks the response.
+    const reqOrigin = (request.headers.origin as string) || '';
+    const allowOrigin = isOriginAllowed(reqOrigin) ? reqOrigin : '';
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': allowedOrigin,
+      'Access-Control-Allow-Origin': allowOrigin,
       'Access-Control-Allow-Credentials': 'true',
+      Vary: 'Origin',
     });
 
     try {

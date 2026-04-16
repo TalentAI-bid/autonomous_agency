@@ -12,8 +12,10 @@ import {
   refreshSession,
   toWsOrigin,
 } from '../lib/auth-client.js';
+import { BACKEND_URL } from '../config.js';
 
-const DEFAULT_SERVER = 'http://localhost:3000';
+// Hardcoded backend — edit `extension/config.js` to point at a different server.
+const DEFAULT_SERVER = BACKEND_URL;
 const rateLimiter = new RateLimiter();
 let ws = null;
 let paused = false;
@@ -292,8 +294,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     if (msg?.kind === 'popup_signin') {
       try {
+        // Server URL is no longer user-configurable; always use the constant
+        // from config.js. Any `msg.serverUrl` is ignored (defensive — the
+        // popup doesn't send it anymore).
         const result = await signIn({
-          serverUrl: msg.serverUrl || DEFAULT_SERVER,
+          serverUrl: BACKEND_URL,
           email: msg.email,
           password: msg.password,
         });

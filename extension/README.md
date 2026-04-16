@@ -7,8 +7,20 @@ Pure vanilla-JS Chrome MV3 extension. **No build step.** Chrome loads these file
 1. Open `chrome://extensions`, enable **Developer mode**.
 2. Click **Load unpacked** and select this `extension/` directory.
 3. Click the TalentAI icon in the toolbar to open the popup.
-4. In the TalentAI dashboard, go to **Settings → Browser Extension → Generate API Key**, copy the key.
-5. Back in the popup: paste the key, set your server URL (`ws://localhost:3000` in dev), click **Save & Connect**.
+4. Sign in with your TalentAI dashboard email + password. The extension issues
+   its own connection key automatically.
+
+## Backend URL (config.js)
+
+The backend URL is hardcoded in [`config.js`](./config.js) — that's the single
+file to edit when switching environments.
+
+- Production (default): `https://agents.api.talentailabs.com`
+- Local backend? Change `BACKEND_URL` in `config.js` to e.g. `http://localhost:4000`,
+  then click **Reload** for the extension in `chrome://extensions`.
+
+There's no `.env` because the extension has no build step that could substitute
+one — Chrome loads the JS files as-is.
 
 ## What it does
 

@@ -50,7 +50,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),
   PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
-  CORS_ORIGIN: z.string().default('http://localhost:3000'),
+  // Comma-separated list of allowed CORS origins. `chrome-extension://*` is
+  // always allowed automatically (extension popup → backend).
+  CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 

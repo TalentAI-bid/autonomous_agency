@@ -13,6 +13,7 @@ import { closeAllQueues } from './queues/queues.js';
 import { closeAllWorkers, registerTenantWorkers, scheduleAgentJobs } from './queues/workers.js';
 import { closeRedisConnections } from './queues/setup.js';
 import { errorHandler } from './utils/errors.js';
+import { isOriginAllowed } from './utils/cors.js';
 import { checkSearxngHealth } from './tools/searxng.tool.js';
 import { checkCrawl4aiHealth } from './tools/crawl4ai.tool.js';
 import logger from './utils/logger.js';
@@ -59,8 +60,14 @@ async function buildApp() {
   fastify.setErrorHandler(errorHandler);
 
   // Core plugins
+  // CORS — function form so we can echo the request origin (required when
+  // credentials: true; wildcards are forbidden in that combination) AND
+  // transparently allow any chrome-extension://... origin (extension popup).
   await fastify.register(cors, {
-    origin: env.CORS_ORIGIN,
+    origin: (origin, cb) => {
+      if (isOriginAllowed(origin)) return cb(null, true);
+      return cb(null, false);
+    },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   });

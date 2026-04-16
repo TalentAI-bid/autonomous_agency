@@ -23,6 +23,25 @@ let currentTask = null;
 let currentMasterAgentName = null;
 let currentStatus = 'idle';
 
+// ─── LinkedIn geo-code map ─────────────────────────────────────────────────
+// LinkedIn's `companyHqGeo` URL parameter expects numeric geo IDs, not free
+// text. If we don't map, LinkedIn silently ignores the filter and returns
+// globally-irrelevant results. Extend this table as needed.
+const LINKEDIN_GEO_CODES = {
+  'united kingdom': '101165590',
+  'uk': '101165590',
+  'england': '101165590',
+  'london': '102257491',
+  'ireland': '104738515',
+  'france': '105015875',
+  'paris': '105259460',
+  'germany': '101282230',
+  'spain': '105646813',
+  'united states': '103644278',
+  'usa': '103644278',
+  'estonia': '102974008',
+};
+
 // ─── Adapter registry (files injected for each {site, type}) ───────────────
 const ADAPTER_FILES = {
   'linkedin:search_companies': ['lib/scraper-utils.js', 'content/linkedin/search-companies.js'],
@@ -192,6 +211,35 @@ async function processTask(msg) {
       }
     });
 
+    // ─── Blocked-by-popup short-circuit ────────────────────────────────────
+    // Adapter detected a terms/premium/cookie modal on the page. We do NOT
+    // auto-dismiss — we pause the whole extension, surface a message in the
+    // popup, and tell the server to keep the task retryable. User must
+    // dismiss the modal in the visible tab and click Resume.
+    if (
+      resultMsg.status === 'completed' &&
+      resultMsg.result?.debug?.reason === 'blocked_by_popup'
+    ) {
+      const debug = resultMsg.result.debug;
+      console.log('[TalentAI sw] blocked_by_popup', { taskId, blockedBy: debug.blockedBy });
+      paused = true;
+      await chrome.storage.local.set({ paused: true });
+      setStatus('blocked');
+      broadcast('popup_update', {
+        status: 'blocked',
+        message: debug.userAction || 'LinkedIn popup detected. Please dismiss it and click Resume.',
+        blockedBy: debug.blockedBy,
+      });
+      ws?.send({
+        type: 'task_result',
+        taskId,
+        status: 'failed',
+        error: 'blocked_by_popup',
+        result: resultMsg.result,
+      });
+      return;
+    }
+
     await rateLimiter.record(site, taskType);
 
     console.log('[TalentAI sw] ws_send_task_result', { taskId, status: resultMsg.status });
@@ -214,9 +262,16 @@ async function processTask(msg) {
 
 function buildUrl(site, type, params) {
   if (site === 'linkedin' && type === 'search_companies') {
-    const kw = encodeURIComponent([params.role, params.industry].filter(Boolean).join(' '));
-    const geo = params.location ? `&companyHqGeo=${encodeURIComponent(params.location)}` : '';
-    return `https://www.linkedin.com/search/results/companies/?keywords=${kw}${geo}`;
+    const keywords = encodeURIComponent(params.industry || '');
+    const locLower = (params.location || '').toLowerCase().trim();
+    const geoCode = LINKEDIN_GEO_CODES[locLower];
+    if (geoCode) {
+      // companyHqGeo=["<code>"] — must be URL-encoded as %5B%22...%22%5D.
+      return `https://www.linkedin.com/search/results/companies/?keywords=${keywords}&companyHqGeo=%5B%22${geoCode}%22%5D`;
+    }
+    // Fallback: fold the location text into the keyword query so at least
+    // some filtering happens client-side in LinkedIn's search ranking.
+    return `https://www.linkedin.com/search/results/companies/?keywords=${keywords}%20${encodeURIComponent(params.location || '')}`;
   }
   if (site === 'linkedin' && type === 'fetch_company') {
     return params.linkedinUrl;
@@ -249,12 +304,12 @@ async function openOrFocusTab(url, site) {
     const existing = await chrome.tabs.query({ url: hostMatch });
     if (existing.length > 0) {
       const tab = existing[0];
-      await chrome.tabs.update(tab.id, { url, active: false });
+      await chrome.tabs.update(tab.id, { url, active: true });
       await waitForTabComplete(tab.id);
       return tab;
     }
   }
-  const tab = await chrome.tabs.create({ url, active: false });
+  const tab = await chrome.tabs.create({ url, active: true });
   await waitForTabComplete(tab.id);
   return tab;
 }

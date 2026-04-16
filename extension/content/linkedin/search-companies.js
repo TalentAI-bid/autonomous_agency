@@ -14,6 +14,38 @@
     const limit = Math.min(50, params.limit || 20);
     console.log('[TalentAI cs] li/search start', { limit, url: location.href, params });
 
+    // ─── Early popup detection ──────────────────────────────────────────────
+    // LinkedIn sometimes covers the results with a "Update to our terms"
+    // banner, a premium-upsell modal, or a cookie prompt. We don't click
+    // through these programmatically — the user needs to acknowledge them.
+    // If we detect one, bail out with a specific debug reason so the service
+    // worker can pause the extension and prompt the user.
+    const POPUP_SELECTORS = [
+      '[data-test-modal-close-btn]',
+      '.artdeco-modal__dismiss',
+      '[class*="premium-upsell"]',
+      '[data-test-premium-upsell]',
+    ];
+    const TERMS_INDICATORS = [
+      'Update to our terms',
+      'Mise à jour de nos conditions',
+    ];
+    const pageText = document.body?.innerText?.slice(0, 500) || '';
+    const hasTermsBanner = TERMS_INDICATORS.some((t) => pageText.includes(t));
+    const hasModal = POPUP_SELECTORS.some((sel) => document.querySelector(sel));
+    if (hasTermsBanner || hasModal) {
+      const blockedBy = hasTermsBanner ? 'terms_update' : 'modal_overlay';
+      console.log('[TalentAI cs] li/search blocked_by_popup', { blockedBy });
+      return {
+        companies: [],
+        debug: {
+          ...collectDebug({ reason: 'blocked_by_popup' }),
+          blockedBy,
+          userAction: 'Please dismiss the popup on the LinkedIn tab, then click Resume in the extension.',
+        },
+      };
+    }
+
     // Wait for the search results container (selector varies across LI redesigns).
     const container = await Promise.race([
       u.waitForSelector('.search-results-container', { timeout: 10000 }).catch(() => null),
@@ -104,7 +136,18 @@
         });
 
       const metaBlob = metaLines.join(' | ');
-      const industry = metaLines[0] || '';
+      // Skip meta rows that are counts/social signals rather than industry/location.
+      // Covers EN + FR variants LinkedIn emits on company cards.
+      const SKIP_META = /abonné|relation|événement|follower|event|suivent|connection|jobs|emploi/i;
+      let industry = '';
+      let location = '';
+      for (const raw of metaLines) {
+        const line = raw.trim();
+        if (!line || SKIP_META.test(line)) continue;
+        if (line.toLowerCase() === name.toLowerCase().trim()) continue; // skip the name duplicate
+        if (!industry) { industry = line; continue; }
+        if (!location && /[A-Z]/.test(line.charAt(0))) { location = line; break; }
+      }
       const sizeMatch = metaBlob.match(/([\d,]+[\d,\-+]*)\s*(employees|followers)/i);
       const locMatch = metaBlob.match(/([A-Z][\w\s,\.-]+?)(?:\s*\·|$)/);
 
@@ -118,7 +161,7 @@
         linkedinUrl,
         industry,
         size: sizeMatch ? sizeMatch[0] : '',
-        location: locMatch ? locMatch[1].trim() : '',
+        location: location || (locMatch ? locMatch[1].trim() : ''),
         logoUrl,
         rawMeta: metaLines,
       });

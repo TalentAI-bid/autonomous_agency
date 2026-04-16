@@ -37,6 +37,7 @@ header h1 {
 .badge.disconnected { background: #fee2e2; color: #991b1b; }
 .badge.paused       { background: #e0e7ff; color: #3730a3; }
 .badge.unauthorized { background: #fee2e2; color: #991b1b; }
+.badge.blocked      { background: #ffedd5; color: #9a3412; }
 
 section {
   background: #fff;
@@ -149,6 +150,13 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 4px 0;
+}
+
+#current-task.blocked {
+  font-family: inherit;
+  white-space: normal;
+  color: #9a3412;
+  font-weight: 500;
 }
 
 .muted { color: #9ca3af; }

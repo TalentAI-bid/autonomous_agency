@@ -63,12 +63,17 @@ async function refresh() {
       els.agentLine.hidden = true;
     }
 
+    // Clear the "blocked" style whenever the extension isn't paused — if the
+    // user clicked Resume, we want the task line to render normally again.
+    if (!state.paused) els.currentTask.classList.remove('blocked');
+
     if (state.currentTask) {
       const { site, taskType, params } = state.currentTask;
       const hint = params?.role || params?.query || params?.linkedinUrl || params?.mapsUrl || '';
       els.currentTask.textContent = `${site}/${taskType}  ${hint}`.trim();
       els.currentTask.classList.remove('muted');
-    } else {
+    } else if (!els.currentTask.classList.contains('blocked')) {
+      // Don't overwrite the blocked message with "Waiting for work…"
       els.currentTask.textContent = 'Waiting for work…';
       els.currentTask.classList.add('muted');
     }
@@ -182,6 +187,11 @@ els.resumeBtn.addEventListener('click', async () => {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.kind === 'status' || msg?.kind === 'current_task') {
     refresh();
+  }
+  if (msg?.kind === 'popup_update' && msg?.data?.status === 'blocked') {
+    els.currentTask.textContent = msg.data.message;
+    els.currentTask.classList.add('blocked');
+    els.currentTask.classList.remove('muted');
   }
 });
 

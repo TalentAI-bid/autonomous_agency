@@ -209,6 +209,25 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
     return;
   }
 
+  // ─── Blocked-by-popup: reset to pending, don't count as a failed attempt ──
+  // The extension has paused itself and the user will click Resume after
+  // dismissing the LinkedIn modal. We want this exact task to re-dispatch
+  // on reconnect, not stay in "failed".
+  if (payload.status === 'failed' && payload.error === 'blocked_by_popup') {
+    const resetAt = new Date();
+    await withTenant(task.tenantId, async (tx) => {
+      await tx
+        .update(extensionTasks)
+        .set({ status: 'pending', error: null, updatedAt: resetAt })
+        .where(eq(extensionTasks.id, task.id));
+    });
+    logger.info(
+      { taskId: task.id, tenantId: task.tenantId, site: task.site, type: task.type },
+      'Extension task blocked by popup — reset to pending for retry on resume',
+    );
+    return;
+  }
+
   const now = new Date();
   await withTenant(task.tenantId, async (tx) => {
     await tx

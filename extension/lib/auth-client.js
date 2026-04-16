@@ -165,10 +165,13 @@ export async function authedFetch(path, { method = 'GET', body } = {}) {
   }
 
   const url = path.startsWith('http') ? path : `${session.serverUrl}${path}`;
-  const headers = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${session.accessToken}`,
-  };
+  // Only attach Content-Type when there's a body — Fastify rejects empty
+  // requests that declare `Content-Type: application/json`
+  // (FST_ERR_CTP_EMPTY_JSON_BODY).
+  const baseHeaders = { Authorization: `Bearer ${session.accessToken}` };
+  const headers = body
+    ? { ...baseHeaders, 'Content-Type': 'application/json' }
+    : baseHeaders;
 
   let res = await fetch(url, {
     method,
@@ -181,9 +184,12 @@ export async function authedFetch(path, { method = 'GET', body } = {}) {
     try {
       await refreshSession();
       const fresh = await getSession();
+      const retryHeaders = body
+        ? { Authorization: `Bearer ${fresh.accessToken}`, 'Content-Type': 'application/json' }
+        : { Authorization: `Bearer ${fresh.accessToken}` };
       res = await fetch(url, {
         method,
-        headers: { ...headers, Authorization: `Bearer ${fresh.accessToken}` },
+        headers: retryHeaders,
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (err) {

@@ -155,6 +155,87 @@ export class MasterAgent extends BaseAgent {
             const strategy = strategyResult.strategy as SalesStrategy;
             if (!pipelineContext.sales) pipelineContext.sales = {};
             pipelineContext.sales.salesStrategy = strategy;
+
+            // Server-side dataSourceStrategy fallback — the LLM strategist does not reliably
+            // emit this field. Without it, the downstream guards at lines ~162 and ~190 that
+            // gate the user alert + Chrome-extension task enqueue both no-op silently. Compute
+            // it deterministically from the mission locations so those guards always have
+            // something to evaluate.
+            if (!strategy.dataSourceStrategy) {
+              const locs = (pipelineContext.locations ?? []).map((l) => String(l ?? '').toLowerCase()).join(' ');
+              let ds: NonNullable<SalesStrategy['dataSourceStrategy']>;
+              if (/\b(uk|united kingdom|england|scotland|wales|northern ireland|london|manchester|birmingham|edinburgh|glasgow)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'gb',
+                  availableSources: [],
+                  expectedQuality: 'limited',
+                  needsChromeExtension: true,
+                  userNotes: 'UK mission — public job-board coverage is limited. The Chrome-extension LinkedIn scraper is required for viable signal.',
+                };
+              } else if (/\b(ireland|ie|dublin|cork|galway)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'ie',
+                  availableSources: ['irishjobs'],
+                  expectedQuality: 'medium',
+                  needsChromeExtension: false,
+                  userNotes: 'Ireland mission — using IrishJobs as the primary public source.',
+                };
+              } else if (/\b(france|fr|paris|lyon|marseille|toulouse|bordeaux|nice|nantes)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'fr',
+                  availableSources: ['welcometothejungle', 'freework'],
+                  expectedQuality: 'excellent',
+                  needsChromeExtension: false,
+                  userNotes: 'France mission — Welcome to the Jungle + Free-Work provide excellent coverage.',
+                };
+              } else if (/\b(germany|de|berlin|munich|hamburg|frankfurt|cologne|stuttgart|düsseldorf|dusseldorf)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'de',
+                  availableSources: ['stepstone', 'northdata'],
+                  expectedQuality: 'good',
+                  needsChromeExtension: false,
+                  userNotes: 'Germany mission — StepStone + Northdata cover the market well.',
+                };
+              } else if (/\b(spain|es|madrid|barcelona|valencia|seville|sevilla|bilbao|málaga|malaga)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'es',
+                  availableSources: ['infojobs'],
+                  expectedQuality: 'medium',
+                  needsChromeExtension: false,
+                  userNotes: 'Spain mission — InfoJobs is the primary public source.',
+                };
+              } else if (/\b(usa|us|united states|new york|san francisco|los angeles|boston|chicago|seattle|austin|denver|miami)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'us',
+                  availableSources: ['dice', 'glassdoor'],
+                  expectedQuality: 'medium',
+                  needsChromeExtension: false,
+                  userNotes: 'US mission — Dice + Glassdoor provide coverage; LinkedIn remains the best signal but is not required.',
+                };
+              } else if (/\b(estonia|ee|tallinn|tartu)\b/.test(locs)) {
+                ds = {
+                  primaryRegion: 'ee',
+                  availableSources: ['cvkeskus'],
+                  expectedQuality: 'medium',
+                  needsChromeExtension: false,
+                  userNotes: 'Estonia mission — CV-Keskus is the primary public source.',
+                };
+              } else {
+                ds = {
+                  primaryRegion: 'unknown',
+                  availableSources: [],
+                  expectedQuality: 'limited',
+                  needsChromeExtension: true,
+                  userNotes: `Unknown region (${(pipelineContext.locations ?? []).join(', ') || 'no locations provided'}) — falling back to the Chrome-extension LinkedIn scraper.`,
+                };
+              }
+              strategy.dataSourceStrategy = ds;
+              logger.info(
+                { masterAgentId, region: ds.primaryRegion, needsChromeExtension: ds.needsChromeExtension, availableSources: ds.availableSources },
+                'Computed dataSourceStrategy from locations (LLM did not provide it)',
+              );
+            }
+
             logger.info({ masterAgentId, queryCount: strategy.opportunitySearchQueries?.length ?? 0 }, 'StrategistAgent initial strategy completed (inline)');
 
             // Always tell the user which data sources the strategist picked.

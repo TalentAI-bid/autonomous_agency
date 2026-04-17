@@ -19,6 +19,20 @@ import {
 } from '../prompts/company-deep.prompt.js';
 import logger from '../utils/logger.js';
 
+/** Quick DNS check — returns false if the domain doesn't resolve (avoids circuit-breaker spam). */
+async function domainResolves(url: string): Promise<boolean> {
+  try {
+    const hostname = new URL(url).hostname;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    await fetch(`https://${hostname}`, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timeout);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Pull discovery-source signals out of an existing company.rawData so they survive enrichment overwrites. */
 function extractPreservedDiscoveryData(rawData: Record<string, unknown> | null | undefined): Record<string, unknown> {
   if (!rawData) return {};
@@ -208,7 +222,13 @@ export class EnrichmentAgent extends BaseAgent {
       try {
         // Domain from company-finder — no SERP needed
         const companyDomain = knownCompanyDomain;
-        const companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
+        let companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
+
+        // Validate domain resolves before scraping (avoids circuit-breaker spam)
+        if (companyUrl && !(await domainResolves(companyUrl))) {
+          logger.info({ contactId, contactCompanyName, companyUrl }, 'Skipping website scrape — domain does not resolve');
+          companyUrl = undefined;
+        }
 
         let homepageContent = '';
         let aboutPageContent = '';
@@ -987,7 +1007,18 @@ export class EnrichmentAgent extends BaseAgent {
 
     // Domain from company-finder — no SERP needed
     const companyDomain = company.domain ?? undefined;
-    const companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
+    let companyUrl = companyDomain ? `https://${companyDomain}` : undefined;
+
+    // Validate domain resolves before scraping (avoids circuit-breaker spam)
+    if (companyUrl && !(await domainResolves(companyUrl))) {
+      logger.info({ companyId, companyName, companyUrl }, 'Skipping website scrape — domain does not resolve');
+      await withTenant(this.tenantId, async (tx) => {
+        await tx.update(companies)
+          .set({ domain: null, updatedAt: new Date() })
+          .where(eq(companies.id, companyId));
+      });
+      companyUrl = undefined;
+    }
 
     try {
       let homepageContent = '';

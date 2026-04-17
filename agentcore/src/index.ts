@@ -205,6 +205,15 @@ async function start() {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     logger.info(`AgentCore API running on http://0.0.0.0:${env.PORT}`);
 
+    // Reset stale Crawl4AI circuit breaker from previous session
+    try {
+      const { createRedisConnection: createRedis } = await import('./queues/setup.js');
+      const cbRedis = createRedis();
+      await cbRedis.del('circuit:crawl4ai:open', 'circuit:crawl4ai:failures');
+      cbRedis.disconnect();
+      logger.info('Circuit breaker state cleared');
+    } catch { /* non-critical */ }
+
     // Re-register workers and re-schedule repeating jobs for tenants with running agents (survives PM2 restarts)
     try {
       const allTenants = await db.select({ id: tenants.id }).from(tenants);

@@ -117,6 +117,13 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
 
     const data = await response.json() as CrawlResult;
 
+    // Check for client-side errors returned in 200 response (e.g. DNS failures)
+    const detail = (data as Record<string, unknown>).detail ?? (data as Record<string, unknown>).error;
+    if (detail && /ERR_NAME_NOT_RESOLVED|ENOTFOUND|net::ERR_/i.test(String(detail))) {
+      logger.debug({ url, detail }, 'Crawl4AI: domain error in response — skipping');
+      return '';
+    }
+
     // If synchronous result
     if (data.results?.length) {
       const md = data.results[0]?.markdown;
@@ -150,14 +157,20 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
 
     return '';
   } catch (err) {
-    await recordCrawl4aiFailure(tenantId);
-    if (!crawl4aiDownWarned) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const isDnsError = /ERR_NAME_NOT_RESOLVED|ENOTFOUND|domain.*not.*found/i.test(errMsg);
+    const isTimeout = /timeout|ETIMEDOUT/i.test(errMsg);
+
+    // Only record as service failure if it's a real Crawl4AI issue
+    if (!isDnsError && !isTimeout) {
+      await recordCrawl4aiFailure(tenantId);
+    }
+
+    if (isDnsError) {
+      logger.debug({ url, err: errMsg }, 'Crawl4AI: domain does not resolve — skipping');
+    } else if (!crawl4aiDownWarned) {
       crawl4aiDownWarned = true;
-      logger.error(
-        { err, crawl4aiUrl: env.CRAWL4AI_URL, tenantId },
-        'Crawl4AI is UNREACHABLE — all page scraping will return empty. Ensure Crawl4AI is running at %s (pm2 start ecosystem.config.cjs or docker run unclecode/crawl4ai:latest -p 11235:11235)',
-        env.CRAWL4AI_URL,
-      );
+      logger.error({ err, crawl4aiUrl: env.CRAWL4AI_URL, tenantId }, 'Crawl4AI is UNREACHABLE — all page scraping will return empty.');
     } else {
       logger.debug({ err, url, tenantId }, 'Crawl4AI scrape error (already warned)');
     }

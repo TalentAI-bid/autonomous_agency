@@ -142,10 +142,17 @@ async function processTask(msg) {
   }
 
   let tab = null;
+  const isDetailTask = (taskType === 'fetch_company' || taskType === 'fetch_business');
   try {
     const target = buildUrl(site, taskType, params);
-    tab = await openOrFocusTab(target, site);
-    console.log('[TalentAI sw] tab', { tabId: tab?.id, url: target });
+    if (isDetailTask) {
+      // Detail pages open in a NEW tab to avoid navigating away from search results.
+      tab = await chrome.tabs.create({ url: target, active: true });
+      await waitForTabComplete(tab.id);
+    } else {
+      tab = await openOrFocusTab(target, site);
+    }
+    console.log('[TalentAI sw] tab', { tabId: tab?.id, url: target, isDetailTask });
 
     // Stash params for the injected adapter (via chrome.storage.session if available)
     const storageKey = `task_${taskId}`;
@@ -254,6 +261,10 @@ async function processTask(msg) {
     console.error('[TalentAI] task failed', err);
     ws?.send({ type: 'task_result', taskId, status: 'failed', error: err.message || String(err) });
   } finally {
+    // Close detail-task tabs after completion — search tabs stay open.
+    if (isDetailTask && tab) {
+      try { await chrome.tabs.remove(tab.id); } catch (_) {}
+    }
     currentTask = null;
     currentMasterAgentName = null;
     broadcast('current_task', null);

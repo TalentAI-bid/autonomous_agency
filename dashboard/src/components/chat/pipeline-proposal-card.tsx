@@ -3,31 +3,9 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
-import {
-  Search, FileText, Zap, Star, Mail, MessageSquare, CheckCircle, Clock,
-} from 'lucide-react';
+import { CheckCircle, Clock } from 'lucide-react';
+import { PipelineStepsCard } from '@/components/agents/pipeline-steps-card';
 import type { PipelineProposalData } from '@/types/chat';
-
-const AGENT_ICONS: Record<string, React.ElementType> = {
-  discovery: Search,
-  document: FileText,
-  enrichment: Zap,
-  scoring: Star,
-  outreach: Mail,
-  reply: MessageSquare,
-  action: CheckCircle,
-};
-
-const AGENT_COLORS: Record<string, string> = {
-  discovery: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  document: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  enrichment: 'bg-green-500/20 text-green-400 border-green-500/30',
-  scoring: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  outreach: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
-  reply: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
-  action: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-};
 
 interface PipelineProposalCardProps {
   proposal: PipelineProposalData;
@@ -52,31 +30,10 @@ export function PipelineProposalCard({
           <p className="text-xs text-muted-foreground mt-1">{proposal.summary}</p>
         </div>
 
-        {/* Pipeline Steps */}
-        <div className="space-y-2">
-          {proposal.pipeline.map((step, i) => {
-            const Icon = AGENT_ICONS[step.agentType] || Zap;
-            const color = AGENT_COLORS[step.agentType] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-            return (
-              <div key={i} className="flex items-start gap-2.5">
-                <div className="flex flex-col items-center">
-                  <div className={cn('w-7 h-7 rounded-md border flex items-center justify-center', color)}>
-                    <Icon className="w-3.5 h-3.5" />
-                  </div>
-                  {i < proposal.pipeline.length - 1 && (
-                    <div className="w-px h-4 bg-border mt-0.5" />
-                  )}
-                </div>
-                <div className="pt-0.5 min-w-0">
-                  <p className="text-xs font-medium capitalize">
-                    {step.agentType} Agent
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">{step.description}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* Dynamic Pipeline Steps */}
+        {proposal.pipelineSteps && proposal.pipelineSteps.length > 0 && (
+          <PipelineStepsCard steps={proposal.pipelineSteps} />
+        )}
 
         {/* Config Details */}
         <div className="flex flex-wrap gap-1.5">

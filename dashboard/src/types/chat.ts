@@ -13,6 +13,13 @@ export interface PipelineProposalData {
     description: string;
     config: Record<string, unknown>;
   }>;
+  pipelineSteps?: Array<{
+    id: string;
+    tool: string;
+    action: string;
+    dependsOn: string[];
+    params?: Record<string, unknown>;
+  }>;
   summary: string;
   estimatedDuration: string;
 }

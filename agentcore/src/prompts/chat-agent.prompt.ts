@@ -121,6 +121,10 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
   // - "document" → only for recruitment (CV/LinkedIn parsing) or when user uploads documents
   // - "outreach" → only if enableOutreach is true and email account is configured
   // - "reply" + "action" → only if outreach is included
+  "pipelineSteps": [
+    { "id": "step_id", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": {} }
+  ],
+  // ↑ REQUIRED — tool-level execution plan. See "Tool-Level Pipeline Steps" section below.
   "summary": "Brief summary of what the pipeline will do",
   "estimatedDuration": "e.g. 2-4 hours"
 }
@@ -146,6 +150,57 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
   - If only one email sending account exists → auto-select it. Mention it in the proposal summary.
   - If multiple exist → ask the user to choose before proposing.
   - If none exist → warn the user they need to configure one in Settings > Email.
+
+## Tool-Level Pipeline Steps (pipelineSteps) — REQUIRED
+
+You MUST always generate a \`pipelineSteps\` array in the proposal. This describes the exact tools used at execution time, adapted to the user's target region and mission.
+
+Available tools:
+- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies and people. Use for UK/IE missions where public job board coverage is limited.
+- **CRAWL4AI**: Web scraping of job boards, company websites, and public directories. Use for FR/DE/ES/US/EE missions where strong public sources exist.
+- **LLM_ANALYSIS**: Deep company/candidate profiling via LLM. Always include after data collection steps.
+- **REACHER**: SMTP email verification. Use for the FIRST person per company only (saves quota).
+- **EMAIL_PATTERN**: Apply a cached working email pattern without SMTP verification. Use for subsequent people at the same company.
+- **SCORING**: Score and qualify contacts. Always the final step.
+
+Rules:
+- Each step has a unique \`id\` and lists \`dependsOn\` (IDs of prerequisite steps).
+- Root steps (dependsOn: []) execute first, in parallel if multiple.
+- For **UK/IE** missions (limited public sources): start with LINKEDIN_EXTENSION steps.
+- For **FR/BE/CH** missions (excellent public sources): start with CRAWL4AI, params.sources from ["welcometothejungle", "freework", "societe_com", "apec"].
+- For **DE/AT** missions: start with CRAWL4AI, params.sources from ["stepstone", "northdata"].
+- For **ES** missions: start with CRAWL4AI, params.sources from ["infojobs", "einforma"].
+- For **US** missions: start with CRAWL4AI, params.sources from ["dice", "glassdoor"].
+- For **EE** missions: start with CRAWL4AI, params.sources from ["cvkeskus", "ariregister"].
+- For other/unknown regions: start with CRAWL4AI with empty sources (generic web search).
+- Always include LLM_ANALYSIS after data collection steps.
+- Always use REACHER for the first person per company, then EMAIL_PATTERN for the rest.
+- Always end with SCORING.
+
+Example — UK mission (extension-primary):
+\`\`\`json
+[
+  { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
+  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+  { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+  { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
+  { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+  { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
+  { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
+]
+\`\`\`
+
+Example — France mission (web sources):
+\`\`\`json
+[
+  { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
+  { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs"] },
+  { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
+  { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+  { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
+  { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
+]
+\`\`\`
 
 ## Sensible Defaults
 

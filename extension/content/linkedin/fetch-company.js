@@ -66,56 +66,83 @@
     });
 
     // ─── People/Team extraction (best-effort) ─────────────────────────────
-    // SPA-navigate to the /people/ tab and extract visible team members.
-    // If the tab doesn't exist or nothing loads, we still return company data.
+    // LinkedIn's "X employees" link navigates to a people search page at
+    // /search/results/people/?currentCompany=[ID]. This uses the same card
+    // structure as company search (div[data-chameleon-result-urn]).
     let people = [];
     try {
-      const peopleLink = Array.from(document.querySelectorAll('a'))
-        .find((a) => (a.getAttribute('href') || '').includes('/people'));
+      const employeeLink = Array.from(document.querySelectorAll('a'))
+        .find((a) => {
+          const href = a.getAttribute('href') || '';
+          const text = (a.textContent || '').toLowerCase();
+          return (href.includes('/search/results/people/') || href.includes('currentCompany'))
+            && (text.includes('employee') || text.includes('employé'));
+        });
 
-      if (peopleLink) {
-        u.safeClick(peopleLink);
-        await u.sleep(3000);
+      if (employeeLink) {
+        u.safeClick(employeeLink);
+        await u.sleep(4000);
 
-        // Wait for people cards to appear
+        // Wait for people search result cards
         await Promise.race([
-          u.waitForSelector('.org-people-profile-card__profile-info', { timeout: 10000 }).catch(() => null),
+          u.waitForSelector('div[data-chameleon-result-urn]', { timeout: 10000 }).catch(() => null),
           u.waitForSelector('a[href*="/in/"]', { timeout: 10000 }).catch(() => null),
         ]);
 
-        // Scroll to load more people
+        // Scroll to load more
         for (let i = 0; i < 3; i++) {
           window.scrollBy(0, 600);
           await u.sleep(800);
         }
 
-        const peopleContainers = document.querySelectorAll('.org-people-profile-card__profile-info');
+        const cards = document.querySelectorAll('div[data-chameleon-result-urn]');
         const seen = new Set();
 
-        for (const card of peopleContainers) {
-          const nameLink = card.querySelector('a[href*="/in/"]');
-          if (!nameLink) continue;
+        for (const card of cards) {
+          // Get the name anchor — skip logo/hidden anchors
+          const allAnchors = card.querySelectorAll('a[href*="/in/"]');
+          let nameAnchor = null;
+          for (const a of allAnchors) {
+            const text = (a.textContent || '').trim();
+            if (text.length > 2 && a.getAttribute('aria-hidden') !== 'true' && !text.startsWith('View')) {
+              nameAnchor = a;
+              break;
+            }
+          }
+          if (!nameAnchor) continue;
 
-          const profileUrl = (nameLink.href || '').split('?')[0];
+          const profileUrl = (nameAnchor.href || '').split('?')[0];
           if (seen.has(profileUrl)) continue;
           seen.add(profileUrl);
 
-          const pName = (nameLink.textContent || '').trim().replace(/\s+/g, ' ')
-            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
-          if (!pName || pName.length < 2) continue;
+          // Clean name — remove emojis
+          let pName = (nameAnchor.textContent || '').trim().replace(/\s+/g, ' ');
+          pName = pName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
+          if (!pName || pName.length < 2 || pName === 'LinkedIn Member') continue;
 
-          // Title is the first non-name text block
+          // Extract title — skip name duplicates and connection-degree text
+          const SKIP = /degree connection|View.*profile|3rd\+|2nd|1st|\bprofile\b/i;
           const allText = Array.from(card.querySelectorAll('div, span, p'))
-            .map((el) => (el.textContent || '').trim())
-            .filter((t) => t.length > 3 && t.length < 150 && t !== pName);
-          const title = allText[0] || '';
+            .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
+            .filter((t) => t.length > 5 && t.length < 200);
+
+          let title = '';
+          for (const t of allText) {
+            if (t.includes(pName)) continue;
+            if (SKIP.test(t)) continue;
+            if (t.startsWith('•')) continue;
+            title = t;
+            break;
+          }
 
           people.push({ name: pName, title, linkedinUrl: profileUrl });
         }
         console.log('[TalentAI cs] li/fetch people extracted:', people.length);
+      } else {
+        console.log('[TalentAI cs] li/fetch no employee link found');
       }
     } catch (err) {
-      console.warn('[TalentAI cs] li/fetch people extraction failed (non-fatal)', err);
+      console.warn('[TalentAI cs] li/fetch people extraction failed:', err);
     }
 
     return {

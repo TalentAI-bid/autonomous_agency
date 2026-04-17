@@ -65,6 +65,59 @@
       currentEmployees,
     });
 
+    // ─── People/Team extraction (best-effort) ─────────────────────────────
+    // SPA-navigate to the /people/ tab and extract visible team members.
+    // If the tab doesn't exist or nothing loads, we still return company data.
+    let people = [];
+    try {
+      const peopleLink = Array.from(document.querySelectorAll('a'))
+        .find((a) => (a.getAttribute('href') || '').includes('/people'));
+
+      if (peopleLink) {
+        u.safeClick(peopleLink);
+        await u.sleep(3000);
+
+        // Wait for people cards to appear
+        await Promise.race([
+          u.waitForSelector('.org-people-profile-card__profile-info', { timeout: 10000 }).catch(() => null),
+          u.waitForSelector('a[href*="/in/"]', { timeout: 10000 }).catch(() => null),
+        ]);
+
+        // Scroll to load more people
+        for (let i = 0; i < 3; i++) {
+          window.scrollBy(0, 600);
+          await u.sleep(800);
+        }
+
+        const peopleContainers = document.querySelectorAll('.org-people-profile-card__profile-info');
+        const seen = new Set();
+
+        for (const card of peopleContainers) {
+          const nameLink = card.querySelector('a[href*="/in/"]');
+          if (!nameLink) continue;
+
+          const profileUrl = (nameLink.href || '').split('?')[0];
+          if (seen.has(profileUrl)) continue;
+          seen.add(profileUrl);
+
+          const pName = (nameLink.textContent || '').trim().replace(/\s+/g, ' ')
+            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
+          if (!pName || pName.length < 2) continue;
+
+          // Title is the first non-name text block
+          const allText = Array.from(card.querySelectorAll('div, span, p'))
+            .map((el) => (el.textContent || '').trim())
+            .filter((t) => t.length > 3 && t.length < 150 && t !== pName);
+          const title = allText[0] || '';
+
+          people.push({ name: pName, title, linkedinUrl: profileUrl });
+        }
+        console.log('[TalentAI cs] li/fetch people extracted:', people.length);
+      }
+    } catch (err) {
+      console.warn('[TalentAI cs] li/fetch people extraction failed (non-fatal)', err);
+    }
+
     return {
       name,
       linkedinUrl: params.linkedinUrl || location.href.split('?')[0],
@@ -78,6 +131,7 @@
       companyType: type,
       logoUrl,
       currentEmployees,
+      people,
     };
   };
 

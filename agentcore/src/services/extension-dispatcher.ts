@@ -1,6 +1,6 @@
 import { eq, and, asc, desc, isNull } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { companies, extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
+import { companies, contacts, extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
 import type { ExtensionTask } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
@@ -390,7 +390,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     // rather than re-running fuzzy domain/name dedup. If absent (e.g.
     // manual enqueue), saveOrUpdateCompanyStatic falls back to its usual
     // id → domain → name match.
-    await saveOrUpdateCompanyStatic(
+    const savedCompany = await saveOrUpdateCompanyStatic(
       task.tenantId,
       {
         id: p.companyId,
@@ -404,6 +404,47 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       },
       task.masterAgentId ?? undefined,
     );
+
+    // Save people from LinkedIn company /people/ tab as contacts (best-effort, max 10)
+    const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
+    for (const person of rawPeople.slice(0, 10)) {
+      if (!person.name || person.name.length < 2) continue;
+      const nameParts = person.name.split(/\s+/);
+      const pFirstName = nameParts[0] || '';
+      const pLastName = nameParts.slice(1).join(' ') || '';
+      if (!pFirstName || !pLastName) continue;
+
+      try {
+        // Dedup by linkedinUrl
+        if (person.linkedinUrl) {
+          const [existing] = await withTenant(task.tenantId, async (tx) => {
+            return tx.select({ id: contacts.id }).from(contacts)
+              .where(and(
+                eq(contacts.tenantId, task.tenantId),
+                eq(contacts.linkedinUrl, person.linkedinUrl),
+              )).limit(1);
+          });
+          if (existing) continue;
+        }
+
+        await withTenant(task.tenantId, async (tx) => {
+          await tx.insert(contacts).values({
+            tenantId: task.tenantId,
+            firstName: pFirstName,
+            lastName: pLastName,
+            title: person.title || undefined,
+            linkedinUrl: person.linkedinUrl || undefined,
+            companyId: savedCompany.id,
+            companyName: name,
+            source: 'linkedin_profile',
+            rawData: { discoverySource: 'linkedin_extension_people', ...person },
+          });
+        });
+      } catch (err) {
+        logger.debug({ err, person: person.name }, 'Failed to save LinkedIn person (non-fatal)');
+      }
+    }
+
     return { extracted: 1, saved: 1 };
   }
 

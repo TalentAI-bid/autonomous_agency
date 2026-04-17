@@ -5,6 +5,17 @@ let dailyEmailChecks = 0;
 let dailyResetAt = Date.now() + 24 * 60 * 60 * 1000;
 const MAX_DAILY_EMAIL_CHECKS = 300;
 
+// Domain pattern cache: once we verify which email pattern works for a domain,
+// reuse it for all subsequent people at that domain (saves SMTP quota).
+const domainPatternCache = new Map<string, { patternIndex: number; verifiedAt: number }>();
+const PATTERN_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+
+/** Check if a domain has a cached email pattern from a previous verification. */
+export function hasCachedPattern(domain: string): boolean {
+  const cached = domainPatternCache.get(domain);
+  return !!cached && Date.now() - cached.verifiedAt < PATTERN_CACHE_TTL;
+}
+
 function normalizeForEmail(str: string): string {
   return str
     .toLowerCase()
@@ -62,6 +73,17 @@ export async function findEmailByPattern(
     return { email: null, method: 'no_patterns', attempts: 0 };
   }
 
+  // Check domain pattern cache — if we already verified a pattern for this domain,
+  // reuse it immediately without SMTP calls (saves 8×(N-1) calls per company)
+  const cached = domainPatternCache.get(domain);
+  if (cached && Date.now() - cached.verifiedAt < PATTERN_CACHE_TTL) {
+    const cachedEmail = patterns[cached.patternIndex];
+    if (cachedEmail) {
+      logger.info({ email: cachedEmail, domain, patternIndex: cached.patternIndex }, 'Email from cached pattern (no SMTP)');
+      return { email: cachedEmail, method: 'cached_pattern', attempts: 0 };
+    }
+  }
+
   let attempts = 0;
   let catchAllDetected = false;
 
@@ -86,15 +108,19 @@ export async function findEmailByPattern(
 
       const result: ReacherResponse = await response.json() as ReacherResponse;
 
-      // Catch-all domain — return first pattern as best guess
+      // Catch-all domain — return first pattern as best guess and cache it
       if (result.smtp?.is_catch_all) {
         catchAllDetected = true;
-        logger.info({ domain, candidate }, 'Catch-all domain detected, returning first pattern');
+        domainPatternCache.set(domain, { patternIndex: 0, verifiedAt: Date.now() });
+        logger.info({ domain, candidate }, 'Catch-all domain detected, returning first pattern (cached)');
         return { email: patterns[0]!, method: 'catch_all_guess', attempts };
       }
 
       if (result.is_reachable === 'safe') {
-        logger.info({ candidate, attempts }, 'Email verified as safe via Reacher');
+        // Cache the working pattern for this domain so subsequent people skip SMTP
+        const patternIndex = patterns.indexOf(candidate);
+        domainPatternCache.set(domain, { patternIndex, verifiedAt: Date.now() });
+        logger.info({ candidate, attempts, domain, patternIndex }, 'Email verified as safe via Reacher (pattern cached)');
         return { email: candidate, method: 'smtp_verified', attempts };
       }
 

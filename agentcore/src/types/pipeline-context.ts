@@ -88,4 +88,11 @@ export interface SalesStrategy {
     needsChromeExtension: boolean;
     userNotes: string;
   };
+  pipelineSteps?: Array<{
+    id: string;
+    tool: 'LINKEDIN_EXTENSION' | 'CRAWL4AI' | 'LLM_ANALYSIS' | 'REACHER' | 'EMAIL_PATTERN' | 'SCORING';
+    action: string;
+    dependsOn: string[];
+    params?: Record<string, unknown>;
+  }>;
 }

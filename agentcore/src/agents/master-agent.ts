@@ -266,6 +266,20 @@ export class MasterAgent extends BaseAgent {
               );
             }
 
+            // Show proposed pipeline steps to the user
+            if (strategy.pipelineSteps?.length) {
+              this.sendMessage(null, 'system_alert', {
+                action: 'pipeline_steps_proposed',
+                severity: 'info',
+                steps: strategy.pipelineSteps,
+                message: `Pipeline: ${strategy.pipelineSteps.map(s => s.tool + ':' + s.action).join(' → ')}`,
+              });
+              logger.info(
+                { masterAgentId, stepCount: strategy.pipelineSteps.length, steps: strategy.pipelineSteps.map(s => `${s.id}(${s.tool})`) },
+                'Pipeline steps proposed by strategist',
+              );
+            }
+
             // If strategist says we need the Chrome extension, enqueue LinkedIn search tasks.
             // They stay 'pending' until the user connects their extension; then drain-on-reconnect dispatches them.
             if (strategy.dataSourceStrategy?.needsChromeExtension) {
@@ -506,8 +520,24 @@ export class MasterAgent extends BaseAgent {
       // the pipeline with low-signal rows. If the extension is flagged but
       // offline, fall through to the crawler path so missions don't silently stall.
       const { isExtensionConnected } = await import('../services/extension-dispatcher.js');
-      const needsExtension =
+
+      // Pipeline steps can override the extension/crawler decision
+      const pipelineSteps = pipelineContext?.sales?.salesStrategy?.pipelineSteps;
+      let needsExtension =
         pipelineContext?.sales?.salesStrategy?.dataSourceStrategy?.needsChromeExtension === true;
+
+      if (pipelineSteps?.length) {
+        const rootSteps = pipelineSteps.filter(s => s.dependsOn.length === 0);
+        const hasExtensionRoot = rootSteps.some(s => s.tool === 'LINKEDIN_EXTENSION');
+        if (hasExtensionRoot && !needsExtension) {
+          needsExtension = true;
+          logger.info({ masterAgentId }, 'Pipeline steps override: LINKEDIN_EXTENSION in root → needsExtension=true');
+        } else if (!hasExtensionRoot && needsExtension) {
+          needsExtension = false;
+          logger.info({ masterAgentId }, 'Pipeline steps override: no LINKEDIN_EXTENSION in root → needsExtension=false');
+        }
+      }
+
       const extensionOnline = needsExtension ? await isExtensionConnected(this.tenantId) : false;
       const skipCrawlerDiscovery = needsExtension && extensionOnline;
 

@@ -32,6 +32,47 @@ Your output must be valid JSON with these fields:
     needsChromeExtension: boolean,               // true iff LinkedIn-extension is required for this region
     userNotes: string                            // one-to-two sentence user-facing note, MUST name the sources explicitly
   }
+- pipelineSteps: [{ id: string, tool: string, action: string, dependsOn: string[], params?: object }]
+  This is the ordered execution plan telling the system which tools to use and in what order.
+  Available tools:
+  - LINKEDIN_EXTENSION: Search companies/people via Chrome extension (UK/IE/unknown regions)
+  - CRAWL4AI: Scrape job boards, company websites, public directories
+  - LLM_ANALYSIS: Deep company/candidate profiling via LLM
+  - REACHER: SMTP email verification (first person per company only)
+  - EMAIL_PATTERN: Apply known working email pattern without SMTP verification (subsequent people)
+  - SCORING: Score and qualify contacts
+
+  Rules for pipelineSteps:
+  - Each step has a unique "id" and lists "dependsOn" (IDs of steps that must complete first)
+  - Root steps (dependsOn: []) execute first, in parallel if multiple
+  - For extension-primary regions (needsChromeExtension=true), start with LINKEDIN_EXTENSION steps
+  - For regions with good public sources, start with CRAWL4AI steps
+  - Always include LLM_ANALYSIS after data-collection steps
+  - Use REACHER for the FIRST person per company, then EMAIL_PATTERN for remaining people (saves SMTP quota)
+  - Always end with SCORING
+
+  PIPELINE EXAMPLES:
+
+  UK mission (extension-primary):
+  [
+    { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+    { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
+    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+    { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
+    { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
+  ]
+
+  France mission (web sources):
+  [
+    { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
+    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs"] },
+    { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
+    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+    { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
+    { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
+  ]
 
 BD STRATEGY DECISION — Pick ONE based on the mission:
 - "hiring_signal": The mission is about selling to companies that are actively hiring for roles related to the service (e.g. selling DevOps consulting → find companies hiring DevOps engineers). Best when the service directly replaces or augments a role.

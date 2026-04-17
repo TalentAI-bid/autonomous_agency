@@ -230,16 +230,19 @@ export class EnrichmentAgent extends BaseAgent {
           );
         }
 
+        logger.info({ contactId, companyUrl, pipelineStep: 'scrape_company_website' }, 'Enrichment: scraping company website (contact path)');
+
         const companySourceResults = await Promise.allSettled([
+          // Always attempt /about and /careers even if homepage was thin
           (async () => {
-            if (!companyUrl || !homepageOk) return;
+            if (!companyUrl) return;
             aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href);
           })(),
           (async () => {
-            if (!companyUrl || !homepageOk) return;
+            if (!companyUrl) return;
             careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href);
           })(),
-          // Team page — try multiple paths
+          // Team page — try multiple paths (expensive, only when homepage looks healthy)
           (async () => {
             if (!companyUrl || !homepageOk) return;
             for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
@@ -489,7 +492,11 @@ export class EnrichmentAgent extends BaseAgent {
                       personEmail = patternResult.email;
                       emailMethod = patternResult.method;
                       emailAttempts = patternResult.attempts;
-                      logger.info({ contactId, personName: person.name, personEmail, method: patternResult.method, attempts: patternResult.attempts }, 'Key person email found via pattern + Reacher');
+                      logger.info({
+                        contactId, personName: person.name, personEmail,
+                        method: patternResult.method, attempts: patternResult.attempts,
+                        cached: patternResult.method === 'cached_pattern',
+                      }, 'Key person email found');
                     }
                     // FALLBACK: Old Generect/emailIntelligence method
                     if (!personEmail) {
@@ -1012,10 +1019,14 @@ export class EnrichmentAgent extends BaseAgent {
         );
       }
 
+      logger.info({ companyId, companyUrl, pipelineStep: 'scrape_company_website' }, 'Enrichment: scraping company website');
+
       const companySourceResults = await Promise.allSettled([
-        (async () => { if (!companyUrl || !homepageOk) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
-        (async () => { if (!companyUrl || !homepageOk) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
-        // Team page — try multiple paths
+        // Always attempt /about and /careers even if homepage was thin — these paths
+        // often work when root redirects or returns minimal HTML
+        (async () => { if (!companyUrl) return; aboutPageContent = await this.scrapeUrl(new URL('/about', companyUrl).href); })(),
+        (async () => { if (!companyUrl) return; careersPageContent = await this.scrapeUrl(new URL('/careers', companyUrl).href); })(),
+        // Team page — try multiple paths (expensive, so only when homepage looks healthy)
         (async () => {
           if (!companyUrl || !homepageOk) return;
           for (const path of ['/team', '/about', '/about-us', '/leadership', '/our-team', '/people', '/management', '/company/team']) {
@@ -1275,7 +1286,11 @@ export class EnrichmentAgent extends BaseAgent {
                   personEmail = patternResult.email;
                   emailMethod = patternResult.method;
                   emailAttempts = patternResult.attempts;
-                  logger.info({ personName: person.name, email: personEmail, method: patternResult.method, attempts: patternResult.attempts }, 'Email found for team member via pattern + Reacher');
+                  logger.info({
+                    personName: person.name, email: personEmail,
+                    method: patternResult.method, attempts: patternResult.attempts,
+                    cached: patternResult.method === 'cached_pattern',
+                  }, 'Email found for team member');
                 }
               }
               // FALLBACK: Old Generect/emailIntelligence method

@@ -289,13 +289,24 @@ export class MasterAgent extends BaseAgent {
                 // later in the per-company contact search. Using role as a company-search
                 // keyword silently excludes target companies whose LinkedIn headline
                 // doesn't contain the exact role string.
+                const userRole = strategy.userRole || 'vendor';
+                const targetIndustries = strategy.targetIndustries ?? [];
                 const services = (agentConfig.services as string[]) ?? [];
                 const industries = pipelineContext.sales?.industries ?? [];
-                const searchTerms = services.length > 0
-                  ? services.slice(0, 5)
-                  : industries.length > 0
-                    ? industries.slice(0, 5)
-                    : ['technology consulting'];
+
+                let searchTerms: string[];
+                if (userRole === 'vendor' && targetIndustries.length > 0) {
+                  // Strategist identified WHO BUYS — use those, not what the user sells
+                  searchTerms = targetIndustries.slice(0, 5);
+                } else if (targetIndustries.length > 0) {
+                  searchTerms = targetIndustries.slice(0, 5);
+                } else if (industries.length > 0) {
+                  searchTerms = industries.slice(0, 5);
+                } else if (services.length > 0) {
+                  searchTerms = services.slice(0, 5);
+                } else {
+                  searchTerms = ['technology consulting'];
+                }
                 const locs = pipelineContext.locations ?? [];
 
                 let dispatched = 0;

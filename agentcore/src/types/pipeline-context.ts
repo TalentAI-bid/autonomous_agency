@@ -47,6 +47,10 @@ export interface PipelineContext {
 }
 
 export interface SalesStrategy {
+  reasoning?: string;
+  userRole?: 'vendor' | 'buyer';
+  targetIndustries?: string[];
+  painPointsAddressed?: string[];
   bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid';
   marketAnalysis?: {
     customerPersonas?: Array<{

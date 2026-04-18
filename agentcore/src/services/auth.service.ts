@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
-import { Redis } from 'ioredis';
-import { env } from '../config/env.js';
+import type { Redis } from 'ioredis';
+import { createRedisConnection } from '../queues/setup.js';
 
 const BCRYPT_ROUNDS = 12;
 const ACCESS_TOKEN_EXPIRY = '15m';
@@ -12,7 +12,7 @@ let redis: Redis | null = null;
 
 function getRedis(): Redis {
   if (!redis) {
-    redis = new Redis(env.REDIS_URL);
+    redis = createRedisConnection();
   }
   return redis;
 }

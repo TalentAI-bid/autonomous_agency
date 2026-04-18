@@ -342,11 +342,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
           },
           task.masterAgentId ?? undefined,
         );
-        await dispatchJob(task.tenantId, 'enrichment', {
-          companyId: savedRow.id,
-          masterAgentId: task.masterAgentId ?? undefined,
-          source: 'linkedin_extension',
-        });
+        // Enrichment dispatch moved to fetch_company — search results lack domain
         logger.debug(
           { taskId: task.id, companyId: savedRow.id, name, linkedinUrl },
           'ingest_saved_company',
@@ -404,6 +400,13 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       },
       task.masterAgentId ?? undefined,
     );
+
+    // Dispatch enrichment now that we have the real domain from LinkedIn
+    await dispatchJob(task.tenantId, 'enrichment', {
+      companyId: savedCompany.id,
+      masterAgentId: task.masterAgentId ?? undefined,
+      source: 'linkedin_extension',
+    });
 
     // Save people from LinkedIn company /people/ tab as contacts (best-effort, max 10)
     const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;

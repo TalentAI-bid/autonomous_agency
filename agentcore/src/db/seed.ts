@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { tenants, users, masterAgents, agentConfigs } from './schema/index.js';
+import { tenants, users, masterAgents, agentConfigs, userTenants } from './schema/index.js';
 import bcrypt from 'bcryptjs';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://agentcore:agentcore@localhost:5432/agentcore';
@@ -33,6 +33,15 @@ async function seed() {
   }).returning();
 
   console.log(`Created user: ${user!.email} (${user!.id})`);
+
+  // Link user to tenant in user_tenants
+  await db.insert(userTenants).values({
+    userId: user!.id,
+    tenantId: tenant!.id,
+    role: 'owner',
+  });
+
+  console.log('Linked user to tenant in user_tenants');
 
   // Create a sample master agent
   const [agent] = await db.insert(masterAgents).values({

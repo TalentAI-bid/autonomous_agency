@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/auth.store';
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { Breadcrumb } from './breadcrumb';
+import { WorkspaceSwitcher } from './workspace-switcher';
 import { apiPost } from '@/lib/api';
 
 export function Header() {
@@ -30,7 +31,8 @@ export function Header() {
     <header className="h-14 border-b border-border flex items-center px-6 gap-4 bg-background/80 backdrop-blur-sm sticky top-0 z-40">
       <Breadcrumb />
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-3">
+        <WorkspaceSwitcher />
         {/* New Agent CTA */}
         <Button asChild size="sm" className="gap-1.5">
           <Link href="/agents/new">

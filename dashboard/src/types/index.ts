@@ -296,12 +296,20 @@ export interface PaginatedResponse<T> {
   };
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
 export interface AuthResponse {
   data: {
     token: string;
     refreshToken?: string;
     user: User;
     tenant: Tenant;
+    workspaces?: Workspace[];
   };
 }
 

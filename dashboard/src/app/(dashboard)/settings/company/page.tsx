@@ -12,8 +12,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Building2, Target, TrendingUp, Award, Send, Loader2, Save,
+  Building2, Target, TrendingUp, Award, Send, Loader2, Save, Sparkles,
 } from 'lucide-react';
+import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import type { CompanyProfile } from '@/types';
 
 const COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];
@@ -32,6 +33,7 @@ export default function CompanyProfilePage() {
   const { toast } = useToast();
 
   const [form, setForm] = useState<Partial<CompanyProfile>>({});
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
     if (profile && Object.keys(profile).length > 0) {
@@ -79,12 +81,20 @@ export default function CompanyProfilePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Company Profile</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Set up your company identity and sales positioning. Agents use this to personalize outreach.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Company Profile</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Set up your company identity and sales positioning. Agents use this to personalize outreach.
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => setCopilotOpen(true)} className="gap-2">
+          <Sparkles className="w-4 h-4" />
+          Setup with AI
+        </Button>
       </div>
+
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
 
       {/* Card 1: Company Identity */}
       <Card>

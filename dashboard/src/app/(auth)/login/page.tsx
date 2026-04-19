@@ -24,8 +24,8 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await apiPost<{ token: string; user: AuthResponse['data']['user']; tenant: AuthResponse['data']['tenant'] }>('/auth/login', { email, password });
-      login(res.token, res.user, res.tenant);
+      const res = await apiPost<{ token: string; user: AuthResponse['data']['user']; tenant: AuthResponse['data']['tenant']; workspaces?: Array<{ id: string; name: string; slug: string; role: string }> }>('/auth/login', { email, password });
+      login(res.token, res.user, res.tenant, res.workspaces);
       router.push('/dashboard');
     } catch {
       toast({ title: 'Login failed', description: 'Invalid email or password', variant: 'destructive' });

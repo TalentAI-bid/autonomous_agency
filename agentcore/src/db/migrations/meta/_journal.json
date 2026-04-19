@@ -148,6 +148,13 @@
       "when": 1776626562513,
       "tag": "0020_ancient_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1776630149435,
+      "tag": "0021_bouncy_shiver_man",
+      "breakpoints": true
     }
   ]
 }

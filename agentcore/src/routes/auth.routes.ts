@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { users, tenants } from '../db/schema/index.js';
+import { users, tenants, userTenants } from '../db/schema/index.js';
 import {
   hashPassword,
   verifyPassword,
@@ -60,6 +60,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
       role: 'owner',
     }).returning();
 
+    // Link user to tenant in user_tenants
+    await db.insert(userTenants).values({
+      userId: user!.id,
+      tenantId: tenant.id,
+      role: 'owner',
+    });
+
     // Generate tokens
     const accessToken = generateAccessToken(fastify, {
       tenantId: tenant.id,
@@ -81,6 +88,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
         token: accessToken,
         user: { id: user!.id, email: user!.email, name: user!.name, role: user!.role },
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+        workspaces: [{ id: tenant.id, name: tenant.name, slug: tenant.slug, role: 'owner' }],
       },
     });
   });
@@ -114,14 +122,25 @@ export default async function authRoutes(fastify: FastifyInstance) {
       path: '/',
     });
 
-    // Look up tenant for response
+    // Look up tenant + all workspaces for response
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
+
+    const workspaces = await db.select({
+      id: tenants.id,
+      name: tenants.name,
+      slug: tenants.slug,
+      role: userTenants.role,
+    })
+      .from(userTenants)
+      .innerJoin(tenants, eq(userTenants.tenantId, tenants.id))
+      .where(eq(userTenants.userId, user.id));
 
     return {
       data: {
         token: accessToken,
         user: { id: user.id, email: user.email, name: user.name, role: user.role },
         tenant: tenant ? { id: tenant.id, name: tenant.name, slug: tenant.slug } : undefined,
+        workspaces,
       },
     };
   });

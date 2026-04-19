@@ -96,3 +96,6 @@ export type { OutreachEmail, NewOutreachEmail } from './outreach-emails.js';
 
 export { products } from './products.js';
 export type { Product, NewProduct } from './products.js';
+
+export { userTenants } from './user-tenants.js';
+export type { UserTenant, NewUserTenant } from './user-tenants.js';

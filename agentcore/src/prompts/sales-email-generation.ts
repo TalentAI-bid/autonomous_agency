@@ -40,6 +40,12 @@ export interface EmailGenerationContext {
     website?: string;
     senderFirstName?: string;
     senderTitle?: string;
+    products?: Array<{
+      name: string;
+      description?: string | null;
+      keyFeatures?: string[] | null;
+      painPointsSolved?: string[] | null;
+    }>;
   };
   campaign: {
     tone?: string;
@@ -124,7 +130,7 @@ Always respond with valid JSON containing "subject" and "body" fields.`;
   ].filter(Boolean).join('\n');
 
   // Build sender section
-  const senderLines = [
+  let senderLines = [
     ctx.sender.companyName ? `- Our Company: ${ctx.sender.companyName}` : null,
     ctx.sender.companyDescription ? `- What We Do: ${ctx.sender.companyDescription}` : null,
     ctx.sender.services?.length ? `- Services: ${ctx.sender.services.join(', ')}` : null,
@@ -139,6 +145,17 @@ Always respond with valid JSON containing "subject" and "body" fields.`;
     ctx.sender.senderFirstName ? `- Sender Name: ${ctx.sender.senderFirstName}` : null,
     ctx.sender.senderTitle ? `- Sender Title: ${ctx.sender.senderTitle}` : null,
   ].filter(Boolean).join('\n');
+
+  // Append products to sender context
+  if (ctx.sender.products?.length) {
+    const productLines = ctx.sender.products.slice(0, 3).map((p) => {
+      const parts = [`  * ${p.name}: ${p.description ?? ''}`];
+      if (p.keyFeatures?.length) parts.push(`    Features: ${p.keyFeatures.slice(0, 3).join(', ')}`);
+      if (p.painPointsSolved?.length) parts.push(`    Solves: ${p.painPointsSolved.slice(0, 3).join(', ')}`);
+      return parts.join('\n');
+    }).join('\n');
+    senderLines += `\n- Products/Services:\n${productLines}`;
+  }
 
   // Build follow-up strategy
   const followUpStrategy = buildFollowUpStrategy(ctx, 'sales');

@@ -1,7 +1,8 @@
 import { eq, and, inArray, sql, count, lt, isNotNull } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks } from '../db/schema/index.js';
+import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks, products as productsTable } from '../db/schema/index.js';
+import { getTenantById } from '../services/tenant.service.js';
 import { AGENT_TYPES } from '../queues/queues.js';
 import { getQueueStatus } from '../services/queue.service.js';
 import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserPrompt } from '../prompts/master-agent.prompt.js';
@@ -137,6 +138,57 @@ export class MasterAgent extends BaseAgent {
           },
         }),
       };
+
+      // 3c-ii. Enrich PipelineContext with company profile + selected products
+      try {
+        const tenant = await getTenantById(this.tenantId);
+        const tenantSettings = (tenant.settings ?? {}) as Record<string, unknown>;
+        const companyProfile = tenantSettings.companyProfile as Record<string, unknown> | undefined;
+
+        if (companyProfile && isSales) {
+          if (!pipelineContext.sales) pipelineContext.sales = {};
+          // Company profile overrides agent-level config where present
+          if (companyProfile.valueProposition) pipelineContext.sales.valueProposition ??= companyProfile.valueProposition as string;
+          if (companyProfile.differentiators) pipelineContext.sales.differentiators ??= companyProfile.differentiators as string[];
+          if (companyProfile.callToAction) pipelineContext.sales.callToAction ??= companyProfile.callToAction as string;
+          if (companyProfile.calendlyUrl) pipelineContext.sales.calendlyUrl ??= companyProfile.calendlyUrl as string;
+          if (companyProfile.companyName) pipelineContext.senderCompanyName ??= companyProfile.companyName as string;
+          if (companyProfile.defaultSenderName) pipelineContext.senderFirstName ??= companyProfile.defaultSenderName as string;
+          if (companyProfile.defaultSenderTitle) pipelineContext.senderTitle ??= companyProfile.defaultSenderTitle as string;
+
+          // ICP fields
+          const icp = companyProfile.icp as Record<string, unknown> | undefined;
+          if (icp) {
+            if (icp.targetIndustries && !pipelineContext.sales.industries?.length) {
+              pipelineContext.sales.industries = icp.targetIndustries as string[];
+            }
+            if (icp.companySizes && !pipelineContext.sales.companySizes?.length) {
+              pipelineContext.sales.companySizes = icp.companySizes as string[];
+            }
+          }
+        }
+
+        // Load selected products
+        const productIds = (agentConfig.productIds as string[]) ?? [];
+        if (productIds.length > 0 && isSales) {
+          const selectedProducts = await withTenant(this.tenantId, async (tx) =>
+            tx.select({
+              name: productsTable.name,
+              description: productsTable.description,
+              targetAudience: productsTable.targetAudience,
+              painPointsSolved: productsTable.painPointsSolved,
+              keyFeatures: productsTable.keyFeatures,
+              differentiators: productsTable.differentiators,
+              pricingModel: productsTable.pricingModel,
+            }).from(productsTable)
+              .where(and(inArray(productsTable.id, productIds), eq(productsTable.isActive, true))),
+          );
+          if (!pipelineContext.sales) pipelineContext.sales = {};
+          pipelineContext.sales.products = selectedProducts;
+        }
+      } catch (err) {
+        logger.warn({ err, masterAgentId }, 'Failed to load company profile / products');
+      }
 
       // 3d. Run strategist INLINE so its search queries feed discovery
       {

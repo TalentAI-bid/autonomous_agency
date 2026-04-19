@@ -257,6 +257,18 @@ export function buildInitialStrategyUserPrompt(ctx: PipelineContext, mission?: s
 
   sections.push(`\nIMPORTANT: Analyze the mission carefully. Adapt ALL search queries, personas, and strategy to the SPECIFIC industry and target type described. If the mission is about universities, generate academic-focused queries. If about consulting, generate pain-point and RFP queries. Do NOT default to tech/SaaS patterns unless the mission is explicitly about tech products.`);
 
+  if (sales?.products?.length) {
+    sections.push(`## Products / Services`);
+    for (const p of sales.products) {
+      sections.push(`### ${p.name}`);
+      if (p.description) sections.push(`Description: ${p.description}`);
+      if (p.targetAudience) sections.push(`Target: ${p.targetAudience}`);
+      if (p.painPointsSolved?.length) sections.push(`Solves: ${p.painPointsSolved.join(', ')}`);
+      if (p.keyFeatures?.length) sections.push(`Features: ${p.keyFeatures.join(', ')}`);
+      if (p.differentiators?.length) sections.push(`Differentiators: ${p.differentiators.join(', ')}`);
+    }
+  }
+
   if (sales?.caseStudies?.length) {
     sections.push(`## Case Studies`);
     for (const cs of sales.caseStudies) {

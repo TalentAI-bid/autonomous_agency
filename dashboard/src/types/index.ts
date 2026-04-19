@@ -579,3 +579,48 @@ export interface CompanyFilters {
   cursor?: string;
   limit?: number;
 }
+
+// ── Product & Company Profile Types ──────────────────────────────────────────
+
+export interface Product {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  targetAudience?: string;
+  painPointsSolved?: string[];
+  keyFeatures?: string[];
+  differentiators?: string[];
+  pricingModel?: string;
+  pricingDetails?: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanyProfile {
+  companyName: string;
+  website?: string;
+  industry?: string;
+  companySize?: string;
+  foundedYear?: number | null;
+  headquarters?: string;
+  valueProposition: string;
+  elevatorPitch?: string;
+  targetMarketDescription?: string;
+  icp?: {
+    targetIndustries?: string[];
+    companySizes?: string[];
+    decisionMakerRoles?: string[];
+    regions?: string[];
+    painPointsAddressed?: string[];
+  };
+  differentiators?: string[];
+  socialProof?: string;
+  defaultSenderName?: string;
+  defaultSenderTitle?: string;
+  calendlyUrl?: string;
+  callToAction?: string;
+}

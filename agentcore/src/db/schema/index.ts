@@ -93,3 +93,6 @@ export type { ExtensionSession, NewExtensionSession, ExtensionTask, NewExtension
 
 export { outreachEmails } from './outreach-emails.js';
 export type { OutreachEmail, NewOutreachEmail } from './outreach-emails.js';
+
+export { products } from './products.js';
+export type { Product, NewProduct } from './products.js';

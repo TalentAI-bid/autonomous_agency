@@ -141,6 +141,13 @@
       "when": 1776338106343,
       "tag": "0019_charming_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1776626562513,
+      "tag": "0020_ancient_wong",
+      "breakpoints": true
     }
   ]
 }

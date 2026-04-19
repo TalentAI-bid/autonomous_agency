@@ -217,6 +217,7 @@ export class OutreachAgent extends BaseAgent {
           website: (config.senderWebsite as string) ?? undefined,
           senderFirstName: (config.senderFirstName as string) ?? undefined,
           senderTitle: (config.senderTitle as string) ?? undefined,
+          products: ((config.pipelineContext as Record<string, unknown>)?.sales as Record<string, unknown>)?.products as Array<{ name: string; description?: string | null; keyFeatures?: string[] | null; painPointsSolved?: string[] | null }> | undefined,
         },
         campaign: {
           tone: (config.emailTone as string) ?? 'professional',

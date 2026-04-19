@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Bot, Users, Building2, Megaphone,
-  FileText, BarChart3, Settings, Zap, Kanban, Mail, Inbox, CalendarClock, Chrome,
+  FileText, BarChart3, Settings, Zap, Kanban, Mail, Inbox, CalendarClock, Chrome, Package,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRealtimeStore } from '@/stores/realtime.store';
@@ -17,6 +17,8 @@ const navItems = [
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/mailbox', label: 'Mailbox', icon: Inbox },
   { href: '/schedule', label: 'Schedule', icon: CalendarClock },
+  { href: '/settings/company', label: 'Company', icon: Building2 },
+  { href: '/settings/products', label: 'Products', icon: Package },
   { href: '/settings/email', label: 'Email', icon: Mail },
   { href: '/settings/extension', label: 'Extension', icon: Chrome },
   { href: '/settings', label: 'Settings', icon: Settings },

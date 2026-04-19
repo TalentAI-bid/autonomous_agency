@@ -5,11 +5,26 @@ export function buildDraftEmailSystemPrompt(
   company: Company | null,
 ): string {
   const config = (masterAgent?.config as Record<string, unknown>) ?? {};
-  const senderCompany = (config.companyName as string) ?? '';
+  const senderCompany = (config.companyName as string) ?? (config.senderCompanyName as string) ?? '';
   const services = (config.services as string[]) ?? [];
   const valueProp = (config.valueProp as string) ?? (config.valueProposition as string) ?? '';
   const strategy = config.salesStrategy as Record<string, unknown> | undefined;
   const angles = (strategy?.emailStrategy as Record<string, unknown>)?.angles as string[] | undefined;
+  const pipelineCtx = config.pipelineContext as Record<string, unknown> | undefined;
+  const salesCtx = pipelineCtx?.sales as Record<string, unknown> | undefined;
+  const products = (salesCtx?.products as Array<{ name: string; description?: string; keyFeatures?: string[]; painPointsSolved?: string[] }>) ?? [];
+
+  let productsSection = '';
+  if (products.length > 0) {
+    const lines = products.slice(0, 3).map((p) => {
+      const parts = [`  * ${p.name}`];
+      if (p.description) parts.push(`: ${p.description}`);
+      if (p.keyFeatures?.length) parts.push(`\n    Features: ${p.keyFeatures.slice(0, 3).join(', ')}`);
+      if (p.painPointsSolved?.length) parts.push(`\n    Solves: ${p.painPointsSolved.slice(0, 3).join(', ')}`);
+      return parts.join('');
+    });
+    productsSection = `- Products/Services:\n${lines.join('\n')}`;
+  }
 
   return `You are a B2B outreach specialist writing a personalized cold email.
 
@@ -18,6 +33,7 @@ SENDER CONTEXT:
 - Services: ${services.join(', ') || 'Not specified'}
 - Value proposition: ${valueProp || 'Not specified'}
 ${angles?.length ? `- Outreach angles: ${angles.join('; ')}` : ''}
+${productsSection}
 
 INSTRUCTIONS:
 - Write a personalized cold email that references the prospect company's specific pain points, signals, and context

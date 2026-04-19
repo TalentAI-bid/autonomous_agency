@@ -44,6 +44,7 @@ import opportunityRoutes from './routes/opportunity.routes.js';
 import agentRoomRoutes from './routes/agent-room.routes.js';
 import linkedinRoutes from './routes/linkedin.routes.js';
 import extensionRoutes from './routes/extension.routes.js';
+import productRoutes from './routes/product.routes.js';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -172,6 +173,7 @@ async function buildApp() {
   await fastify.register(agentRoomRoutes, { prefix: '/api/agent-room' });
   await fastify.register(linkedinRoutes, { prefix: '/api/linkedin' });
   await fastify.register(extensionRoutes, { prefix: '/api/extension' });
+  await fastify.register(productRoutes, { prefix: '/api/products' });
 
   // Tracking pixel route — registered WITHOUT /api prefix (email clients hit this directly)
   await fastify.register(trackingRoutes, { prefix: '/track' });

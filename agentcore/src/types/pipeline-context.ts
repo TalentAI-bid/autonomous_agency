@@ -23,6 +23,15 @@ export interface PipelineContext {
     callToAction?: string;
     calendlyUrl?: string;
     salesStrategy?: SalesStrategy;
+    products?: Array<{
+      name: string;
+      description?: string | null;
+      targetAudience?: string | null;
+      painPointsSolved?: string[] | null;
+      keyFeatures?: string[] | null;
+      differentiators?: string[] | null;
+      pricingModel?: string | null;
+    }>;
   };
 
   // Recruitment-specific

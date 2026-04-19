@@ -2,11 +2,15 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useCreateAgent, useStartAgent } from '@/hooks/use-agents';
 import { useEmailAccounts } from '@/hooks/use-email-settings';
+import { useProducts } from '@/hooks/use-products';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Rocket, ChevronDown, ChevronUp } from 'lucide-react';
@@ -25,8 +29,17 @@ export function CreateAgentWizard() {
   const [scoringThreshold, setScoringThreshold] = useState(70);
   const [emailTone, setEmailTone] = useState('professional');
   const [emailAccountId, setEmailAccountId] = useState('');
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const { data: emailAccountsList } = useEmailAccounts();
   const activeEmailAccounts = emailAccountsList?.filter((a) => a.isActive) ?? [];
+  const { data: productsList } = useProducts();
+  const activeProducts = (productsList ?? []).filter((p) => p.isActive);
+
+  function toggleProduct(id: string, checked: boolean) {
+    setSelectedProductIds((prev) =>
+      checked ? [...prev, id] : prev.filter((pid) => pid !== id),
+    );
+  }
 
   function generateName(text: string): string {
     const words = text.trim().split(/\s+/).slice(0, 5).join(' ');
@@ -59,6 +72,7 @@ export function CreateAgentWizard() {
           ...(locations.length > 0 && { locations }),
           ...(skills.length > 0 && { requiredSkills: skills }),
           ...(emailAccountId && { emailAccountId }),
+          ...(selectedProductIds.length > 0 && { productIds: selectedProductIds }),
         },
       });
 
@@ -120,6 +134,45 @@ export function CreateAgentWizard() {
           <p className="text-xs text-muted-foreground">
             Include role, skills, experience level, and location preferences. The more specific, the better the matches.
           </p>
+        </div>
+
+        {/* Product Selection */}
+        <div className="space-y-2">
+          <Label>Products to promote</Label>
+          <p className="text-xs text-muted-foreground">
+            Select which products/services this agent should focus on in outreach
+          </p>
+          {activeProducts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No products configured.{' '}
+              <Link href="/settings/products" className="text-primary underline">
+                Add products
+              </Link>
+            </p>
+          ) : (
+            <div className="space-y-2 mt-1">
+              {activeProducts.map((product) => (
+                <label key={product.id} className="flex items-start gap-2 cursor-pointer p-2 rounded-md hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    checked={selectedProductIds.includes(product.id)}
+                    onCheckedChange={(checked) => toggleProduct(product.id, !!checked)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-medium">{product.name}</span>
+                      {product.category && (
+                        <Badge variant="secondary" className="text-xs">{product.category}</Badge>
+                      )}
+                    </div>
+                    {product.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{product.description}</p>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Advanced Settings (collapsible) */}

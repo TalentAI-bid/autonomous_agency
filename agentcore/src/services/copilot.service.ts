@@ -3,7 +3,7 @@ import { withTenant } from '../config/database.js';
 import { conversations, conversationMessages, tenants, products } from '../db/schema/index.js';
 import { complete, completeStream } from '../tools/together-ai.tool.js';
 import { scrape } from '../tools/crawl4ai.tool.js';
-import { buildCopilotSystemPrompt } from '../prompts/copilot.prompt.js';
+import { buildCopilotSystemPrompt, buildProductSuggestPrompt } from '../prompts/copilot.prompt.js';
 import { updateTenant } from './tenant.service.js';
 import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js';
 import type { ChatMessage } from '../tools/together-ai.tool.js';
@@ -221,9 +221,10 @@ export async function* sendCopilotMessageStream(
     }).returning();
   });
 
-  // Update extractedConfig if profile or products found
+  // Update extractedConfig — merge with existing to preserve products across refinements
   if (profileData || productsData) {
-    const configUpdate: Record<string, unknown> = { type: 'copilot' };
+    const existingConfig = (conversation.extractedConfig as Record<string, unknown>) ?? {};
+    const configUpdate: Record<string, unknown> = { ...existingConfig, type: 'copilot' };
     if (profileData) configUpdate.profile = profileData;
     if (productsData) configUpdate.products = productsData;
     await withTenant(tenantId, async (tx) => {
@@ -329,4 +330,50 @@ export async function approveCopilotProfile(tenantId: string, conversationId: st
   });
 
   return { profile: profileData, productsCreated: createdProducts };
+}
+
+// ── Suggest Product ─────────────────────────────────────────────────────────
+
+interface ProductSuggestion {
+  description: string;
+  category: string;
+  targetAudience: string;
+  painPointsSolved: string[];
+  keyFeatures: string[];
+  differentiators: string[];
+  pricingModel: string | null;
+  pricingDetails: string;
+}
+
+export async function suggestProduct(tenantId: string, productName: string): Promise<ProductSuggestion> {
+  // Load company profile for context
+  const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+  const settings = (tenant?.settings as Record<string, unknown>) ?? {};
+  const companyProfile = settings.companyProfile as Record<string, unknown> | undefined;
+
+  const prompt = buildProductSuggestPrompt(productName, companyProfile);
+  const llmMessages: ChatMessage[] = [
+    { role: 'system', content: prompt },
+    { role: 'user', content: `Generate complete product details for: "${productName}"` },
+  ];
+
+  const response = await complete(tenantId, llmMessages);
+
+  // Extract JSON from response
+  const jsonMatch = response.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new ValidationError('Failed to generate product suggestion');
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as ProductSuggestion;
+    // Validate pricingModel
+    const validModels = ['subscription', 'per_seat', 'one_time', 'usage_based', 'freemium', 'custom'];
+    if (parsed.pricingModel && !validModels.includes(parsed.pricingModel)) {
+      parsed.pricingModel = null;
+    }
+    return parsed;
+  } catch {
+    throw new ValidationError('Failed to parse product suggestion');
+  }
 }

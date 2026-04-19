@@ -3,6 +3,7 @@ import {
   createCopilotSession,
   sendCopilotMessageStream,
   approveCopilotProfile,
+  suggestProduct,
 } from '../services/copilot.service.js';
 import { getConversation } from '../services/chat.service.js';
 import { ValidationError } from '../utils/errors.js';
@@ -62,5 +63,16 @@ export default async function copilotRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { id: string } }>('/sessions/:id/approve', async (request) => {
     const result = await approveCopilotProfile(request.tenantId, request.params.id);
     return { data: result };
+  });
+
+  // POST /api/copilot/suggest-product — AI-generate product details from name
+  fastify.post('/suggest-product', async (request) => {
+    const body = request.body as Record<string, unknown>;
+    const name = (body?.name as string) ?? '';
+    if (!name.trim()) {
+      throw new ValidationError('Product name is required');
+    }
+    const suggestion = await suggestProduct(request.tenantId, name.trim());
+    return { data: { suggestion } };
   });
 }

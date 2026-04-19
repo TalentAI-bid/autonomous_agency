@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct } from '@/hooks/use-products';
+import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct, useSuggestProduct } from '@/hooks/use-products';
 import { useAuthStore } from '@/stores/auth.store';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Package, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Loader2, Sparkles } from 'lucide-react';
 import type { Product } from '@/types';
 
 const PRICING_MODELS = [
@@ -104,6 +104,7 @@ export default function ProductsPage() {
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
   const deleteProduct = useDeleteProduct();
+  const suggestProduct = useSuggestProduct();
   const tenant = useAuthStore(s => s.tenant);
   const { toast } = useToast();
 
@@ -141,6 +142,31 @@ export default function ProductsPage() {
       await updateProduct.mutateAsync({ id: product.id, isActive: !product.isActive });
     } catch {
       toast({ title: 'Failed to update product', variant: 'destructive' });
+    }
+  }
+
+  async function handleAiSuggest() {
+    if (!form.name.trim()) {
+      toast({ title: 'Enter a product name first', variant: 'destructive' });
+      return;
+    }
+    try {
+      const result = await suggestProduct.mutateAsync(form.name.trim());
+      const s = result.suggestion;
+      setForm(f => ({
+        ...f,
+        description: s.description ?? f.description,
+        category: s.category ?? f.category,
+        targetAudience: s.targetAudience ?? f.targetAudience,
+        painPointsSolved: s.painPointsSolved?.length ? joinTags(s.painPointsSolved) : f.painPointsSolved,
+        keyFeatures: s.keyFeatures?.length ? joinTags(s.keyFeatures) : f.keyFeatures,
+        differentiators: s.differentiators?.length ? joinTags(s.differentiators) : f.differentiators,
+        pricingModel: s.pricingModel ?? f.pricingModel,
+        pricingDetails: s.pricingDetails ?? f.pricingDetails,
+      }));
+      toast({ title: 'AI suggestions applied' });
+    } catch {
+      toast({ title: 'Failed to generate suggestions', variant: 'destructive' });
     }
   }
 
@@ -338,12 +364,30 @@ export default function ProductsPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label>Product Name *</Label>
-              <Input
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="e.g., Cloud Migration Service"
-                required
-              />
+              <div className="flex gap-2">
+                <Input
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g., Cloud Migration Service"
+                  required
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAiSuggest}
+                  disabled={!form.name.trim() || suggestProduct.isPending}
+                  className="shrink-0 gap-1.5"
+                >
+                  {suggestProduct.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  AI Suggest
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-1.5">

@@ -137,3 +137,32 @@ Do NOT present the profile as a list of questions or confirmations. Present it a
 - Do NOT wait for perfect information — a good draft now is better than a perfect profile after 10 questions
 - Do NOT mention the JSON format to the user — present a human-readable summary alongside it${existingSection}`;
 }
+
+export function buildProductSuggestPrompt(productName: string, companyProfile?: Record<string, unknown>): string {
+  const profileContext = companyProfile && Object.keys(companyProfile).length > 0
+    ? `\n\nCOMPANY CONTEXT:\n${JSON.stringify(companyProfile, null, 2)}\n\nUse this company context to make the product details relevant — align the target audience, pain points, and positioning with the company's ICP and value proposition.`
+    : '';
+
+  return `You are a product marketing expert. Given a product or service name, generate complete product details as a JSON object.
+
+Your output must be ONLY a valid JSON object with these exact fields:
+{
+  "description": "1-2 sentence description of what the product does and its core value",
+  "category": "One of: SaaS, Consulting, Professional Services, Hardware, Platform, API, Managed Service, Training",
+  "targetAudience": "Specific description of who buys this product (roles, company types, situations)",
+  "painPointsSolved": ["Specific pain point 1", "Specific pain point 2", "Specific pain point 3"],
+  "keyFeatures": ["Key feature 1", "Key feature 2", "Key feature 3", "Key feature 4"],
+  "differentiators": ["What makes this product unique 1", "What makes this product unique 2"],
+  "pricingModel": "subscription | per_seat | one_time | usage_based | freemium | custom",
+  "pricingDetails": "Estimated pricing range or structure, e.g. 'Starting at $X/mo per user' or '$X-$Y per project'"
+}
+
+Rules:
+- Be specific and concrete — no generic marketing speak
+- painPointsSolved: 3-5 real problems buyers face, not vague ones
+- keyFeatures: 3-6 specific capabilities, not buzzwords
+- differentiators: 2-3 things that make it stand out vs competitors
+- pricingModel: pick the most appropriate model for this type of product
+- pricingDetails: give a realistic price estimate based on the market (research typical pricing for similar products)
+- Output ONLY the JSON object, no other text${profileContext}`;
+}

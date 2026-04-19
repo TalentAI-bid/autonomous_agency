@@ -44,3 +44,21 @@ export function useDeleteProduct() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
   });
 }
+
+interface ProductSuggestion {
+  description: string;
+  category: string;
+  targetAudience: string;
+  painPointsSolved: string[];
+  keyFeatures: string[];
+  differentiators: string[];
+  pricingModel: string | null;
+  pricingDetails: string;
+}
+
+export function useSuggestProduct() {
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiPost<{ suggestion: ProductSuggestion }>('/copilot/suggest-product', { name }),
+  });
+}

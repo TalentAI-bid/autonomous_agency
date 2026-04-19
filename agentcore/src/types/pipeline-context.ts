@@ -32,6 +32,10 @@ export interface PipelineContext {
       differentiators?: string[] | null;
       pricingModel?: string | null;
     }>;
+    elevatorPitch?: string;
+    socialProof?: string;
+    targetMarketDescription?: string;
+    painPointsAddressed?: string[];
   };
 
   // Recruitment-specific

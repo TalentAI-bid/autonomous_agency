@@ -156,6 +156,11 @@ export class MasterAgent extends BaseAgent {
           if (companyProfile.defaultSenderName) pipelineContext.senderFirstName ??= companyProfile.defaultSenderName as string;
           if (companyProfile.defaultSenderTitle) pipelineContext.senderTitle ??= companyProfile.defaultSenderTitle as string;
 
+          // Additional profile fields
+          if (companyProfile.elevatorPitch) pipelineContext.sales.elevatorPitch ??= companyProfile.elevatorPitch as string;
+          if (companyProfile.socialProof) pipelineContext.sales.socialProof ??= companyProfile.socialProof as string;
+          if (companyProfile.targetMarketDescription) pipelineContext.sales.targetMarketDescription ??= companyProfile.targetMarketDescription as string;
+
           // ICP fields
           const icp = companyProfile.icp as Record<string, unknown> | undefined;
           if (icp) {
@@ -165,26 +170,43 @@ export class MasterAgent extends BaseAgent {
             if (icp.companySizes && !pipelineContext.sales.companySizes?.length) {
               pipelineContext.sales.companySizes = icp.companySizes as string[];
             }
+            if (icp.painPointsAddressed) {
+              pipelineContext.sales.painPointsAddressed ??= icp.painPointsAddressed as string[];
+            }
+            if (icp.decisionMakerRoles && !pipelineContext.targetRoles?.length) {
+              pipelineContext.targetRoles = icp.decisionMakerRoles as string[];
+            }
+            if (icp.regions && !pipelineContext.locations?.length) {
+              pipelineContext.locations = icp.regions as string[];
+            }
           }
         }
 
-        // Load selected products
-        const productIds = (agentConfig.productIds as string[]) ?? [];
-        if (productIds.length > 0 && isSales) {
-          const selectedProducts = await withTenant(this.tenantId, async (tx) =>
-            tx.select({
-              name: productsTable.name,
-              description: productsTable.description,
-              targetAudience: productsTable.targetAudience,
-              painPointsSolved: productsTable.painPointsSolved,
-              keyFeatures: productsTable.keyFeatures,
-              differentiators: productsTable.differentiators,
-              pricingModel: productsTable.pricingModel,
-            }).from(productsTable)
-              .where(and(inArray(productsTable.id, productIds), eq(productsTable.isActive, true))),
-          );
+        // Load products — use explicit productIds if set, otherwise load ALL active products
+        if (isSales) {
+          const productIds = (agentConfig.productIds as string[]) ?? [];
+          const productColumns = {
+            name: productsTable.name,
+            description: productsTable.description,
+            targetAudience: productsTable.targetAudience,
+            painPointsSolved: productsTable.painPointsSolved,
+            keyFeatures: productsTable.keyFeatures,
+            differentiators: productsTable.differentiators,
+            pricingModel: productsTable.pricingModel,
+          };
+          const selectedProducts = await withTenant(this.tenantId, async (tx) => {
+            if (productIds.length > 0) {
+              return tx.select(productColumns).from(productsTable)
+                .where(and(inArray(productsTable.id, productIds), eq(productsTable.isActive, true)));
+            }
+            // No productIds configured → load ALL active products for this tenant
+            return tx.select(productColumns).from(productsTable)
+              .where(and(eq(productsTable.tenantId, this.tenantId), eq(productsTable.isActive, true)));
+          });
           if (!pipelineContext.sales) pipelineContext.sales = {};
-          pipelineContext.sales.products = selectedProducts;
+          if (selectedProducts.length > 0) {
+            pipelineContext.sales.products = selectedProducts;
+          }
         }
       } catch (err) {
         logger.warn({ err, masterAgentId }, 'Failed to load company profile / products');

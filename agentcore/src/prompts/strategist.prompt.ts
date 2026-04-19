@@ -248,6 +248,11 @@ export function buildInitialStrategyUserPrompt(ctx: PipelineContext, mission?: s
   sections.push(`## Value Proposition\n${sales?.valueProposition ?? 'Not specified'}`);
   sections.push(`## Differentiators\n${sales?.differentiators?.join(', ') ?? 'Not specified'}`);
 
+  if (sales?.elevatorPitch) sections.push(`## Elevator Pitch\n${sales.elevatorPitch}`);
+  if (sales?.socialProof) sections.push(`## Social Proof\n${sales.socialProof}`);
+  if (sales?.targetMarketDescription) sections.push(`## Target Market\n${sales.targetMarketDescription}`);
+  if (sales?.painPointsAddressed?.length) sections.push(`## Pain Points We Address\n${sales.painPointsAddressed.join(', ')}`);
+
   sections.push(`## Target Profile`);
   sections.push(`- Industries / Sectors: ${sales?.industries?.join(', ') ?? 'Any'}`);
   sections.push(`- Organization Sizes: ${sales?.companySizes?.join(', ') ?? 'Any'}`);

@@ -31,6 +31,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [profileReady, setProfileReady] = useState(false);
+  const [productsCount, setProductsCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
 
@@ -96,6 +97,9 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
       if (result?.profileData) {
         setProfileReady(true);
       }
+      if (result?.productsData) {
+        setProductsCount(result.productsData.length);
+      }
     } catch {
       toast({ title: 'Failed to send message', variant: 'destructive' });
     } finally {
@@ -105,14 +109,19 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
 
   const handleApprove = useCallback(async () => {
     try {
-      await approveProfile.mutateAsync();
-      toast({ title: 'Company profile saved!', variant: 'success' });
+      const result = await approveProfile.mutateAsync();
+      const pCount = (result as { productsCreated?: number })?.productsCreated ?? 0;
+      const msg = pCount > 0
+        ? `Company profile saved and ${pCount} product(s) created!`
+        : 'Company profile saved!';
+      toast({ title: msg, variant: 'success' });
       onClose();
       // Reset for next open
       initialized.current = false;
       setSessionId(null);
       setMessages([]);
       setProfileReady(false);
+      setProductsCount(0);
     } catch {
       toast({ title: 'Failed to save profile', variant: 'destructive' });
     }
@@ -122,6 +131,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
   function cleanContent(content: string): string {
     return content
       .replace(/<company_profile>[\s\S]*?<\/company_profile>/g, '')
+      .replace(/<products>[\s\S]*?<\/products>/g, '')
       .trim();
   }
 
@@ -195,8 +205,14 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
         <div className="px-4 py-3 border-t border-border bg-primary/5">
           <div className="flex items-center gap-2">
             <div className="flex-1">
-              <p className="text-sm font-medium">Profile ready</p>
-              <p className="text-xs text-muted-foreground">Apply it to auto-fill your company profile</p>
+              <p className="text-sm font-medium">
+                Profile ready{productsCount > 0 ? ` — ${productsCount} product(s) detected` : ''}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {productsCount > 0
+                  ? 'Apply to auto-fill your profile and create products'
+                  : 'Apply it to auto-fill your company profile'}
+              </p>
             </div>
             <Button
               size="sm"

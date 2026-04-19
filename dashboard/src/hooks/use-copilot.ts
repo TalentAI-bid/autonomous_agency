@@ -47,7 +47,7 @@ export function useSendCopilotMessage(sessionId: string | null) {
   const abortRef = useRef<AbortController | null>(null);
 
   const sendStream = useCallback(
-    async (content: string): Promise<{ message: CopilotMessage; profileData: Record<string, unknown> | null } | null> => {
+    async (content: string): Promise<{ message: CopilotMessage; profileData: Record<string, unknown> | null; productsData: Array<Record<string, unknown>> | null } | null> => {
       if (!sessionId) return null;
 
       const token = useAuthStore.getState().token;
@@ -80,7 +80,7 @@ export function useSendCopilotMessage(sessionId: string | null) {
 
         const decoder = new TextDecoder();
         let buffer = '';
-        let result: { message: CopilotMessage; profileData: Record<string, unknown> | null } | null = null;
+        let result: { message: CopilotMessage; profileData: Record<string, unknown> | null; productsData: Array<Record<string, unknown>> | null } | null = null;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -146,10 +146,11 @@ export function useApproveCopilotProfile(sessionId: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      apiPost<{ profile: Record<string, unknown> }>(`/copilot/sessions/${sessionId}/approve`),
+      apiPost<{ profile: Record<string, unknown>; productsCreated: number }>(`/copilot/sessions/${sessionId}/approve`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['copilot-session', sessionId] });
       qc.invalidateQueries({ queryKey: ['company-profile'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
     },
   });
 }

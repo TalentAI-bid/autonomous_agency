@@ -1,6 +1,6 @@
 import { eq, and, max } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { conversations, conversationMessages, tenants } from '../db/schema/index.js';
+import { conversations, conversationMessages, tenants, products } from '../db/schema/index.js';
 import { complete, completeStream } from '../tools/together-ai.tool.js';
 import { scrape } from '../tools/crawl4ai.tool.js';
 import { buildCopilotSystemPrompt } from '../prompts/copilot.prompt.js';
@@ -191,6 +191,19 @@ export async function* sendCopilotMessageStream(
     }
   }
 
+  // Parse products from response
+  const productsMatch = fullResponse.match(/<products>\s*([\s\S]*?)\s*<\/products>/);
+  let productsData: Array<Record<string, unknown>> | undefined;
+
+  if (productsMatch) {
+    try {
+      const cleaned = productsMatch[1]!.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      productsData = JSON.parse(cleaned);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to parse products JSON from copilot response');
+    }
+  }
+
   // Save assistant message
   const msgMetadata: Record<string, unknown> = {};
   if (crawledContent) msgMetadata.crawledContent = crawledContent;
@@ -208,16 +221,19 @@ export async function* sendCopilotMessageStream(
     }).returning();
   });
 
-  // Update extractedConfig if profile found
-  if (profileData) {
+  // Update extractedConfig if profile or products found
+  if (profileData || productsData) {
+    const configUpdate: Record<string, unknown> = { type: 'copilot' };
+    if (profileData) configUpdate.profile = profileData;
+    if (productsData) configUpdate.products = productsData;
     await withTenant(tenantId, async (tx) => {
       return tx.update(conversations)
-        .set({ extractedConfig: { type: 'copilot', profile: profileData }, updatedAt: new Date() })
+        .set({ extractedConfig: configUpdate, updatedAt: new Date() })
         .where(eq(conversations.id, conversationId));
     });
   }
 
-  yield `event: done\ndata: ${JSON.stringify({ message: assistantMsg, profileData: profileData ?? null })}\n\n`;
+  yield `event: done\ndata: ${JSON.stringify({ message: assistantMsg, profileData: profileData ?? null, productsData: productsData ?? null })}\n\n`;
 }
 
 // ── Approve Profile ──────────────────────────────────────────────────────────
@@ -245,6 +261,45 @@ export async function approveCopilotProfile(tenantId: string, conversationId: st
     settings: { ...currentSettings, companyProfile: profileData },
   });
 
+  // Create products from extracted data
+  const extractedProducts = config?.products as Array<Record<string, unknown>> | undefined;
+  let createdProducts = 0;
+  if (extractedProducts?.length) {
+    // Get existing products to avoid duplicates
+    const existingProducts = await withTenant(tenantId, async (tx) => {
+      return tx.select({ name: products.name }).from(products)
+        .where(eq(products.tenantId, tenantId));
+    });
+    const existingNames = new Set(existingProducts.map(p => p.name.toLowerCase()));
+
+    const validPricingModels = ['subscription', 'per_seat', 'one_time', 'usage_based', 'freemium', 'custom'];
+
+    for (const product of extractedProducts) {
+      const name = product.name as string;
+      if (!name || existingNames.has(name.toLowerCase())) continue;
+
+      const pricingModel = validPricingModels.includes(product.pricingModel as string)
+        ? product.pricingModel as string
+        : null;
+
+      await withTenant(tenantId, async (tx) => {
+        return tx.insert(products).values({
+          tenantId,
+          name,
+          description: (product.description as string) ?? null,
+          category: (product.category as string) ?? null,
+          targetAudience: (product.targetAudience as string) ?? null,
+          painPointsSolved: (product.painPointsSolved as string[]) ?? null,
+          keyFeatures: (product.keyFeatures as string[]) ?? null,
+          differentiators: (product.differentiators as string[]) ?? null,
+          pricingModel,
+        });
+      });
+      createdProducts++;
+      existingNames.add(name.toLowerCase());
+    }
+  }
+
   // Mark conversation as completed
   await withTenant(tenantId, async (tx) => {
     return tx.update(conversations)
@@ -259,15 +314,19 @@ export async function approveCopilotProfile(tenantId: string, conversationId: st
       .where(eq(conversationMessages.conversationId, conversationId));
   });
 
+  const approvalContent = createdProducts > 0
+    ? `Company profile saved and ${createdProducts} product(s) created!`
+    : 'Company profile has been saved!';
+
   await withTenant(tenantId, async (tx) => {
     return tx.insert(conversationMessages).values({
       conversationId,
       role: 'assistant',
       type: 'pipeline_approved',
-      content: 'Company profile has been saved!',
+      content: approvalContent,
       orderIndex: (maxResult?.maxOrder ?? 0) + 1,
     });
   });
 
-  return { profile: profileData };
+  return { profile: profileData, productsCreated: createdProducts };
 }

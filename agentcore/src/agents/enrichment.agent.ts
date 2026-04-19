@@ -18,6 +18,51 @@ import {
   type DeepCompanyProfile,
 } from '../prompts/company-deep.prompt.js';
 import logger from '../utils/logger.js';
+import { calculateSeoScore, detectSeoIssues } from '../utils/seo-analysis.js';
+
+type StructuredPainPoint = { type: string; severity: 'high' | 'medium' | 'low'; description: string; score?: number; issues?: string[]; roles?: string[] };
+
+function buildStructuredPainPoints(opts: {
+  companyUrl?: string;
+  homepageContent?: string;
+  deepCompany: DeepCompanyProfile;
+}): StructuredPainPoint[] {
+  const { companyUrl, homepageContent, deepCompany } = opts;
+  const out: StructuredPainPoint[] = [];
+
+  if (!companyUrl) {
+    out.push({ type: 'no_website', severity: 'high', description: 'Company has no website' });
+  } else if (!homepageContent || homepageContent.length < 100) {
+    out.push({ type: 'broken_website', severity: 'high', description: 'Website unreachable or empty' });
+  }
+
+  if (homepageContent && homepageContent.length > 200) {
+    const seo = calculateSeoScore(homepageContent);
+    if (seo < 50) {
+      out.push({ type: 'poor_seo', severity: 'medium', description: `SEO score ${seo}/100`, score: seo, issues: detectSeoIssues(homepageContent) });
+    }
+    if (homepageContent.length < 500) {
+      out.push({ type: 'thin_content', severity: 'medium', description: 'Homepage has very thin content' });
+    }
+  }
+
+  if (deepCompany.painPoints?.length) {
+    for (const pp of deepCompany.painPoints) {
+      out.push({ type: 'llm_detected', severity: 'medium', description: pp });
+    }
+  }
+
+  const jobs = (deepCompany as any).openPositions as Array<{ title?: string }> | undefined;
+  if (jobs?.length) {
+    out.push({
+      type: 'hiring_engineers', severity: 'high',
+      description: `Hiring ${jobs.length} positions`,
+      roles: jobs.map(j => j.title).filter((t): t is string => !!t).slice(0, 5),
+    });
+  }
+
+  return out;
+}
 
 /** Quick DNS check — returns false if the domain doesn't resolve (avoids circuit-breaker spam). */
 async function domainResolves(url: string): Promise<boolean> {
@@ -429,6 +474,12 @@ export class EnrichmentAgent extends BaseAgent {
         const resolvedLinkedinUrl = linkedinCompanyUrl
           || (deepCompany.linkedinUrl?.includes('linkedin.com/company/') ? deepCompany.linkedinUrl : undefined);
 
+        // Structured pain points + SEO analysis
+        const structuredPainPoints = buildStructuredPainPoints({ companyUrl, homepageContent, deepCompany });
+        const computedWebsiteStatus = !companyUrl ? 'no_website' : (!homepageContent || homepageContent.length < 100) ? 'unreachable' : 'active';
+        const computedSeoScore = (homepageContent && homepageContent.length > 200)
+          ? calculateSeoScore(homepageContent) : undefined;
+
         const company = await this.saveOrUpdateCompany({
           id: contact.companyId ?? undefined,
           name: resolvedCompanyName,
@@ -440,6 +491,9 @@ export class EnrichmentAgent extends BaseAgent {
           description: deepCompany.description || undefined,
           linkedinUrl: resolvedLinkedinUrl,
           dataCompleteness: companyDataCompleteness,
+          painPoints: structuredPainPoints.length > 0 ? structuredPainPoints : undefined,
+          websiteStatus: computedWebsiteStatus,
+          seoScore: computedSeoScore,
           rawData: {
             ...preservedDiscoveryData,
             products: deepCompany.products,
@@ -1199,6 +1253,12 @@ export class EnrichmentAgent extends BaseAgent {
       const resolvedLinkedinUrl = linkedinCompanyUrl
         || (deepCompany.linkedinUrl?.includes('linkedin.com/company/') ? deepCompany.linkedinUrl : undefined);
 
+      // Structured pain points + SEO analysis
+      const structuredPainPointsCO = buildStructuredPainPoints({ companyUrl, homepageContent, deepCompany });
+      const computedWebsiteStatusCO = !companyUrl ? 'no_website' : (!homepageContent || homepageContent.length < 100) ? 'unreachable' : 'active';
+      const computedSeoScoreCO = (homepageContent && homepageContent.length > 200)
+        ? calculateSeoScore(homepageContent) : undefined;
+
       await this.saveOrUpdateCompany({
         id: companyId,
         name: resolvedName,
@@ -1210,6 +1270,9 @@ export class EnrichmentAgent extends BaseAgent {
         description: deepCompany.description || undefined,
         linkedinUrl: resolvedLinkedinUrl,
         dataCompleteness: companyDataCompleteness,
+        painPoints: structuredPainPointsCO.length > 0 ? structuredPainPointsCO : undefined,
+        websiteStatus: computedWebsiteStatusCO,
+        seoScore: computedSeoScoreCO,
         rawData: {
           ...preservedDiscoveryDataCO,
           ...(company.rawData as Record<string, unknown> ?? {}),

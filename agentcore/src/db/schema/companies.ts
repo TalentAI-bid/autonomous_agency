@@ -19,6 +19,12 @@ export const companies = pgTable('companies', {
   score: integer('score'),
   scoreDetails: jsonb('score_details').$type<Record<string, unknown>>(),
   dataCompleteness: integer('data_completeness').default(0),
+  painPoints: jsonb('pain_points').$type<Array<{
+    type: string; severity: 'high' | 'medium' | 'low';
+    description: string; score?: number; issues?: string[]; roles?: string[];
+  }>>(),
+  websiteStatus: varchar('website_status', { length: 50 }),
+  seoScore: integer('seo_score'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [

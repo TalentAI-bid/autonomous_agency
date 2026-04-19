@@ -11,9 +11,10 @@ import {
   ArrowLeft, Globe, Building2, Users, Cpu, DollarSign,
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
   Mail, ExternalLink, Search, Linkedin, CheckCircle2,
+  AlertTriangle, TrendingDown, FileText, Brain, ShieldAlert,
 } from 'lucide-react';
 import Link from 'next/link';
-import type { CompanyDeepData } from '@/types';
+import type { CompanyDeepData, PainPoint } from '@/types';
 
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -42,6 +43,18 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const deep = (company.rawData ?? {}) as CompanyDeepData;
+
+  const painPointIcon = (type: string) => {
+    switch (type) {
+      case 'no_website': return <Globe className="w-3 h-3" />;
+      case 'broken_website': return <AlertTriangle className="w-3 h-3" />;
+      case 'poor_seo': return <TrendingDown className="w-3 h-3" />;
+      case 'thin_content': return <FileText className="w-3 h-3" />;
+      case 'hiring_engineers': return <Search className="w-3 h-3" />;
+      case 'llm_detected': return <Brain className="w-3 h-3" />;
+      default: return <ShieldAlert className="w-3 h-3" />;
+    }
+  };
 
   /** Safely render a value that might be an object (e.g. headquarters: {city, state, country}) */
   const safeStr = (val: unknown): string => {
@@ -115,6 +128,20 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   <p className="font-medium">—</p>
                 )}
               </div>
+              {company.websiteStatus && (
+                <div>
+                  <p className="text-muted-foreground">Website</p>
+                  <p className="font-medium capitalize">{company.websiteStatus.replace('_', ' ')}</p>
+                </div>
+              )}
+              {company.seoScore != null && (
+                <div>
+                  <p className="text-muted-foreground">SEO Score</p>
+                  <p className={`font-medium ${company.seoScore >= 70 ? 'text-emerald-500' : company.seoScore >= 40 ? 'text-amber-500' : 'text-rose-500'}`}>
+                    {company.seoScore}/100
+                  </p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -138,6 +165,31 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             )}
           </CardContent>
         </Card>
+
+        {/* Pain Points */}
+        {(company.painPoints ?? []).length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShieldAlert className="w-4 h-4" /> Pain Points
+                <Badge variant="secondary" className="ml-1 text-xs">{company.painPoints!.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {company.painPoints!.map((p: PainPoint, i: number) => (
+                  <Badge
+                    key={i}
+                    variant={p.severity === 'high' ? 'destructive' : p.severity === 'medium' ? 'warning' : 'secondary'}
+                    className="flex items-center gap-1"
+                  >
+                    {painPointIcon(p.type)} {p.description}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* People / Contacts */}
         <Card className="md:col-span-2">

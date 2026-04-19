@@ -109,6 +109,15 @@ export interface Contact {
   updatedAt: string;
 }
 
+export interface PainPoint {
+  type: string;
+  severity: 'high' | 'medium' | 'low';
+  description: string;
+  score?: number;
+  issues?: string[];
+  roles?: string[];
+}
+
 export interface Company {
   id: string;
   tenantId: string;
@@ -122,6 +131,9 @@ export interface Company {
   linkedinUrl?: string;
   description?: string;
   dataCompleteness?: number;
+  painPoints?: PainPoint[];
+  websiteStatus?: string;
+  seoScore?: number;
   rawData?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

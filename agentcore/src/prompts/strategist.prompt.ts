@@ -55,6 +55,23 @@ Your output must be valid JSON with these fields:
   - Use REACHER for the FIRST person per company, then EMAIL_PATTERN for remaining people (saves SMTP quota)
   - Always end with SCORING
 
+  STRATEGY-TO-PIPELINE MAPPING (CRITICAL — your bdStrategy MUST match your root steps):
+  - bdStrategy "hiring_signal" → Root step MUST be CRAWL4AI with action "scrape_job_boards" and params.sources from the region
+  - bdStrategy "industry_target" → Root step MUST be LINKEDIN_EXTENSION with action "search_companies" (if needsChromeExtension) or CRAWL4AI with action "scrape_company_directories"
+  - bdStrategy "hybrid" → BOTH CRAWL4AI:scrape_job_boards AND LINKEDIN_EXTENSION:search_companies as parallel root steps (both dependsOn: [])
+
+  For France/Benelux hiring_signal or hybrid:
+  - CRAWL4AI:scrape_job_boards with params.sources from region (welcometothejungle, freework, etc.)
+  - Jobs contain company names and sometimes website URLs
+  - Then CRAWL4AI:scrape_company_website for full context
+  - Then LLM_ANALYSIS, REACHER, EMAIL_PATTERN, SCORING
+
+  For UK/US industry_target or hybrid:
+  - LINKEDIN_EXTENSION:search_companies by target industry
+  - LINKEDIN_EXTENSION:fetch_company_detail for website/domain
+  - Then CRAWL4AI:scrape_company_website
+  - Then LLM_ANALYSIS, REACHER, EMAIL_PATTERN, SCORING
+
   PIPELINE EXAMPLES:
 
   UK mission (extension-primary):
@@ -68,10 +85,22 @@ Your output must be valid JSON with these fields:
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ]
 
-  France mission (web sources):
+  France mission (web sources, hiring_signal):
   [
     { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs"] },
+    { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
+    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+    { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
+    { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
+  ]
+
+  Hybrid mission (both job boards + extension in parallel):
+  [
+    { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
+    { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs", "li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
     { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },

@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useContact } from '@/hooks/use-contacts';
 import { useContactTimeline, useDeals, useCrmStages } from '@/hooks/use-crm';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageBadge } from '@/components/crm/stage-badge';
 import { AddActivityDialog } from '@/components/crm/add-activity-dialog';
+import { EmailComposeModal } from '@/components/contacts/email-compose-modal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,7 +16,7 @@ import { formatDate, formatRelative } from '@/lib/utils';
 import {
   ArrowLeft, User, Mail, Building, MapPin, Linkedin, Star, ExternalLink,
   Github, Globe, GraduationCap, Briefcase, Code, CheckCircle, AlertCircle,
-  Activity, DollarSign,
+  Activity, DollarSign, Send,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { ContactDeepData } from '@/types';
@@ -46,6 +48,7 @@ export default function ContactDetailPage() {
     );
   }
 
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
   const deep = (contact.rawData ?? {}) as ContactDeepData;
   const fullName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown';
 
@@ -67,6 +70,11 @@ export default function ContactDetailPage() {
                 <Star className="w-3 h-3" />
                 {contact.score}
               </Badge>
+            )}
+            {contact.email && (
+              <Button variant="outline" size="sm" onClick={() => setEmailModalOpen(true)}>
+                <Send className="w-3.5 h-3.5 mr-1.5" /> Draft Email
+              </Button>
             )}
           </div>
           <div className="flex flex-wrap gap-4 mt-2 text-sm text-muted-foreground">
@@ -417,6 +425,14 @@ export default function ContactDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <EmailComposeModal
+        contactId={id}
+        contactName={fullName}
+        contactEmail={contact.email}
+        open={emailModalOpen}
+        onOpenChange={setEmailModalOpen}
+      />
     </div>
   );
 }

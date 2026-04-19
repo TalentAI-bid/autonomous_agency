@@ -90,3 +90,6 @@ export type { AgentMessage, NewAgentMessage } from './agent-messages.js';
 
 export { extensionSessions, extensionTasks, extensionSiteEnum, extensionTaskTypeEnum, extensionTaskStatusEnum } from './extension.js';
 export type { ExtensionSession, NewExtensionSession, ExtensionTask, NewExtensionTask } from './extension.js';
+
+export { outreachEmails } from './outreach-emails.js';
+export type { OutreachEmail, NewOutreachEmail } from './outreach-emails.js';

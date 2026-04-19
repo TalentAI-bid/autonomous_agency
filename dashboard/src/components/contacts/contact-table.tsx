@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useContacts } from '@/hooks/use-contacts';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -7,8 +8,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/utils';
 import type { ContactFilters } from '@/types';
 import Link from 'next/link';
-import { ExternalLink, Mail } from 'lucide-react';
+import { ExternalLink, Mail, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { EmailComposeModal } from './email-compose-modal';
 
 interface ContactTableProps {
   filters?: ContactFilters;
@@ -38,6 +40,7 @@ export function ContactTable({ filters }: ContactTableProps) {
   const { data: res, isLoading } = useContacts(filters);
   const contacts = res?.data ?? [];
   const meta = res?.pagination;
+  const [emailModal, setEmailModal] = useState<{ id: string; name: string; email: string } | null>(null);
 
   if (isLoading) {
     return (
@@ -110,17 +113,43 @@ export function ContactTable({ filters }: ContactTableProps) {
                   {formatDate(contact.createdAt)}
                 </TableCell>
                 <TableCell>
-                  <Link href={`/contacts/${contact.id}`}>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Button>
-                  </Link>
+                  <div className="flex items-center gap-0.5">
+                    {contact.email && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setEmailModal({
+                          id: contact.id,
+                          name: [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Contact',
+                          email: contact.email!,
+                        })}
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    <Link href={`/contacts/${contact.id}`}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Button>
+                    </Link>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      {emailModal && (
+        <EmailComposeModal
+          contactId={emailModal.id}
+          contactName={emailModal.name}
+          contactEmail={emailModal.email}
+          open={true}
+          onOpenChange={(open) => { if (!open) setEmailModal(null); }}
+        />
+      )}
     </div>
   );
 }

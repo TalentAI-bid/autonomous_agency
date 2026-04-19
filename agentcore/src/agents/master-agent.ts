@@ -549,8 +549,14 @@ export class MasterAgent extends BaseAgent {
         }
       }
 
+      // Check if pipeline includes job-board scraping (France/Benelux hiring_signal)
+      const hasJobBoardStep = pipelineSteps?.some(
+        s => s.tool === 'CRAWL4AI' && s.action === 'scrape_job_boards',
+      ) ?? false;
+
       const extensionOnline = needsExtension ? await isExtensionConnected(this.tenantId) : false;
-      const skipCrawlerDiscovery = needsExtension && extensionOnline;
+      // Don't skip crawler discovery if pipeline includes job-board steps (parallel paths)
+      const skipCrawlerDiscovery = needsExtension && extensionOnline && !hasJobBoardStep;
 
       if (skipCrawlerDiscovery) {
         logger.info(

@@ -2,8 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, and, desc, lt, ilike, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { contacts } from '../db/schema/index.js';
+import { contacts, companies, masterAgents, outreachEmails } from '../db/schema/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { selectEmailAccount, incrementQuota } from '../tools/email-queue.tool.js';
+import { sendEmail } from '../tools/smtp.tool.js';
+import { extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
+import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../prompts/draft-email.prompt.js';
+import logger from '../utils/logger.js';
 
 const createContactSchema = z.object({
   firstName: z.string().max(255).optional(),
@@ -156,5 +161,131 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     });
 
     return reply.status(201).send({ data: imported, count: imported.length });
+  });
+
+  // POST /api/contacts/:id/draft-email — AI-generated email draft
+  fastify.post<{ Params: { id: string }; Body: { hint?: string } }>('/:id/draft-email', async (request) => {
+    const { id } = request.params;
+    const hint = (request.body as Record<string, unknown>)?.hint as string | undefined;
+
+    // Load contact
+    const [contact] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(contacts)
+        .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!contact) throw new NotFoundError('Contact', id);
+
+    // Load company if linked
+    let company = null;
+    if (contact.companyId) {
+      const [c] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(companies)
+          .where(and(eq(companies.id, contact.companyId!), eq(companies.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      company = c ?? null;
+    }
+
+    // Load most recent master agent for context
+    let masterAgent = null;
+    const maId = contact.masterAgentId ?? company?.masterAgentId;
+    if (maId) {
+      const [ma] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(masterAgents)
+          .where(and(eq(masterAgents.id, maId), eq(masterAgents.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      masterAgent = ma ?? null;
+    }
+
+    const draft = await extractJSON<{ subject: string; body: string }>(
+      request.tenantId,
+      [
+        { role: 'system', content: buildDraftEmailSystemPrompt(masterAgent, company) },
+        { role: 'user', content: buildDraftEmailUserPrompt(contact, company, hint) },
+      ],
+      2,
+      { model: SMART_MODEL, temperature: 0.7 },
+    );
+
+    return { data: draft };
+  });
+
+  // POST /api/contacts/:id/send-email — Send email via configured SMTP
+  fastify.post<{ Params: { id: string }; Body: { subject: string; body: string } }>('/:id/send-email', async (request) => {
+    const { id } = request.params;
+    const { subject, body } = request.body as { subject: string; body: string };
+
+    if (!subject || !body) throw new ValidationError('subject and body are required');
+
+    // Load contact
+    const [contact] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(contacts)
+        .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!contact) throw new NotFoundError('Contact', id);
+    if (!contact.email) throw new ValidationError('Contact has no email address');
+
+    // Select email account
+    const account = await selectEmailAccount(request.tenantId);
+    if (!account) {
+      throw new ValidationError('No email account configured. Go to Settings > Email to add one.');
+    }
+
+    // Send via SMTP
+    const htmlBody = body.replace(/\n/g, '<br>');
+    const result = await sendEmail({
+      tenantId: request.tenantId,
+      from: account.fromEmail,
+      to: contact.email,
+      subject,
+      html: htmlBody,
+      text: body,
+      emailAccount: account,
+    });
+
+    // Increment quota
+    await incrementQuota(request.tenantId, account.id);
+
+    // Save to outreach_emails
+    const [saved] = await withTenant(request.tenantId, async (tx) => {
+      return tx.insert(outreachEmails).values({
+        tenantId: request.tenantId,
+        contactId: id,
+        masterAgentId: contact.masterAgentId ?? undefined,
+        subject,
+        body,
+        messageId: result.messageId,
+        status: 'sent',
+        sentAt: new Date(),
+      }).returning();
+    });
+
+    // Update contact status to 'contacted' if still in earlier stage
+    const earlyStatuses = ['discovered', 'enriched', 'scored'];
+    if (earlyStatuses.includes(contact.status)) {
+      await withTenant(request.tenantId, async (tx) => {
+        await tx.update(contacts)
+          .set({ status: 'contacted', updatedAt: new Date() })
+          .where(eq(contacts.id, id));
+      });
+    }
+
+    logger.info({ tenantId: request.tenantId, contactId: id, messageId: result.messageId }, 'Outreach email sent');
+
+    return { data: { success: true, messageId: result.messageId, outreachEmailId: saved!.id } };
+  });
+
+  // GET /api/contacts/:id/outreach-emails — List outreach emails for a contact
+  fastify.get<{ Params: { id: string } }>('/:id/outreach-emails', async (request) => {
+    const { id } = request.params;
+    const emails = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(outreachEmails)
+        .where(and(eq(outreachEmails.contactId, id), eq(outreachEmails.tenantId, request.tenantId)))
+        .orderBy(desc(outreachEmails.createdAt));
+    });
+    return { data: emails };
   });
 }

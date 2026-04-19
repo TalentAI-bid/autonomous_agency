@@ -129,11 +129,11 @@ export async function* sendCopilotMessageStream(
     { role: 'system', content: systemPrompt },
   ];
 
-  // Add crawled content as context
+  // Add crawled content as context with generation instruction
   if (crawledContent) {
     llmMessages.push({
       role: 'system',
-      content: `## Website Content (auto-crawled)\n${crawledContent}`,
+      content: `## Website Content (auto-crawled)\n${crawledContent}\n\n## INSTRUCTION\nYou now have the website content. Analyze it thoroughly and IMMEDIATELY generate a complete <company_profile> JSON in your response. Do NOT ask follow-up questions first. Use your sales expertise to infer everything you need from this content. Present your expert analysis and the complete profile.`,
     });
   }
 
@@ -157,16 +157,16 @@ export async function* sendCopilotMessageStream(
     });
   }
 
-  // Turn-count safeguard: after 4+ user messages, force profile output
+  // Turn-count safeguard: after 2+ user messages without a profile, force generation
   const userMessageCount = llmMessages.filter(m => m.role === 'user').length;
   const hasProfileAlready = allMessages.some(m => {
     const meta = m.metadata as Record<string, unknown> | null;
     return meta?.hasProfile === true;
   });
-  if (userMessageCount >= 4 && !hasProfileAlready) {
+  if (userMessageCount >= 2 && !hasProfileAlready) {
     llmMessages.push({
       role: 'system',
-      content: 'You have enough information now. You MUST output a <company_profile> JSON block in your response. Use sensible defaults for any missing fields. Present a brief summary to the user alongside the profile.',
+      content: 'You have enough information now. You MUST output a <company_profile> JSON block in your response. Use your sales expertise to infer any missing fields — do NOT ask more questions. Present your expert analysis and the complete profile.',
     });
   }
 

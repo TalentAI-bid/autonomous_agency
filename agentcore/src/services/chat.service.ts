@@ -1,6 +1,6 @@
 import { eq, and, desc, max } from 'drizzle-orm';
-import { withTenant } from '../config/database.js';
-import { conversations, conversationMessages, masterAgents, emailListenerConfigs, emailAccounts } from '../db/schema/index.js';
+import { withTenant, db } from '../config/database.js';
+import { conversations, conversationMessages, masterAgents, emailListenerConfigs, emailAccounts, tenants, products as productsTable } from '../db/schema/index.js';
 import { complete, completeStream } from '../tools/together-ai.tool.js';
 import { parsePDF } from '../tools/pdf-parser.tool.js';
 import { parseDOCX } from '../tools/docx-parser.tool.js';
@@ -18,6 +18,29 @@ interface Attachment {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
+}
+
+// Helper: load company profile + active products for prompt context
+async function loadCompanyContext(tenantId: string) {
+  const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+  const settings = (tenant?.settings as Record<string, unknown>) ?? {};
+  const companyProfile = settings.companyProfile as Record<string, unknown> | undefined;
+
+  const activeProducts = await withTenant(tenantId, async (tx) => {
+    return tx.select({
+      name: productsTable.name,
+      description: productsTable.description,
+      category: productsTable.category,
+      targetAudience: productsTable.targetAudience,
+      painPointsSolved: productsTable.painPointsSolved,
+      keyFeatures: productsTable.keyFeatures,
+      differentiators: productsTable.differentiators,
+      pricingModel: productsTable.pricingModel,
+    }).from(productsTable)
+      .where(and(eq(productsTable.tenantId, tenantId), eq(productsTable.isActive, true)));
+  });
+
+  return { companyProfile, products: activeProducts };
 }
 
 export async function createConversation(tenantId: string, userId: string) {
@@ -43,8 +66,11 @@ export async function createConversation(tenantId: string, userId: string) {
       .where(and(eq(emailAccounts.tenantId, tenantId), eq(emailAccounts.isActive, true)));
   });
 
+  // Load company profile + products for context
+  const { companyProfile, products: activeProducts } = await loadCompanyContext(tenantId);
+
   // Build messages for the greeting
-  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts });
+  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts, companyProfile, products: activeProducts });
   const llmMessages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: 'Start the conversation' },
@@ -125,8 +151,8 @@ export async function sendMessage(
     }).returning();
   });
 
-  // Load messages, listeners, and accounts in parallel
-  const [allMessages, listeners, accounts] = await Promise.all([
+  // Load messages, listeners, accounts, and company context in parallel
+  const [allMessages, listeners, accounts, companyCtx] = await Promise.all([
     withTenant(tenantId, async (tx) => {
       return tx.select().from(conversationMessages)
         .where(eq(conversationMessages.conversationId, conversationId))
@@ -142,10 +168,11 @@ export async function sendMessage(
         .from(emailAccounts)
         .where(and(eq(emailAccounts.tenantId, tenantId), eq(emailAccounts.isActive, true)));
     }),
+    loadCompanyContext(tenantId),
   ]);
 
   // Build LLM message array
-  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts });
+  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts, companyProfile: companyCtx.companyProfile, products: companyCtx.products });
 
   // Build context block with extracted config and document texts
   const contextParts: string[] = [];
@@ -325,8 +352,8 @@ export async function* sendMessageStream(
     }).returning();
   });
 
-  // Load messages, listeners, and accounts in parallel
-  const [allMessages, listeners, accounts] = await Promise.all([
+  // Load messages, listeners, accounts, and company context in parallel
+  const [allMessages, listeners, accounts, companyCtx] = await Promise.all([
     withTenant(tenantId, async (tx) => {
       return tx.select().from(conversationMessages)
         .where(eq(conversationMessages.conversationId, conversationId))
@@ -342,10 +369,11 @@ export async function* sendMessageStream(
         .from(emailAccounts)
         .where(and(eq(emailAccounts.tenantId, tenantId), eq(emailAccounts.isActive, true)));
     }),
+    loadCompanyContext(tenantId),
   ]);
 
   // Build LLM message array
-  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts });
+  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts, companyProfile: companyCtx.companyProfile, products: companyCtx.products });
 
   const contextParts: string[] = [];
   if (conversation.extractedConfig) {

@@ -40,6 +40,8 @@ const AGENT_CAPABILITY_MANIFEST = {
 export function buildChatSystemPrompt(context?: {
   emailListeners?: Array<{ id: string; username: string; host: string }>;
   emailAccounts?: Array<{ id: string; name: string; fromEmail: string }>;
+  companyProfile?: Record<string, unknown>;
+  products?: Array<Record<string, unknown>>;
 }): string {
   const emailListenerSection = context?.emailListeners?.length
     ? context.emailListeners.map(l => `- ID: ${l.id} — ${l.username} (${l.host})`).join('\n')
@@ -48,6 +50,51 @@ export function buildChatSystemPrompt(context?: {
   const emailAccountSection = context?.emailAccounts?.length
     ? context.emailAccounts.map(a => `- ID: ${a.id} — ${a.name} (${a.fromEmail})`).join('\n')
     : 'No email sending accounts configured. The user needs to set up an email account in Settings > Email before creating a pipeline with outreach.';
+
+  // Build company profile section
+  let companyProfileSection = 'No company profile configured yet. For sales pipelines, ask for company details.';
+  if (context?.companyProfile && Object.keys(context.companyProfile).length > 0) {
+    const cp = context.companyProfile;
+    const icp = cp.icp as Record<string, unknown> | undefined;
+    const lines: string[] = [];
+    if (cp.companyName) lines.push(`- Company: ${cp.companyName}`);
+    if (cp.website) lines.push(`- Website: ${cp.website}`);
+    if (cp.industry) lines.push(`- Industry: ${cp.industry}`);
+    if (cp.valueProposition) lines.push(`- Value Proposition: ${cp.valueProposition}`);
+    if (cp.elevatorPitch) lines.push(`- Elevator Pitch: ${cp.elevatorPitch}`);
+    if (cp.differentiators) lines.push(`- Differentiators: ${(cp.differentiators as string[]).join(', ')}`);
+    if (cp.socialProof) lines.push(`- Social Proof: ${cp.socialProof}`);
+    if (cp.targetMarketDescription) lines.push(`- Target Market: ${cp.targetMarketDescription}`);
+    if (icp?.targetIndustries) lines.push(`- Target Industries: ${(icp.targetIndustries as string[]).join(', ')}`);
+    if (icp?.companySizes) lines.push(`- Target Company Sizes: ${(icp.companySizes as string[]).join(', ')}`);
+    if (icp?.decisionMakerRoles) lines.push(`- Decision Maker Roles: ${(icp.decisionMakerRoles as string[]).join(', ')}`);
+    if (icp?.regions) lines.push(`- Target Regions: ${(icp.regions as string[]).join(', ')}`);
+    if (icp?.painPointsAddressed) lines.push(`- Pain Points Addressed: ${(icp.painPointsAddressed as string[]).join(', ')}`);
+    if (cp.defaultSenderName) lines.push(`- Default Sender Name: ${cp.defaultSenderName}`);
+    if (cp.defaultSenderTitle) lines.push(`- Default Sender Title: ${cp.defaultSenderTitle}`);
+    if (cp.callToAction) lines.push(`- Call to Action: ${cp.callToAction}`);
+    if (cp.calendlyUrl) lines.push(`- Calendly URL: ${cp.calendlyUrl}`);
+    if (lines.length > 0) companyProfileSection = lines.join('\n');
+  }
+
+  // Build products section
+  let productsListSection = 'No products configured yet.';
+  if (context?.products?.length) {
+    const productLines = context.products.map((p, i) => {
+      const parts = [`${i + 1}. ${p.name}`];
+      if (p.category) parts.push(`   Category: ${p.category}`);
+      if (p.description) parts.push(`   Description: ${p.description}`);
+      if (p.targetAudience) parts.push(`   Target: ${p.targetAudience}`);
+      if ((p.painPointsSolved as string[])?.length) parts.push(`   Solves: ${(p.painPointsSolved as string[]).join(', ')}`);
+      if ((p.keyFeatures as string[])?.length) parts.push(`   Features: ${(p.keyFeatures as string[]).join(', ')}`);
+      if (p.pricingModel) parts.push(`   Pricing: ${p.pricingModel}`);
+      return parts.join('\n');
+    });
+    productsListSection = productLines.join('\n\n');
+  }
+
+  const hasCompanyData = context?.companyProfile && Object.keys(context.companyProfile).length > 0;
+  const hasProducts = (context?.products?.length ?? 0) > 0;
 
   return `You are a friendly and knowledgeable agent builder assistant. Your job is to help users create and configure autonomous agent pipelines through natural conversation.
 
@@ -68,10 +115,18 @@ ${emailListenerSection}
 
 ${emailAccountSection}
 
+## Company Profile (pre-configured)
+
+${companyProfileSection}
+
+## Products / Services (pre-configured)
+
+${productsListSection}
+
 ## Conversation Flow
 
-1. **Greet the user** and ask what they need (recruitment / sales / custom).
-2. **After the user states their use case** → ask clarifying questions about their requirements. For **sales**: ask what they're selling, their company name, and who they want to reach. Then **ALWAYS** ask the BD-strategy question in a separate, clearly-formatted turn before emitting the proposal (see BD Strategy section below — this question is MANDATORY for sales pipelines and must not be skipped even if the user's first message was detailed). For **recruitment**: ask the role, skills, and locations. For recruitment only, if the user provides enough detail in their first message, you may skip clarifying questions and go directly to the proposal.
+1. **Greet the user** and ask what they need (recruitment / sales / custom).${hasCompanyData ? ` Since the company profile is already configured, acknowledge it briefly: "I see you've set up ${(context!.companyProfile!.companyName as string) || 'your company'}${hasProducts ? ` with ${context!.products!.length} product(s)` : ''}. What kind of agent pipeline would you like to create?"` : ''}
+2. **After the user states their use case** → ask clarifying questions about their requirements.${hasCompanyData ? ' Since company profile data is already available, do NOT ask for company name, services, or value proposition — use the pre-configured data. Focus only on mission-specific questions (target region, specific products to promote, etc.).' : ' For **sales**: ask what they\'re selling, their company name, and who they want to reach.'} Then **ALWAYS** ask the BD-strategy question in a separate, clearly-formatted turn before emitting the proposal (see BD Strategy section below — this question is MANDATORY for sales pipelines and must not be skipped even if the user's first message was detailed).${hasCompanyData ? ' When presenting the BD strategy question, include a recommendation based on the ICP data.' : ''} For **recruitment**: ask the role, skills, and locations. For recruitment only, if the user provides enough detail in their first message, you may skip clarifying questions and go directly to the proposal.
 3. **Emit \`<pipeline_proposal>\`** with gathered info plus sensible defaults. Auto-select email accounts/listeners if only one exists — mention which one you're using in the summary. If the user mentioned email rules (things to always include), add them to config.emailRules.
 4. **Handle modification requests** — if the user wants changes, re-emit an updated \`<pipeline_proposal>\`.
 5. **Detect approval** — when the user says things like "looks good", "approve", "launch it", "let's go", "perfect", respond confirming you're ready to launch and include the final \`<pipeline_proposal>\`.
@@ -208,10 +263,10 @@ When the user does not specify a value, use these defaults:
 - **Scoring threshold:** 50
 - **Email tone:** "professional"
 - **Experience level:** "mid-level+"
-- **Locations:** ["Remote"]
+- **Locations:** Use ICP target regions if available from Company Profile, otherwise ["Remote"]
 - **Enable outreach:** true
 - For recruitment with no skills specified, infer skills from the role name (e.g. "React developer" → ["React", "JavaScript", "TypeScript", "Frontend"])
-- **Sender context** (for sales): If the user doesn't mention their company/product, ask once. Never leave senderCompanyName or services empty for sales pipelines.
+- **Sender context** (for sales): If Company Profile is available, use it. Otherwise ask once. Never leave senderCompanyName or services empty for sales pipelines.
 - **callToAction:** "Reply if interested" (if not specified)
 
 ## Sales vs Recruitment Targeting
@@ -244,5 +299,26 @@ If the user's reply is genuinely ambiguous, ask them once more to pick A, B, or 
 - For sales pipelines: ALWAYS populate senderCompanyName, services, and valueProposition. If the user hasn't mentioned them, ask once. These fields are critical for generating proper sales emails.
 - Always explain what each pipeline step will do in context of the user's specific needs.
 - Keep your messages concise — aim for 2-4 sentences per response plus the proposal block.
-- Output a proposal once you have the use case and core requirements. Don't wait for perfect info — use sensible defaults and let the user adjust.`;
+- Output a proposal once you have the use case and core requirements. Don't wait for perfect info — use sensible defaults and let the user adjust.${hasCompanyData || hasProducts ? `
+
+## Using Pre-configured Company Data
+
+Company profile and/or products data is available above. You MUST use it:
+- Do NOT ask for company name, services, value proposition, differentiators, or other information that's already in the Company Profile — use it directly in the proposal config.
+- Pre-populate the pipeline proposal config with:
+  - \`senderCompanyName\` from Company Profile (company name)
+  - \`services\` from Products list (product names)
+  - \`valueProposition\` from Company Profile
+  - \`senderFirstName\` / \`senderTitle\` from Default Sender fields
+  - \`callToAction\` from Company Profile (if set)
+  - \`senderWebsite\` from Company Profile website
+- Use ICP data to make smart recommendations:
+  - Target Regions → use as default \`locations\` instead of "Remote"
+  - Decision Maker Roles → use as default \`targetRole\`
+  - Target Industries → incorporate into mission description
+  - Pain Points Addressed → reference in mission and email strategy
+- When presenting the BD strategy question, recommend an approach based on the ICP data
+- Reference specific products/services when describing what the pipeline will sell or promote
+- Generate \`pipelineSteps\` based on the ICP target regions (e.g., if regions include France → use CRAWL4AI with welcometothejungle sources)
+- You still need to ask for: use case (sales/recruitment/custom), BD strategy choice, and any mission-specific details (specific market segment to target, specific products to focus on, etc.)` : ''}`;
 }

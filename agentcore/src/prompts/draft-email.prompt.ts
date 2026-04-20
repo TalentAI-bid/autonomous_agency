@@ -42,8 +42,9 @@ INSTRUCTIONS:
 - End with a clear CTA (book a call, reply to discuss, etc.)
 - Tone: professional but conversational, like a peer reaching out
 - Do NOT use generic filler ("I hope this finds you well")
-- Output ONLY valid JSON: { "subject": "...", "body": "..." }
-- The body should be plain text (not HTML), with \\n for line breaks`;
+- The body should be plain text (not HTML), with \\n for line breaks
+
+IMPORTANT: Return ONLY the JSON object. No markdown code fences. No preamble. No postamble. Your entire response must be valid JSON: { "subject": "...", "body": "..." }`;
 }
 
 export function buildDraftEmailUserPrompt(

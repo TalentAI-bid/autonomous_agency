@@ -6,7 +6,8 @@ import { contacts, companies, masterAgents, outreachEmails } from '../db/schema/
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { selectEmailAccount, incrementQuota } from '../tools/email-queue.tool.js';
 import { sendEmail } from '../tools/smtp.tool.js';
-import { extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
+import { extractJSON, complete, SMART_MODEL } from '../tools/together-ai.tool.js';
+import { extractJSONFromText } from '../utils/json-extract.js';
 import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../prompts/draft-email.prompt.js';
 import logger from '../utils/logger.js';
 
@@ -199,15 +200,62 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       masterAgent = ma ?? null;
     }
 
-    const draft = await extractJSON<{ subject: string; body: string }>(
-      request.tenantId,
-      [
-        { role: 'system', content: buildDraftEmailSystemPrompt(masterAgent, company) },
-        { role: 'user', content: buildDraftEmailUserPrompt(contact, company, hint) },
-      ],
-      2,
-      { model: SMART_MODEL, temperature: 0.7 },
-    );
+    const systemPrompt = buildDraftEmailSystemPrompt(masterAgent, company);
+    const userPrompt = buildDraftEmailUserPrompt(contact, company, hint);
+    const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
+
+    logger.info({
+      contactId: id,
+      contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(),
+      companyName: company?.name,
+      systemPromptLen: systemPrompt.length,
+      userPromptLen: userPrompt.length,
+      model: SMART_MODEL,
+    }, 'draft-email: starting LLM call');
+
+    let draft: { subject: string; body: string };
+
+    try {
+      draft = await extractJSON<{ subject: string; body: string }>(
+        request.tenantId,
+        messages,
+        2,
+        { model: SMART_MODEL, temperature: 0.7 },
+      );
+      logger.info({ contactId: id, subject: draft.subject?.slice(0, 80) }, 'draft-email: JSON extracted successfully');
+    } catch (err) {
+      logger.warn({
+        contactId: id,
+        error: err instanceof Error ? err.message : String(err),
+      }, 'draft-email: extractJSON failed, attempting raw fallback');
+
+      // Fallback: get raw completion and try to extract, or use as-is
+      try {
+        const rawText = await complete(request.tenantId, messages, { model: SMART_MODEL, temperature: 0.7, max_tokens: 16384 });
+        logger.info({ contactId: id, rawLen: rawText.length, rawPreview: rawText.slice(0, 200) }, 'draft-email: raw LLM response');
+
+        try {
+          draft = extractJSONFromText<{ subject: string; body: string }>(rawText);
+          logger.info({ contactId: id }, 'draft-email: JSON extracted from raw fallback');
+        } catch {
+          // Use raw text as email body with a fallback subject
+          draft = {
+            subject: `Quick question about ${company?.name || 'your work'}`,
+            body: rawText.trim(),
+          };
+          logger.warn({ contactId: id }, 'draft-email: using raw text as fallback body');
+        }
+      } catch (rawErr) {
+        logger.error({
+          contactId: id,
+          error: rawErr instanceof Error ? rawErr.message : String(rawErr),
+        }, 'draft-email: both extractJSON and raw fallback failed');
+        throw rawErr;
+      }
+    }
 
     return { data: draft };
   });

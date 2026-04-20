@@ -42,8 +42,7 @@ export async function searchLinkedInJobs(
     return { companies: [], raw: markdown };
   }
 
-  const parsed = parseJobListings(markdown);
-  logger.info({ tenantId, jobTitle, location, parsedCount: parsed.length }, 'LinkedIn Jobs parsed from markdown');
+  const parsed = parseJobListings(markdown, jobTitle, location);
 
   // Deduplicate by LinkedIn URL
   const seen = new Set<string>();
@@ -54,6 +53,11 @@ export async function searchLinkedInJobs(
     seen.add(key);
     unique.push(c);
   }
+
+  logger.info(
+    { tenantId, jobTitle, location, parsedBeforeDedup: parsed.length, afterDedup: unique.length },
+    'LinkedIn Jobs parsed, filtered, and deduped',
+  );
 
   // Save companies to DB and auto-chain fetch_company
   let saved = 0;
@@ -128,70 +132,150 @@ export async function searchLinkedInJobs(
   return { companies: unique, raw: markdown };
 }
 
-/**
- * Parse LinkedIn Jobs markdown output from CRAWL4AI.
- *
- * LinkedIn Jobs pages rendered as markdown typically contain job cards with:
- *  - Job title as a heading or bold link
- *  - Company name with a /company/ link
- *  - Location text
- *  - Posted date (e.g. "2 days ago", "1 week ago")
- *
- * We use multiple regex strategies to handle different markdown formats.
- */
-function parseJobListings(markdown: string): LinkedInJobCompany[] {
-  const results: LinkedInJobCompany[] = [];
+// ─── Location aliases for validation ──────────────────────────────────────────
 
-  // Strategy 1: Look for /company/ links with surrounding context
-  // Pattern: [Company Name](https://www.linkedin.com/company/slug...)
+const LOCATION_ALIASES: Record<string, string[]> = {
+  'united kingdom': ['united kingdom', 'uk', 'london', 'manchester', 'birmingham', 'edinburgh', 'glasgow', 'bristol', 'leeds', 'liverpool', 'cambridge', 'oxford', 'england', 'scotland', 'wales', 'belfast', 'cardiff', 'nottingham', 'sheffield', 'newcastle', 'reading', 'brighton'],
+  'france': ['france', 'paris', 'lyon', 'marseille', 'bordeaux', 'toulouse', 'nantes', 'lille', 'strasbourg', 'montpellier', 'nice'],
+  'germany': ['germany', 'berlin', 'munich', 'hamburg', 'frankfurt', 'cologne', 'düsseldorf', 'stuttgart', 'dortmund', 'essen', 'leipzig', 'dresden'],
+  'ireland': ['ireland', 'dublin', 'cork', 'galway', 'limerick', 'waterford'],
+  'spain': ['spain', 'madrid', 'barcelona', 'valencia', 'seville', 'bilbao', 'malaga'],
+  'united states': ['united states', 'usa', 'us', 'new york', 'san francisco', 'los angeles', 'chicago', 'seattle', 'austin', 'boston', 'denver', 'miami', 'atlanta'],
+  'estonia': ['estonia', 'tallinn', 'tartu'],
+};
+
+// ─── Parsing ──────────────────────────────────────────────────────────────────
+
+/**
+ * Parse LinkedIn Jobs markdown output from CRAWL4AI, then filter by keyword + location.
+ *
+ * Two parsing strategies:
+ *  1. (Primary) Find /jobs/view/ links — these ARE the actual job cards.
+ *     For each, look forward for the nearest /company/ link.
+ *  2. (Fallback) Find /company/ links and look backward for job titles.
+ *     Only used when zero /jobs/view/ links are found.
+ *
+ * After parsing, results are filtered:
+ *  - Keyword filter: job title must contain the primary search keyword
+ *  - Location filter: job location must match the target region
+ */
+function parseJobListings(markdown: string, searchJobTitle: string, searchLocation: string): LinkedInJobCompany[] {
+  let rawResults = parseViaJobViewLinks(markdown);
+
+  if (rawResults.length === 0) {
+    rawResults = parseViaCompanyLinks(markdown);
+  }
+
+  if (rawResults.length === 0) {
+    rawResults = parseViaLineFallback(markdown);
+  }
+
+  // Apply keyword + location filters
+  const afterKeyword = filterByKeyword(rawResults, searchJobTitle);
+  const afterLocation = filterByLocation(afterKeyword, searchLocation);
+
+  logger.info({
+    rawParsed: rawResults.length,
+    afterKeywordFilter: afterKeyword.length,
+    afterLocationFilter: afterLocation.length,
+    searchJobTitle,
+    searchLocation,
+  }, 'LinkedIn Jobs parse + filter results');
+
+  return afterLocation;
+}
+
+/**
+ * Strategy 1 (Primary): Find /jobs/view/ links — these are the actual job cards.
+ * For each job link, look forward for the nearest /company/ link to identify the company.
+ */
+function parseViaJobViewLinks(markdown: string): LinkedInJobCompany[] {
+  const results: LinkedInJobCompany[] = [];
+  const jobViewRegex = /\[([^\]]+)\]\(https?:\/\/(?:www\.)?linkedin\.com\/jobs\/view\/[^)]+\)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = jobViewRegex.exec(markdown)) !== null) {
+    const jobTitleRaw = match[1]!.trim();
+    if (jobTitleRaw.length < 3) continue;
+
+    const afterJob = markdown.slice(match.index + match[0].length, match.index + match[0].length + 600);
+
+    // Look for the nearest /company/ link after this job link
+    const companyMatch = afterJob.match(/\[([^\]]+)\]\(https?:\/\/(?:www\.)?linkedin\.com\/company\/([a-zA-Z0-9_-]+)\/?[^)]*\)/);
+    if (!companyMatch) continue;
+
+    const companyName = companyMatch[1]!.trim();
+    const companySlug = companyMatch[2]!;
+    if (companyName.length < 2 || companySlug.length < 2) continue;
+
+    // Extract location: look in the text between job link and company link, or after company
+    const contextBlock = afterJob.slice(0, 500);
+    let jobLocation = '';
+    const locMatch = contextBlock.match(/(?:📍|Location:|·)\s*([A-Z][^\n|·]{2,50})/);
+    if (locMatch) {
+      jobLocation = locMatch[1]!.trim();
+    } else {
+      // Look for "City, Country" or "City, ST" patterns
+      const cityMatch = contextBlock.match(/\b([A-Z][a-z]+(?:[\s,]+[A-Z][a-z]+){0,3}(?:,\s*[A-Z]{2,})?)\b/);
+      if (cityMatch && cityMatch[1]!.length > 3) jobLocation = cityMatch[1]!.trim();
+    }
+
+    // Extract posted date
+    let postedAt = '';
+    const dateMatch = contextBlock.match(/(\d+\s+(?:hour|day|week|month)s?\s+ago|just\s+now|today|yesterday)/i);
+    if (dateMatch) postedAt = dateMatch[1]!.trim();
+
+    results.push({
+      companyName,
+      linkedinUrl: `https://www.linkedin.com/company/${companySlug}`,
+      jobTitle: jobTitleRaw,
+      location: jobLocation || undefined,
+      postedAt: postedAt || undefined,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Strategy 2 (Fallback): Find /company/ links and look backward for job titles.
+ * Only used when zero /jobs/view/ links are found.
+ */
+function parseViaCompanyLinks(markdown: string): LinkedInJobCompany[] {
+  const results: LinkedInJobCompany[] = [];
   const companyLinkRegex = /\[([^\]]+)\]\(https?:\/\/(?:www\.)?linkedin\.com\/company\/([a-zA-Z0-9_-]+)\/?[^)]*\)/g;
   let match: RegExpExecArray | null;
-  const companyPositions: Array<{ name: string; slug: string; linkedinUrl: string; index: number }> = [];
 
   while ((match = companyLinkRegex.exec(markdown)) !== null) {
     const name = match[1]!.trim();
     const slug = match[2]!;
     if (name.length < 2 || slug.length < 2) continue;
-    companyPositions.push({
-      name,
-      slug,
-      linkedinUrl: `https://www.linkedin.com/company/${slug}`,
-      index: match.index,
-    });
-  }
 
-  // For each company link, look backwards for a job title (usually a nearby heading or bold text)
-  for (const cp of companyPositions) {
-    const contextBefore = markdown.slice(Math.max(0, cp.index - 500), cp.index);
-    const contextAfter = markdown.slice(cp.index, cp.index + 300);
+    const contextBefore = markdown.slice(Math.max(0, match.index - 500), match.index);
+    const contextAfter = markdown.slice(match.index, match.index + 300);
 
-    // Job title: look for the closest heading, bold, or link text before the company
+    // Job title: prefer /jobs/view/ link in context, then heading/bold, then last line
     let jt = '';
-    // Try: ### Job Title or ** Job Title **
-    const headingMatch = contextBefore.match(/(?:#{1,4}\s+(.+)|^\*\*(.+?)\*\*)/m);
-    if (headingMatch) {
-      jt = (headingMatch[1] || headingMatch[2] || '').trim();
+    const jobLinkMatch = contextBefore.match(/\[([^\]]+)\]\(https?:\/\/(?:www\.)?linkedin\.com\/jobs\/view\//);
+    if (jobLinkMatch) {
+      jt = jobLinkMatch[1]!.trim();
     }
-    // Try: [Job Title](linkedin.com/jobs/view/...)
     if (!jt) {
-      const jobLinkMatch = contextBefore.match(/\[([^\]]+)\]\(https?:\/\/(?:www\.)?linkedin\.com\/jobs\/view\//);
-      if (jobLinkMatch) jt = jobLinkMatch[1]!.trim();
+      const headingMatch = contextBefore.match(/(?:#{1,4}\s+(.+)|^\*\*(.+?)\*\*)/m);
+      if (headingMatch) jt = (headingMatch[1] || headingMatch[2] || '').trim();
     }
-    // Fallback: last non-empty line before company mention
     if (!jt) {
       const lines = contextBefore.split('\n').map(l => l.trim()).filter(Boolean);
       const lastLine = lines[lines.length - 1] || '';
-      // Clean markdown formatting
       jt = lastLine.replace(/^[#*\->\s]+/, '').replace(/\[([^\]]+)\]\([^)]+\)/, '$1').trim();
     }
 
-    // Location: look for common location patterns after the company
+    // Location
     let location = '';
     const locMatch = contextAfter.match(/(?:📍|Location:|·)\s*([A-Z][^\n|·]{2,50})/);
     if (locMatch) location = locMatch[1]!.trim();
-    // Fallback: city-like pattern in the context
     if (!location) {
-      const cityMatch = contextAfter.match(/\b([A-Z][a-z]+(?:[\s,]+[A-Z][a-z]+){0,3}(?:,\s*[A-Z]{2})?)\b/);
+      const cityMatch = contextAfter.match(/\b([A-Z][a-z]+(?:[\s,]+[A-Z][a-z]+){0,3}(?:,\s*[A-Z]{2,})?)\b/);
       if (cityMatch && cityMatch[1]!.length > 3) location = cityMatch[1]!.trim();
     }
 
@@ -201,36 +285,119 @@ function parseJobListings(markdown: string): LinkedInJobCompany[] {
     if (dateMatch) postedAt = dateMatch[1]!.trim();
 
     results.push({
-      companyName: cp.name,
-      linkedinUrl: cp.linkedinUrl,
+      companyName: name,
+      linkedinUrl: `https://www.linkedin.com/company/${slug}`,
       jobTitle: jt || 'Unknown role',
       location: location || undefined,
       postedAt: postedAt || undefined,
     });
   }
 
-  // Strategy 2: If no /company/ links found, try line-by-line extraction
-  // LinkedIn Jobs markdown sometimes renders as plain text lists
-  if (results.length === 0) {
-    const lines = markdown.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]!.trim();
-      // Look for lines that mention a company with a job context
-      const jobPattern = line.match(/^(?:[-*•]\s*)?(.+?)\s+(?:at|@|-|–|—)\s+(.+?)(?:\s*[|·]\s*(.+))?$/i);
-      if (jobPattern) {
-        const title = jobPattern[1]!.trim();
-        const company = jobPattern[2]!.trim();
-        const loc = jobPattern[3]?.trim();
-        if (company.length >= 2 && title.length >= 3) {
-          results.push({
-            companyName: company,
-            jobTitle: title,
-            location: loc || undefined,
-          });
-        }
+  return results;
+}
+
+/**
+ * Strategy 3 (Last resort): Line-by-line "Title at Company" pattern.
+ */
+function parseViaLineFallback(markdown: string): LinkedInJobCompany[] {
+  const results: LinkedInJobCompany[] = [];
+  const lines = markdown.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const jobPattern = trimmed.match(/^(?:[-*•]\s*)?(.+?)\s+(?:at|@|-|–|—)\s+(.+?)(?:\s*[|·]\s*(.+))?$/i);
+    if (jobPattern) {
+      const title = jobPattern[1]!.trim();
+      const company = jobPattern[2]!.trim();
+      const loc = jobPattern[3]?.trim();
+      if (company.length >= 2 && title.length >= 3) {
+        results.push({
+          companyName: company,
+          jobTitle: title,
+          location: loc || undefined,
+        });
       }
     }
   }
-
   return results;
+}
+
+// ─── Filters ──────────────────────────────────────────────────────────────────
+
+/**
+ * Filter by keyword: the primary search keyword (first word, usually the most
+ * specific like "Solana") must appear in the job title. If it doesn't match,
+ * fall back to requiring ANY keyword to match.
+ *
+ * For "Solana developer":
+ *  - "FrontEnd Developer" → has "developer" but NOT "solana" → rejected
+ *  - "Solana Smart Contract Developer" → has "solana" → accepted
+ */
+function filterByKeyword(results: LinkedInJobCompany[], searchJobTitle: string): LinkedInJobCompany[] {
+  const keywords = searchJobTitle.toLowerCase().split(/\s+/).filter(k => k.length > 2);
+  if (keywords.length === 0) return results;
+
+  const primaryKeyword = keywords[0]!;
+
+  // First try: primary keyword must match
+  const primaryMatches = results.filter(r => {
+    const title = r.jobTitle.toLowerCase();
+    return title.includes(primaryKeyword);
+  });
+
+  // If primary keyword matched some results, use those
+  if (primaryMatches.length > 0) return primaryMatches;
+
+  // Fallback: any keyword must match (less strict)
+  const anyMatch = results.filter(r => {
+    const title = r.jobTitle.toLowerCase();
+    return keywords.some(kw => title.includes(kw));
+  });
+
+  if (anyMatch.length > 0) return anyMatch;
+
+  // Last resort: if nothing matched, return all (parser may have bad titles)
+  // but log a warning so we know the filter found nothing
+  logger.warn(
+    { searchJobTitle, keywords, resultCount: results.length },
+    'LinkedIn Jobs keyword filter matched nothing — returning unfiltered results',
+  );
+  return results;
+}
+
+/**
+ * Filter by location: jobs whose location clearly doesn't match the target
+ * region are excluded. Jobs with no location or "remote" are kept.
+ */
+function filterByLocation(results: LinkedInJobCompany[], searchLocation: string): LinkedInJobCompany[] {
+  if (!searchLocation) return results;
+
+  const locLower = searchLocation.toLowerCase().trim();
+
+  // Build list of valid location terms for this target
+  const validTerms = LOCATION_ALIASES[locLower] || [locLower];
+
+  const filtered = results.filter(r => {
+    if (!r.location) return true; // keep if no location data (can't exclude)
+    const loc = r.location.toLowerCase();
+
+    // Keep if location matches any valid term
+    if (validTerms.some(term => loc.includes(term))) return true;
+
+    // Keep remote jobs (they could be in the target region)
+    if (loc.includes('remote') || loc.includes('hybrid')) return true;
+
+    // Reject: location doesn't match target
+    return false;
+  });
+
+  // If filter removed everything, return original (location data may be bad)
+  if (filtered.length === 0 && results.length > 0) {
+    logger.warn(
+      { searchLocation, validTerms, resultCount: results.length },
+      'LinkedIn Jobs location filter matched nothing — returning unfiltered results',
+    );
+    return results;
+  }
+
+  return filtered;
 }

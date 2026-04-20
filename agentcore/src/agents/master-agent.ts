@@ -368,7 +368,8 @@ export class MasterAgent extends BaseAgent {
 
                 let dispatched = 0;
 
-                // ─── Hiring signal path: search_job_posts ────────────────
+                // ─── Hiring signal path: server-side LinkedIn Jobs scrape ──
+                // LinkedIn Jobs search is PUBLIC (no login) — scrape via CRAWL4AI
                 if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
                   // Resolve jobTitle with explicit priority chain
                   const resolveJobTitle = (): { value: string; source: string } => {
@@ -386,16 +387,18 @@ export class MasterAgent extends BaseAgent {
                   const { value: jobTitle, source: jobTitleSource } = resolveJobTitle();
                   logger.info({ jobTitle, jobTitleSource, masterAgentId }, 'Resolved jobTitle for LinkedIn Jobs search');
 
+                  const { searchLinkedInJobs } = await import('../tools/linkedin-jobs.tool.js');
                   for (const loc of locs) {
-                    await enqueueExtensionTask({
-                      tenantId: this.tenantId,
-                      masterAgentId,
-                      site: 'linkedin',
-                      type: 'search_job_posts',
-                      params: { jobTitle, location: loc, limit: 25 },
-                      priority: 7,
-                    });
-                    dispatched++;
+                    try {
+                      const result = await searchLinkedInJobs(this.tenantId, jobTitle, loc, masterAgentId);
+                      logger.info(
+                        { masterAgentId, location: loc, companiesFound: result.companies.length },
+                        'Server-side LinkedIn Jobs scrape completed',
+                      );
+                      dispatched++;
+                    } catch (err) {
+                      logger.warn({ err, masterAgentId, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
+                    }
                   }
                 }
 

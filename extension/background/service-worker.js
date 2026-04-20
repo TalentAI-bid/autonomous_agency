@@ -46,7 +46,6 @@ const LINKEDIN_GEO_CODES = {
 const ADAPTER_FILES = {
   'linkedin:search_companies':  ['lib/scraper-utils.js', 'content/linkedin/search-companies.js'],
   'linkedin:fetch_company':     ['lib/scraper-utils.js', 'content/linkedin/fetch-company.js'],
-  'linkedin:search_job_posts':  ['lib/scraper-utils.js', 'content/linkedin/search-job-posts.js'],
   'gmaps:search_businesses':    ['lib/scraper-utils.js', 'content/gmaps/search-businesses.js'],
   'gmaps:fetch_business':       ['lib/scraper-utils.js', 'content/gmaps/fetch-business.js'],
   'crunchbase:search_companies': ['lib/scraper-utils.js', 'content/crunchbase/search-companies.js'],
@@ -345,11 +344,6 @@ function buildUrl(site, type, params) {
     // Fallback: fold the location text into the keyword query so at least
     // some filtering happens client-side in LinkedIn's search ranking.
     return `https://www.linkedin.com/search/results/companies/?keywords=${keywords}%20${encodeURIComponent(params.location || '')}`;
-  }
-  if (site === 'linkedin' && type === 'search_job_posts') {
-    const keywords = encodeURIComponent(params.jobTitle || params.keyword || '');
-    const location = encodeURIComponent(params.location || '');
-    return `https://www.linkedin.com/jobs/search/?keywords=${keywords}&location=${location}&f_TPR=r604800`;
   }
   if (site === 'linkedin' && type === 'fetch_company') {
     return params.linkedinUrl;

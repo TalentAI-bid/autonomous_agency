@@ -40,7 +40,7 @@ Your output must be valid JSON with these fields:
   This is the ordered execution plan telling the system which tools to use and in what order.
   Available tools:
   - LINKEDIN_EXTENSION: Search companies/people via Chrome extension (UK/IE/unknown regions)
-  - CRAWL4AI: Scrape job boards, company websites, public directories
+  - CRAWL4AI: Scrape company websites, public directories, and LinkedIn Jobs (public, no login needed)
   - LLM_ANALYSIS: Deep company/candidate profiling via LLM
   - REACHER: SMTP email verification (first person per company only)
   - EMAIL_PATTERN: Apply known working email pattern without SMTP verification (subsequent people)
@@ -56,22 +56,25 @@ Your output must be valid JSON with these fields:
   - Always end with SCORING
 
   STRATEGY-TO-PIPELINE MAPPING (CRITICAL — your bdStrategy MUST match your root steps):
-  - bdStrategy "hiring_signal" → Root step MUST be LINKEDIN_EXTENSION with action "search_job_posts"
+  - bdStrategy "hiring_signal" → Root step MUST be CRAWL4AI with action "search_linkedin_jobs"
     params: { jobTitle: "<role from mission>", location: "<target location>" }
-    Then: fetch_company_detail → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
+    LinkedIn Jobs search is PUBLIC (no login needed) — the server scrapes it directly via CRAWL4AI.
+    Then: fetch_company_detail (extension) → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
   - bdStrategy "industry_target" → Root step MUST be LINKEDIN_EXTENSION with action "search_companies"
+    LinkedIn company search REQUIRES login — uses the Chrome extension.
     Then: fetch_company_detail → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
-  - bdStrategy "hybrid" → BOTH search_job_posts AND search_companies as parallel root steps
+  - bdStrategy "hybrid" → BOTH CRAWL4AI:search_linkedin_jobs AND LINKEDIN_EXTENSION:search_companies as parallel root steps
 
   NOTE: Job boards (WTTJ, Free-Work, Indeed, etc.) are NOT available in v1.
   Do NOT generate CRAWL4AI:scrape_job_boards steps.
-  For hiring signals in ANY region, use LINKEDIN_EXTENSION:search_job_posts.
+  For hiring signals, use CRAWL4AI:search_linkedin_jobs (server-side, no extension needed).
+  For industry targeting, use LINKEDIN_EXTENSION:search_companies (requires Chrome extension).
 
   PIPELINE EXAMPLES:
 
-  Hiring signal example (any region):
+  Hiring signal example (any region — server-side, no extension needed for discovery):
   [
-    { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
     { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
     { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
@@ -81,7 +84,7 @@ Your output must be valid JSON with these fields:
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ]
 
-  Industry target example (any region):
+  Industry target example (any region — extension required for company search):
   [
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
     { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
@@ -93,9 +96,9 @@ Your output must be valid JSON with these fields:
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ]
 
-  Hybrid example (both hiring signals + industry search in parallel):
+  Hybrid example (server-side hiring signals + extension industry search in parallel):
   [
-    { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
     { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search", "li_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },

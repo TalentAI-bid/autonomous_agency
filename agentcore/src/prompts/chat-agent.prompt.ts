@@ -177,7 +177,7 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
   // - "outreach" → only if enableOutreach is true and email account is configured
   // - "reply" + "action" → only if outreach is included
   "pipelineSteps": [
-    { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "role from mission", "location": "target region" } }
+    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "role from mission", "location": "target region" } }
   ],
   // ↑ REQUIRED — tool-level execution plan. See "Tool-Level Pipeline Steps" section below.
   "summary": "Brief summary of what the pipeline will do",
@@ -211,8 +211,8 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
 You MUST always generate a \`pipelineSteps\` array in the proposal. This describes the exact tools used at execution time, adapted to the user's target region and mission.
 
 Available tools:
-- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies, people, and job posts. Actions: \`search_companies\`, \`fetch_company_detail\`, \`search_job_posts\`, \`get_team\`.
-- **CRAWL4AI**: Scrape company websites for context. Action: \`scrape_company_website\`. NOTE: Job board scraping (scrape_job_boards) is NOT available in v1 — use LINKEDIN_EXTENSION:search_job_posts for hiring signals instead.
+- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies and people (requires login). Actions: \`search_companies\`, \`fetch_company_detail\`, \`get_team\`.
+- **CRAWL4AI**: Server-side scraping. Actions: \`scrape_company_website\`, \`search_linkedin_jobs\` (LinkedIn Jobs pages are PUBLIC — no login needed, scraped server-side).
 - **LLM_ANALYSIS**: Deep company/candidate profiling via LLM. Always include after data collection steps.
 - **REACHER**: SMTP email verification. Use for the FIRST person per company only (saves quota).
 - **EMAIL_PATTERN**: Apply a cached working email pattern without SMTP verification. Use for subsequent people at the same company.
@@ -221,18 +221,18 @@ Available tools:
 Rules:
 - Each step has a unique \`id\` and lists \`dependsOn\` (IDs of prerequisite steps).
 - Root steps (dependsOn: []) execute first, in parallel if multiple.
-- For **hiring signals** (any region): start with LINKEDIN_EXTENSION:search_job_posts with params \`{ jobTitle, location }\`.
-- For **industry targeting** (any region): start with LINKEDIN_EXTENSION:search_companies.
-- For **hybrid** approach: BOTH search_job_posts AND search_companies as parallel root steps.
+- For **hiring signals** (any region): start with CRAWL4AI:search_linkedin_jobs with params \`{ jobTitle, location }\`. This is server-side (public, no login needed).
+- For **industry targeting** (any region): start with LINKEDIN_EXTENSION:search_companies (requires Chrome extension login).
+- For **hybrid** approach: BOTH CRAWL4AI:search_linkedin_jobs AND LINKEDIN_EXTENSION:search_companies as parallel root steps.
 - Do NOT generate CRAWL4AI:scrape_job_boards steps (not available in v1).
 - Always include LLM_ANALYSIS after data collection steps.
 - Always use REACHER for the first person per company, then EMAIL_PATTERN for the rest.
 - Always end with SCORING.
 
-Example — Hiring signal mission (any region):
+Example — Hiring signal mission (any region — server-side, no extension needed for discovery):
 \`\`\`json
 [
-  { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+  { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
   { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
   { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
   { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
@@ -243,7 +243,7 @@ Example — Hiring signal mission (any region):
 ]
 \`\`\`
 
-Example — Industry target mission (any region):
+Example — Industry target mission (any region — extension required for company search):
 \`\`\`json
 [
   { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },

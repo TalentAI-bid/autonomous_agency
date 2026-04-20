@@ -387,8 +387,14 @@ export class MasterAgent extends BaseAgent {
                   const { value: jobTitle, source: jobTitleSource } = resolveJobTitle();
                   logger.info({ jobTitle, jobTitleSource, masterAgentId }, 'Resolved jobTitle for LinkedIn Jobs search');
 
+                  const LINKEDIN_SCRAPE_DELAY_MS = 8000;
                   const { searchLinkedInJobs } = await import('../tools/linkedin-jobs.tool.js');
+                  let isFirstLocation = true;
                   for (const loc of locs) {
+                    if (!isFirstLocation) {
+                      await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
+                    }
+                    isFirstLocation = false;
                     try {
                       const result = await searchLinkedInJobs(this.tenantId, jobTitle, loc, masterAgentId);
                       logger.info(

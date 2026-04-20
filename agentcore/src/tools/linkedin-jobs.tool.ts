@@ -14,6 +14,28 @@ export interface LinkedInJobCompany {
   postedAt?: string;
 }
 
+// ─── Retry constants ─────────────────────────────────────────────────────────
+
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
+
+async function scrapeWithRetry(tenantId: string, url: string): Promise<string> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const markdown = await scrape(tenantId, url);
+    if (markdown && markdown.trim().length >= 50) return markdown;
+
+    if (attempt < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[attempt]!;
+      logger.info(
+        { tenantId, url, attempt: attempt + 1, delayMs: delay },
+        'LinkedIn Jobs scrape returned empty — retrying after delay',
+      );
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  return '';
+}
+
 /**
  * Server-side LinkedIn Jobs search via CRAWL4AI.
  *
@@ -36,9 +58,9 @@ export async function searchLinkedInJobs(
 
   logger.info({ tenantId, jobTitle, location, url, masterAgentId }, 'Hiring signal: scraping LinkedIn Jobs via server');
 
-  const markdown = await scrape(tenantId, url);
+  const markdown = await scrapeWithRetry(tenantId, url);
   if (!markdown || markdown.trim().length < 50) {
-    logger.warn({ tenantId, jobTitle, location, markdownLen: markdown.length }, 'LinkedIn Jobs scrape returned empty/short content');
+    logger.warn({ tenantId, jobTitle, location, markdownLen: markdown.length }, 'LinkedIn Jobs scrape returned empty/short content after retries');
     return { companies: [], raw: markdown };
   }
 

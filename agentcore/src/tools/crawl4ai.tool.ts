@@ -12,8 +12,49 @@ const MAX_POLL_ATTEMPTS = 15; // 30s total
 const CIRCUIT_BREAKER_THRESHOLD = 5;
 const CIRCUIT_BREAKER_TTL = 300; // 5 minutes
 
+// ─── Per-domain rate limiting ───────────────────────────────────────────────
+const DOMAIN_MIN_DELAY: Record<string, number> = {
+  'www.linkedin.com': 5000,
+  'linkedin.com': 5000,
+};
+const DEFAULT_DOMAIN_DELAY_MS = 1000;
+
+const CLOUDFLARE_SIGNATURES = [
+  'error 1015', 'rate limit', 'cloudflare', 'attention required',
+  'cf-error-details', 'enable javascript and cookies',
+  'checking your browser', 'just a moment',
+];
+
 /** Track whether we've already warned about Crawl4AI being unreachable */
 let crawl4aiDownWarned = false;
+
+async function enforceDomainRateLimit(url: string): Promise<void> {
+  try {
+    const domain = new URL(url).hostname;
+    const delayMs = DOMAIN_MIN_DELAY[domain] ?? DEFAULT_DOMAIN_DELAY_MS;
+    const key = `ratelimit:crawl4ai:${domain}:last`;
+    const last = await redis.get(key);
+    if (last) {
+      const elapsed = Date.now() - parseInt(last, 10);
+      if (elapsed < delayMs) {
+        const waitMs = delayMs - elapsed;
+        logger.debug({ domain, waitMs }, 'Crawl4AI domain rate limit — waiting');
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+    }
+    await redis.setex(key, 60, String(Date.now()));
+  } catch { /* non-critical */ }
+}
+
+function isCloudflareBlock(markdown: string): boolean {
+  const lower = markdown.toLowerCase();
+  let matches = 0;
+  for (const sig of CLOUDFLARE_SIGNATURES) {
+    if (lower.includes(sig)) matches++;
+    if (matches >= 2) return true;
+  }
+  return false;
+}
 
 async function isCrawl4aiCircuitOpen(): Promise<boolean> {
   try {
@@ -82,6 +123,9 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
   const cached = await redis.get(cacheKey);
   if (cached) return cached;
 
+  // Per-domain rate limiting (prevents Cloudflare 1015)
+  await enforceDomainRateLimit(url);
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
@@ -128,6 +172,15 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
     if (data.results?.length) {
       const md = data.results[0]?.markdown;
       const text = typeof md === 'string' ? md : (md?.raw_markdown || md?.fit_markdown || data.results[0]?.extracted_content || '');
+      if (text && isCloudflareBlock(text)) {
+        logger.warn({ url, tenantId }, 'Cloudflare block detected in CRAWL4AI response');
+        try {
+          const domain = new URL(url).hostname;
+          await redis.setex(`ratelimit:crawl4ai:${domain}:last`, 120, String(Date.now() + 55000));
+        } catch { /* non-critical */ }
+        await recordCrawl4aiFailure(tenantId);
+        return '';
+      }
       if (text && text.trim().length >= 100) await redis.setex(cacheKey, CACHE_TTL_SEC, text);
       await recordCrawl4aiSuccess();
       return text;
@@ -146,6 +199,15 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
         if (pollData.status === 'completed' && pollData.results?.length) {
           const md = pollData.results[0]?.markdown;
           const text = typeof md === 'string' ? md : (md?.raw_markdown || md?.fit_markdown || pollData.results[0]?.extracted_content || '');
+          if (text && isCloudflareBlock(text)) {
+            logger.warn({ url, tenantId }, 'Cloudflare block detected in CRAWL4AI async response');
+            try {
+              const domain = new URL(url).hostname;
+              await redis.setex(`ratelimit:crawl4ai:${domain}:last`, 120, String(Date.now() + 55000));
+            } catch { /* non-critical */ }
+            await recordCrawl4aiFailure(tenantId);
+            return '';
+          }
           if (text && text.trim().length >= 100) await redis.setex(cacheKey, CACHE_TTL_SEC, text);
           await recordCrawl4aiSuccess();
           return text;

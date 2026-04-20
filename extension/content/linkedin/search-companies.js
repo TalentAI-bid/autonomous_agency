@@ -46,6 +46,26 @@
       };
     }
 
+    // 429 / rate-limit page detection
+    const RATE_LIMIT_INDICATORS = [
+      "you've reached the",
+      'you have reached the',
+      'rate limit',
+      'too many requests',
+    ];
+    const lowerPageText = pageText.toLowerCase();
+    const isRateLimited = RATE_LIMIT_INDICATORS.some((t) => lowerPageText.includes(t));
+    if (isRateLimited) {
+      console.log('[TalentAI cs] li/search rate_limited_429');
+      return {
+        companies: [],
+        debug: {
+          ...collectDebug({ reason: 'rate_limited_429' }),
+          userAction: 'LinkedIn is rate-limiting requests. The extension will back off automatically.',
+        },
+      };
+    }
+
     // Wait for the search results container (selector varies across LI redesigns).
     const container = await Promise.race([
       u.waitForSelector('.search-results-container', { timeout: 10000 }).catch(() => null),

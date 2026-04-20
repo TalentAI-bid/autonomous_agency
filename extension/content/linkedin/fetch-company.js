@@ -28,6 +28,22 @@
     ]);
     console.log('[TalentAI cs] li/fetch container_ready', { title: document.title, url: location.href });
 
+    // 429 / rate-limit page detection
+    const RATE_LIMIT_INDICATORS = [
+      "you've reached the",
+      'you have reached the',
+      'rate limit',
+      'too many requests',
+    ];
+    const pageTextLower = (document.body?.innerText ?? '').slice(0, 2000).toLowerCase();
+    const isRateLimited = RATE_LIMIT_INDICATORS.some((t) => pageTextLower.includes(t));
+    if (isRateLimited) {
+      console.log('[TalentAI cs] li/fetch rate_limited_429');
+      return {
+        debug: { reason: 'rate_limited_429' },
+      };
+    }
+
     const name =
       u.extractText(document, 'h1.org-top-card-summary__title') ||
       u.extractText(document, 'h1') ||

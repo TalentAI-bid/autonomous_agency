@@ -127,6 +127,14 @@ async function processTask(msg) {
     return;
   }
 
+  // Check daily block (5+ consecutive 429s → blocked until midnight UTC)
+  const blockState = await chrome.storage.local.get(['dailyBlockUntil']);
+  if (blockState.dailyBlockUntil && Date.now() < blockState.dailyBlockUntil) {
+    console.log('[TalentAI sw] daily_block_active', { taskId, until: new Date(blockState.dailyBlockUntil).toISOString() });
+    ws?.send({ type: 'task_result', taskId, status: 'failed', error: 'rate_limited_429' });
+    return;
+  }
+
   currentTask = { taskId, site, taskType, params };
   currentMasterAgentName = masterAgentName ?? null;
   broadcast('current_task', { task: currentTask, masterAgentName: currentMasterAgentName });
@@ -246,6 +254,59 @@ async function processTask(msg) {
         result: resultMsg.result,
       });
       return;
+    }
+
+    // ─── Rate-limited (429) short-circuit with exponential backoff ─────
+    if (
+      resultMsg.status === 'completed' &&
+      resultMsg.result?.debug?.reason === 'rate_limited_429'
+    ) {
+      console.log('[TalentAI sw] rate_limited_429', { taskId });
+      ws?.send({
+        type: 'task_result',
+        taskId,
+        status: 'failed',
+        error: 'rate_limited_429',
+        result: resultMsg.result,
+      });
+
+      // Exponential backoff: 30s → 60s → 120s → 240s → 480s → 600s (cap)
+      const MAX_BACKOFF_MS = 600_000; // 10 minutes
+      const MAX_CONSECUTIVE_BEFORE_DAILY_BLOCK = 5;
+      const stored = await chrome.storage.local.get(['consecutive429s']);
+      const consecutive = (stored.consecutive429s ?? 0) + 1;
+      await chrome.storage.local.set({ consecutive429s: consecutive });
+
+      if (consecutive >= MAX_CONSECUTIVE_BEFORE_DAILY_BLOCK) {
+        // Block until next UTC midnight
+        const now = new Date();
+        const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+        await chrome.storage.local.set({ dailyBlockUntil: midnight.getTime() });
+        console.log('[TalentAI sw] daily_block_set', { consecutive, until: midnight.toISOString() });
+        broadcast('popup_update', {
+          status: 'rate_limited',
+          message: `LinkedIn rate limit hit ${consecutive} times. Pausing all LinkedIn tasks until ${midnight.toUTCString()}.`,
+        });
+      } else {
+        const backoffMs = Math.min(30_000 * Math.pow(2, consecutive - 1), MAX_BACKOFF_MS);
+        console.log('[TalentAI sw] 429_backoff', { consecutive, backoffMs });
+        broadcast('popup_update', {
+          status: 'rate_limited',
+          message: `LinkedIn rate limited. Backing off for ${Math.round(backoffMs / 1000)}s (attempt ${consecutive}/${MAX_CONSECUTIVE_BEFORE_DAILY_BLOCK}).`,
+        });
+        // Auto-resume after backoff (don't pause permanently like blocked_by_popup)
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+      return;
+    }
+
+    // ─── Successful task: reset 429 counter ───────────────────────────
+    if (resultMsg.status === 'completed') {
+      const stored = await chrome.storage.local.get(['consecutive429s']);
+      if (stored.consecutive429s > 0) {
+        await chrome.storage.local.set({ consecutive429s: 0 });
+        console.log('[TalentAI sw] 429_counter_reset');
+      }
     }
 
     await rateLimiter.record(site, taskType);

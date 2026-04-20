@@ -10,12 +10,13 @@ import logger from '../utils/logger.js';
 // ─── Rate limits (server-authoritative; client mirrors these) ──────────────
 
 export type ExtensionSite = 'linkedin' | 'gmaps' | 'crunchbase';
-export type ExtensionTaskType = 'search_companies' | 'fetch_company' | 'search_businesses' | 'fetch_business';
+export type ExtensionTaskType = 'search_companies' | 'fetch_company' | 'search_businesses' | 'fetch_business' | 'search_job_posts';
 
 export const EXTENSION_SITE_LIMITS = {
   linkedin: {
     search_companies: { dailyCap: 10, minDelayMs: 4000 },
     fetch_company: { dailyCap: 100, minDelayMs: 4000 },
+    search_job_posts: { dailyCap: 5, minDelayMs: 8000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },
@@ -96,6 +97,21 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
   if (!result.task || !result.session) return false;
 
   const { task, session } = result;
+
+  // Skip dispatch if the owning master agent is paused
+  if (task.masterAgentId) {
+    const [agentRow] = await withTenant(tenantId, async (tx) => {
+      return tx.select({ status: masterAgents.status })
+        .from(masterAgents)
+        .where(eq(masterAgents.id, task.masterAgentId as string))
+        .limit(1);
+    });
+    if (agentRow?.status === 'paused') {
+      logger.info({ taskId, masterAgentId: task.masterAgentId }, 'Skipped dispatch — master agent is paused');
+      return false;
+    }
+  }
+
   const limit = getLimit(task.site as ExtensionSite, task.type as ExtensionTaskType);
   const key = `${task.site}:${task.type}`;
 
@@ -224,6 +240,22 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
     logger.info(
       { taskId: task.id, tenantId: task.tenantId, site: task.site, type: task.type },
       'Extension task blocked by popup — reset to pending for retry on resume',
+    );
+    return;
+  }
+
+  // ─── Rate-limited (429): reset to pending for retry, don't count as attempt ──
+  if (payload.status === 'failed' && payload.error === 'rate_limited_429') {
+    const resetAt = new Date();
+    await withTenant(task.tenantId, async (tx) => {
+      await tx
+        .update(extensionTasks)
+        .set({ status: 'pending', error: null, updatedAt: resetAt })
+        .where(eq(extensionTasks.id, task.id));
+    });
+    logger.info(
+      { taskId: task.id, tenantId: task.tenantId, site: task.site, type: task.type },
+      'Extension task rate-limited (429) — reset to pending for retry after backoff',
     );
     return;
   }
@@ -371,6 +403,84 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         saved++;
       } catch (err) {
         logger.debug({ err, name }, 'Skipped invalid company from LinkedIn extension');
+      }
+    }
+    return { extracted: rawCompanies.length, saved };
+  }
+
+  if (site === 'linkedin' && type === 'search_job_posts') {
+    const rawCompanies = (result.companies ?? []) as Array<Record<string, unknown>>;
+    logger.info({ taskId: task.id, rawCount: rawCompanies.length }, 'ingest_linkedin_search_job_posts_raw');
+    let saved = 0;
+    for (const c of rawCompanies) {
+      const name = String(c.companyName ?? '').trim();
+      if (!name || name.length < 2) continue;
+
+      const linkedinUrl = typeof c.linkedinUrl === 'string' ? c.linkedinUrl : undefined;
+
+      // Dedup by linkedinUrl (same pattern as search_companies)
+      if (linkedinUrl) {
+        const [existing] = await withTenant(task.tenantId, async (tx) => {
+          return tx
+            .select({ id: companies.id })
+            .from(companies)
+            .where(
+              and(
+                eq(companies.tenantId, task.tenantId),
+                eq(companies.linkedinUrl, linkedinUrl),
+              ),
+            )
+            .limit(1);
+        });
+        if (existing) {
+          logger.debug(
+            { linkedinUrl, existingId: existing.id },
+            'Skipped duplicate company from LinkedIn Jobs search (dedup by linkedinUrl)',
+          );
+          continue;
+        }
+      }
+
+      try {
+        const savedRow = await saveOrUpdateCompanyStatic(
+          task.tenantId,
+          {
+            name,
+            linkedinUrl,
+            rawData: {
+              source: 'linkedin_jobs_search',
+              hiringSignal: true,
+              openJob: c.jobTitle,
+              jobPostedAt: c.postedAt,
+              location: c.location,
+            },
+          },
+          task.masterAgentId ?? undefined,
+        );
+        logger.debug(
+          { taskId: task.id, companyId: savedRow.id, name, linkedinUrl },
+          'ingest_saved_company_from_jobs',
+        );
+
+        // Auto-chain fetch_company for full company details (same as search_companies)
+        if (linkedinUrl) {
+          try {
+            await enqueueExtensionTask({
+              tenantId: task.tenantId,
+              masterAgentId: task.masterAgentId ?? undefined,
+              site: 'linkedin',
+              type: 'fetch_company',
+              params: { linkedinUrl, companyId: savedRow.id },
+              priority: 3,
+            });
+          } catch (err) {
+            logger.debug({ err, linkedinUrl }, 'Failed to auto-queue fetch_company from jobs search (non-fatal)');
+          }
+        }
+
+        saved++;
+      } catch (err) {
+        logger.debug({ err, name }, 'Skipped invalid company from LinkedIn Jobs search');
       }
     }
     return { extracted: rawCompanies.length, saved };

@@ -354,56 +354,88 @@ export class MasterAgent extends BaseAgent {
               );
             }
 
-            // If strategist says we need the Chrome extension, enqueue LinkedIn search tasks.
+            // If strategist says we need the Chrome extension, enqueue LinkedIn tasks.
             // They stay 'pending' until the user connects their extension; then drain-on-reconnect dispatches them.
             if (strategy.dataSourceStrategy?.needsChromeExtension) {
               try {
                 const { enqueueExtensionTask } = await import('../services/extension-dispatcher.js');
-                // Search companies by INDUSTRY × LOCATION, not by roles. Roles get applied
-                // later in the per-company contact search. Using role as a company-search
-                // keyword silently excludes target companies whose LinkedIn headline
-                // doesn't contain the exact role string.
+                const bdStrategy = strategy.bdStrategy || (agentConfig.bdStrategy as string) || 'hybrid';
                 const userRole = strategy.userRole || 'vendor';
                 const targetIndustries = strategy.targetIndustries ?? [];
                 const services = (agentConfig.services as string[]) ?? [];
                 const industries = pipelineContext.sales?.industries ?? [];
-
-                let searchTerms: string[];
-                if (userRole === 'vendor' && targetIndustries.length > 0) {
-                  // Strategist identified WHO BUYS — use those, not what the user sells
-                  searchTerms = targetIndustries.slice(0, 5);
-                } else if (targetIndustries.length > 0) {
-                  searchTerms = targetIndustries.slice(0, 5);
-                } else if (industries.length > 0) {
-                  searchTerms = industries.slice(0, 5);
-                } else if (services.length > 0) {
-                  searchTerms = services.slice(0, 5);
-                } else {
-                  searchTerms = ['technology consulting'];
-                }
                 const locs = pipelineContext.locations ?? [];
 
                 let dispatched = 0;
-                for (const term of searchTerms) {
+
+                // ─── Hiring signal path: search_job_posts ────────────────
+                if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
+                  // Resolve jobTitle with explicit priority chain
+                  const resolveJobTitle = (): { value: string; source: string } => {
+                    if (pipelineContext?.targetRoles?.[0]) {
+                      return { value: pipelineContext.targetRoles[0], source: 'pipelineContext.targetRoles' };
+                    }
+                    if ((agentConfig.targetRoles as string[])?.[0]) {
+                      return { value: (agentConfig.targetRoles as string[])[0], source: 'agentConfig.targetRoles' };
+                    }
+                    if (services[0]) {
+                      return { value: services[0], source: 'agentConfig.services' };
+                    }
+                    return { value: 'engineer', source: 'fallback' };
+                  };
+                  const { value: jobTitle, source: jobTitleSource } = resolveJobTitle();
+                  logger.info({ jobTitle, jobTitleSource, masterAgentId }, 'Resolved jobTitle for LinkedIn Jobs search');
+
                   for (const loc of locs) {
                     await enqueueExtensionTask({
                       tenantId: this.tenantId,
                       masterAgentId,
                       site: 'linkedin',
-                      type: 'search_companies',
-                      params: { industry: term, location: loc, limit: 20 },
+                      type: 'search_job_posts',
+                      params: { jobTitle, location: loc, limit: 25 },
                       priority: 7,
                     });
                     dispatched++;
                   }
                 }
-                logger.info({ masterAgentId, dispatched, searchTerms, locs }, 'Chrome-extension LinkedIn tasks enqueued');
+
+                // ─── Industry target path: search_companies ──────────────
+                if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
+                  let searchTerms: string[];
+                  if (userRole === 'vendor' && targetIndustries.length > 0) {
+                    searchTerms = targetIndustries.slice(0, 5);
+                  } else if (targetIndustries.length > 0) {
+                    searchTerms = targetIndustries.slice(0, 5);
+                  } else if (industries.length > 0) {
+                    searchTerms = industries.slice(0, 5);
+                  } else if (services.length > 0) {
+                    searchTerms = services.slice(0, 5);
+                  } else {
+                    searchTerms = ['technology consulting'];
+                  }
+
+                  for (const term of searchTerms) {
+                    for (const loc of locs) {
+                      await enqueueExtensionTask({
+                        tenantId: this.tenantId,
+                        masterAgentId,
+                        site: 'linkedin',
+                        type: 'search_companies',
+                        params: { industry: term, location: loc, limit: 20 },
+                        priority: 7,
+                      });
+                      dispatched++;
+                    }
+                  }
+                }
+
+                logger.info({ masterAgentId, dispatched, bdStrategy, locs }, 'Chrome-extension LinkedIn tasks enqueued');
                 if (dispatched > 0) {
                   this.sendMessage(null, 'system_alert', {
                     action: 'extension_tasks_enqueued',
                     severity: 'info',
                     count: dispatched,
-                    message: `Queued ${dispatched} LinkedIn searches for the Chrome extension. They will run as soon as the extension connects.`,
+                    message: `Queued ${dispatched} LinkedIn search${dispatched > 1 ? 'es' : ''} for the Chrome extension. They will run as soon as the extension connects.`,
                   });
                 }
               } catch (extErr) {
@@ -623,14 +655,8 @@ export class MasterAgent extends BaseAgent {
         }
       }
 
-      // Check if pipeline includes job-board scraping (France/Benelux hiring_signal)
-      const hasJobBoardStep = pipelineSteps?.some(
-        s => s.tool === 'CRAWL4AI' && s.action === 'scrape_job_boards',
-      ) ?? false;
-
       const extensionOnline = needsExtension ? await isExtensionConnected(this.tenantId) : false;
-      // Don't skip crawler discovery if pipeline includes job-board steps (parallel paths)
-      const skipCrawlerDiscovery = needsExtension && extensionOnline && !hasJobBoardStep;
+      const skipCrawlerDiscovery = needsExtension && extensionOnline;
 
       if (skipCrawlerDiscovery) {
         logger.info(

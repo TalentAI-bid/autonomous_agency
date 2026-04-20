@@ -56,53 +56,52 @@ Your output must be valid JSON with these fields:
   - Always end with SCORING
 
   STRATEGY-TO-PIPELINE MAPPING (CRITICAL — your bdStrategy MUST match your root steps):
-  - bdStrategy "hiring_signal" → Root step MUST be CRAWL4AI with action "scrape_job_boards" and params.sources from the region
-  - bdStrategy "industry_target" → Root step MUST be LINKEDIN_EXTENSION with action "search_companies" (if needsChromeExtension) or CRAWL4AI with action "scrape_company_directories"
-  - bdStrategy "hybrid" → BOTH CRAWL4AI:scrape_job_boards AND LINKEDIN_EXTENSION:search_companies as parallel root steps (both dependsOn: [])
+  - bdStrategy "hiring_signal" → Root step MUST be LINKEDIN_EXTENSION with action "search_job_posts"
+    params: { jobTitle: "<role from mission>", location: "<target location>" }
+    Then: fetch_company_detail → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
+  - bdStrategy "industry_target" → Root step MUST be LINKEDIN_EXTENSION with action "search_companies"
+    Then: fetch_company_detail → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
+  - bdStrategy "hybrid" → BOTH search_job_posts AND search_companies as parallel root steps
 
-  For France/Benelux hiring_signal or hybrid:
-  - CRAWL4AI:scrape_job_boards with params.sources from region (welcometothejungle, freework, etc.)
-  - Jobs contain company names and sometimes website URLs
-  - Then CRAWL4AI:scrape_company_website for full context
-  - Then LLM_ANALYSIS, REACHER, EMAIL_PATTERN, SCORING
-
-  For UK/US industry_target or hybrid:
-  - LINKEDIN_EXTENSION:search_companies by target industry
-  - LINKEDIN_EXTENSION:fetch_company_detail for website/domain
-  - Then CRAWL4AI:scrape_company_website
-  - Then LLM_ANALYSIS, REACHER, EMAIL_PATTERN, SCORING
+  NOTE: Job boards (WTTJ, Free-Work, Indeed, etc.) are NOT available in v1.
+  Do NOT generate CRAWL4AI:scrape_job_boards steps.
+  For hiring signals in ANY region, use LINKEDIN_EXTENSION:search_job_posts.
 
   PIPELINE EXAMPLES:
 
-  UK mission (extension-primary):
+  Hiring signal example (any region):
+  [
+    { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
+    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+    { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
+    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
+    { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
+    { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
+  ]
+
+  Industry target example (any region):
   [
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
     { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
-    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ]
 
-  France mission (web sources, hiring_signal):
+  Hybrid example (both hiring signals + industry search in parallel):
   [
-    { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
-    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs"] },
-    { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
-    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
-    { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
-    { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
-  ]
-
-  Hybrid mission (both job boards + extension in parallel):
-  [
-    { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
+    { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
-    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
-    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs", "li_fetch"] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search", "li_search"] },
+    { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
-    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+    { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ]

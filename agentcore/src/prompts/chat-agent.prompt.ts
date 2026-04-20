@@ -177,7 +177,7 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
   // - "outreach" → only if enableOutreach is true and email account is configured
   // - "reply" + "action" → only if outreach is included
   "pipelineSteps": [
-    { "id": "step_id", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": {} }
+    { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "role from mission", "location": "target region" } }
   ],
   // ↑ REQUIRED — tool-level execution plan. See "Tool-Level Pipeline Steps" section below.
   "summary": "Brief summary of what the pipeline will do",
@@ -211,8 +211,8 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
 You MUST always generate a \`pipelineSteps\` array in the proposal. This describes the exact tools used at execution time, adapted to the user's target region and mission.
 
 Available tools:
-- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies and people. Use for UK/IE missions where public job board coverage is limited.
-- **CRAWL4AI**: Web scraping of job boards, company websites, and public directories. Use for FR/DE/ES/US/EE missions where strong public sources exist.
+- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies, people, and job posts. Actions: \`search_companies\`, \`fetch_company_detail\`, \`search_job_posts\`, \`get_team\`.
+- **CRAWL4AI**: Scrape company websites for context. Action: \`scrape_company_website\`. NOTE: Job board scraping (scrape_job_boards) is NOT available in v1 — use LINKEDIN_EXTENSION:search_job_posts for hiring signals instead.
 - **LLM_ANALYSIS**: Deep company/candidate profiling via LLM. Always include after data collection steps.
 - **REACHER**: SMTP email verification. Use for the FIRST person per company only (saves quota).
 - **EMAIL_PATTERN**: Apply a cached working email pattern without SMTP verification. Use for subsequent people at the same company.
@@ -221,37 +221,37 @@ Available tools:
 Rules:
 - Each step has a unique \`id\` and lists \`dependsOn\` (IDs of prerequisite steps).
 - Root steps (dependsOn: []) execute first, in parallel if multiple.
-- For **UK/IE** missions (limited public sources): start with LINKEDIN_EXTENSION steps.
-- For **FR/BE/CH** missions (excellent public sources): start with CRAWL4AI, params.sources from ["welcometothejungle", "freework", "societe_com", "apec"].
-- For **DE/AT** missions: start with CRAWL4AI, params.sources from ["stepstone", "northdata"].
-- For **ES** missions: start with CRAWL4AI, params.sources from ["infojobs", "einforma"].
-- For **US** missions: start with CRAWL4AI, params.sources from ["dice", "glassdoor"].
-- For **EE** missions: start with CRAWL4AI, params.sources from ["cvkeskus", "ariregister"].
-- For other/unknown regions: start with CRAWL4AI with empty sources (generic web search).
+- For **hiring signals** (any region): start with LINKEDIN_EXTENSION:search_job_posts with params \`{ jobTitle, location }\`.
+- For **industry targeting** (any region): start with LINKEDIN_EXTENSION:search_companies.
+- For **hybrid** approach: BOTH search_job_posts AND search_companies as parallel root steps.
+- Do NOT generate CRAWL4AI:scrape_job_boards steps (not available in v1).
 - Always include LLM_ANALYSIS after data collection steps.
 - Always use REACHER for the first person per company, then EMAIL_PATTERN for the rest.
 - Always end with SCORING.
 
-Example — UK mission (extension-primary):
+Example — Hiring signal mission (any region):
 \`\`\`json
 [
-  { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
-  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+  { "id": "jobs_search", "tool": "LINKEDIN_EXTENSION", "action": "search_job_posts", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
   { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+  { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
   { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
-  { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+  { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
   { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
   { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
 ]
 \`\`\`
 
-Example — France mission (web sources):
+Example — Industry target mission (any region):
 \`\`\`json
 [
-  { "id": "crawl_jobs", "tool": "CRAWL4AI", "action": "scrape_job_boards", "dependsOn": [], "params": { "sources": ["welcometothejungle", "freework"] } },
-  { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["crawl_jobs"] },
+  { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
+  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+  { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
+  { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
   { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
-  { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["analyze"] },
+  { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
   { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
   { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
 ]

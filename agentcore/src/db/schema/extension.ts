@@ -8,7 +8,7 @@ export const extensionSiteEnum = pgEnum('extension_site', [
 ]);
 
 export const extensionTaskTypeEnum = pgEnum('extension_task_type', [
-  'search_companies', 'fetch_company', 'search_businesses', 'fetch_business',
+  'search_companies', 'fetch_company', 'search_businesses', 'fetch_business', 'search_job_posts',
 ]);
 
 export const extensionTaskStatusEnum = pgEnum('extension_task_status', [

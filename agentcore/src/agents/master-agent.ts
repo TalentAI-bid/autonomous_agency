@@ -702,7 +702,20 @@ export class MasterAgent extends BaseAgent {
     // 7. Dispatch discovery jobs — branches on USE_COMPANY_FINDER feature flag.
     //    When true: single company-finder job reads SITE_CONFIGS directly.
     //    When false: legacy SearXNG-based discovery batches (preserved for rollback).
-    if (hasDiscovery) {
+    //    For bdStrategy='hiring_signal', LinkedIn Jobs scrape above already covered
+    //    discovery — skip company-finder/crawler entirely to avoid polluting the
+    //    pipeline with unrelated industry/SERP results.
+    const dispatchBdStrategy = (agentConfig.bdStrategy as string)
+      || pipelineContext?.sales?.salesStrategy?.bdStrategy
+      || 'hybrid';
+    const skipDiscoveryForHiringSignal = dispatchBdStrategy === 'hiring_signal';
+    if (skipDiscoveryForHiringSignal) {
+      logger.info(
+        { masterAgentId, bdStrategy: dispatchBdStrategy },
+        'Skipping company-finder/discovery — bdStrategy=hiring_signal uses LinkedIn Jobs as sole discovery source',
+      );
+    }
+    if (hasDiscovery && !skipDiscoveryForHiringSignal) {
       // Extension-primary regions: the strategist already queued search_companies
       // tasks against the user's Chrome extension (see block around line 190).
       // If the extension is actually online, don't *also* fan out crawler-based

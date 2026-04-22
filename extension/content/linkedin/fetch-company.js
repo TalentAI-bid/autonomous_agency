@@ -136,9 +136,24 @@
           pName = pName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
           if (!pName || pName.length < 2 || pName === 'LinkedIn Member') continue;
 
-          // Extract title — skip name duplicates and connection-degree text
-          const SKIP = /degree connection|View.*profile|3rd\+|2nd|1st|\bprofile\b/i;
+          // Extract title — skip name duplicates, connection-degree text, and
+          // screen-reader-only status labels ("Status is online/offline") that
+          // LinkedIn injects as <span class="visually-hidden"> next to the avatar.
+          const SKIP = /degree connection|View.*profile|3rd\+|2nd|1st|\bprofile\b|status is (online|offline)|^(message|follow|connect)$/i;
+
+          function isHiddenForA11y(el) {
+            let node = el;
+            while (node && node !== card) {
+              if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return true;
+              const cls = (node.className && typeof node.className === 'string') ? node.className : '';
+              if (/\bvisually-hidden\b|\bsr-only\b|\ba11y-text\b/.test(cls)) return true;
+              node = node.parentElement;
+            }
+            return false;
+          }
+
           const allText = Array.from(card.querySelectorAll('div, span, p'))
+            .filter((el) => !isHiddenForA11y(el))
             .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
             .filter((t) => t.length > 5 && t.length < 200);
 

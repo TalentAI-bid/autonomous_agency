@@ -251,16 +251,16 @@ export default function ContactDetailPage() {
                       <p className="font-medium capitalize">{deep.githubStats.contributionLevel}</p>
                     </div>
                   </div>
-                  {deep.githubStats.topLanguages.length > 0 && (
+                  {(deep.githubStats.topLanguages?.length ?? 0) > 0 && (
                     <div className="flex flex-wrap gap-1">
-                      {deep.githubStats.topLanguages.map((lang) => (
+                      {deep.githubStats.topLanguages!.map((lang) => (
                         <Badge key={lang} variant="secondary" className="text-xs">{lang}</Badge>
                       ))}
                     </div>
                   )}
-                  {deep.githubStats.topRepos.length > 0 && (
+                  {(deep.githubStats.topRepos?.length ?? 0) > 0 && (
                     <div className="space-y-2 pt-2 border-t border-border">
-                      {deep.githubStats.topRepos.map((repo, i) => (
+                      {deep.githubStats.topRepos!.map((repo, i) => (
                         <div key={i} className="flex items-center justify-between">
                           <div>
                             <span className="font-medium">{repo.name}</span>

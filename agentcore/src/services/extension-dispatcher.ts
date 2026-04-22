@@ -466,7 +466,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
             tenantId: task.tenantId,
             firstName: pFirstName,
             lastName: pLastName,
-            title: person.title || undefined,
+            title: sanitizeTitle(person.title),
             linkedinUrl: person.linkedinUrl || undefined,
             companyId: savedCompany.id,
             companyName: name,
@@ -546,6 +546,16 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
   }
 
   return { extracted: 0, saved: 0 };
+}
+
+const JUNK_TITLE_REGEX = /^(status is (online|offline)|message|follow|connect|view profile|see more)$/i;
+
+function sanitizeTitle(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (JUNK_TITLE_REGEX.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 function extractDomain(url: string): string | undefined {

@@ -347,12 +347,13 @@ function parseViaLineFallback(markdown: string): LinkedInJobCompany[] {
 
 /**
  * Filter by keyword: the primary search keyword (first word, usually the most
- * specific like "Solana") must appear in the job title. If it doesn't match,
- * fall back to requiring ANY keyword to match.
+ * specific like "Solana", "Hedera") MUST appear in the job title. No fallback:
+ * if nothing matches, return empty — better than polluting the pipeline with
+ * unrelated jobs (e.g. "FullStack Developer" for a "Hedera developer" search).
  *
- * For "Solana developer":
- *  - "FrontEnd Developer" → has "developer" but NOT "solana" → rejected
- *  - "Solana Smart Contract Developer" → has "solana" → accepted
+ * For "Hedera developer":
+ *  - "FullStack Developer" → has "developer" but NOT "hedera" → rejected
+ *  - "Hedera Smart Contract Developer" → has "hedera" → accepted
  */
 function filterByKeyword(results: LinkedInJobCompany[], searchJobTitle: string): LinkedInJobCompany[] {
   const keywords = searchJobTitle.toLowerCase().split(/\s+/).filter(k => k.length > 2);
@@ -360,30 +361,19 @@ function filterByKeyword(results: LinkedInJobCompany[], searchJobTitle: string):
 
   const primaryKeyword = keywords[0]!;
 
-  // First try: primary keyword must match
   const primaryMatches = results.filter(r => {
     const title = r.jobTitle.toLowerCase();
     return title.includes(primaryKeyword);
   });
 
-  // If primary keyword matched some results, use those
-  if (primaryMatches.length > 0) return primaryMatches;
+  if (primaryMatches.length === 0 && results.length > 0) {
+    logger.warn(
+      { searchJobTitle, primaryKeyword, resultCount: results.length },
+      'LinkedIn Jobs keyword filter matched zero — returning empty (strict match required)',
+    );
+  }
 
-  // Fallback: any keyword must match (less strict)
-  const anyMatch = results.filter(r => {
-    const title = r.jobTitle.toLowerCase();
-    return keywords.some(kw => title.includes(kw));
-  });
-
-  if (anyMatch.length > 0) return anyMatch;
-
-  // Last resort: if nothing matched, return all (parser may have bad titles)
-  // but log a warning so we know the filter found nothing
-  logger.warn(
-    { searchJobTitle, keywords, resultCount: results.length },
-    'LinkedIn Jobs keyword filter matched nothing — returning unfiltered results',
-  );
-  return results;
+  return primaryMatches;
 }
 
 /**

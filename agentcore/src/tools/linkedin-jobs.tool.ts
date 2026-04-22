@@ -5,6 +5,24 @@ import { eq, and } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies } from '../db/schema/index.js';
 import logger from '../utils/logger.js';
+import { logPipelineError } from '../utils/pipeline-error.js';
+
+const CLOUDFLARE_SIGNATURES = [
+  'error 1015', 'rate limit', 'cloudflare', 'attention required',
+  'cf-error-details', 'enable javascript and cookies',
+  'checking your browser', 'just a moment',
+];
+
+function looksLikeCloudflareBlock(markdown: string): boolean {
+  if (!markdown) return false;
+  const lower = markdown.toLowerCase();
+  let matches = 0;
+  for (const sig of CLOUDFLARE_SIGNATURES) {
+    if (lower.includes(sig)) matches++;
+    if (matches >= 2) return true;
+  }
+  return false;
+}
 
 export interface LinkedInJobCompany {
   companyName: string;
@@ -61,6 +79,16 @@ export async function searchLinkedInJobs(
   const markdown = await scrapeWithRetry(tenantId, url);
   if (!markdown || markdown.trim().length < 50) {
     logger.warn({ tenantId, jobTitle, location, markdownLen: markdown.length }, 'LinkedIn Jobs scrape returned empty/short content after retries');
+    // Classify: Cloudflare signature → cloudflare_block, else treat as timeout/empty.
+    const errorType = looksLikeCloudflareBlock(markdown) ? 'cloudflare_block' : 'crawl_timeout';
+    await logPipelineError({
+      tenantId,
+      masterAgentId,
+      step: 'linkedin_jobs_search',
+      tool: 'CRAWL4AI',
+      errorType,
+      context: { url, jobTitle, location, markdownLen: markdown.length },
+    });
     return { companies: [], raw: markdown };
   }
 
@@ -150,6 +178,21 @@ export async function searchLinkedInJobs(
     { tenantId, masterAgentId, jobTitle, location, parsed: unique.length, saved },
     'Server-side LinkedIn Jobs scrape completed',
   );
+
+  // We got markdown back but ended up with zero usable companies. Record it as a
+  // soft warning so the user sees it in the UI — the strict keyword+location
+  // filters deliberately return empty rather than pollute the pipeline.
+  if (unique.length === 0) {
+    await logPipelineError({
+      tenantId,
+      masterAgentId,
+      step: 'linkedin_jobs_search',
+      tool: 'CRAWL4AI',
+      errorType: 'no_job_posts_found',
+      severity: 'warning',
+      context: { url, jobTitle, location, rawParsed: parsed.length },
+    });
+  }
 
   return { companies: unique, raw: markdown };
 }

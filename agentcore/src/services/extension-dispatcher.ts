@@ -6,6 +6,7 @@ import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import logger from '../utils/logger.js';
+import { logPipelineError } from '../utils/pipeline-error.js';
 
 // ─── Rate limits (server-authoritative; client mirrors these) ──────────────
 
@@ -125,6 +126,16 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
   const used = counts[key] ?? 0;
   if (limit && used >= limit.dailyCap) {
     logger.info({ taskId, tenantId, site: task.site, type: task.type, used, cap: limit.dailyCap }, 'rate_limit_hit');
+    if (task.site === 'linkedin') {
+      await logPipelineError({
+        tenantId,
+        masterAgentId: task.masterAgentId ?? null,
+        step: 'extension.dispatch',
+        tool: 'LINKEDIN_EXTENSION',
+        errorType: 'linkedin_rate_limit',
+        context: { taskId, site: task.site, type: task.type, used, cap: limit.dailyCap },
+      });
+    }
     return false;
   }
 
@@ -240,6 +251,16 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
       { taskId: task.id, tenantId: task.tenantId, site: task.site, type: task.type },
       'Extension task blocked by popup — reset to pending for retry on resume',
     );
+    if (task.site === 'linkedin') {
+      await logPipelineError({
+        tenantId: task.tenantId,
+        masterAgentId: task.masterAgentId ?? null,
+        step: 'extension.task',
+        tool: 'LINKEDIN_EXTENSION',
+        errorType: 'linkedin_popup',
+        context: { taskId: task.id, site: task.site, type: task.type },
+      });
+    }
     return;
   }
 
@@ -256,6 +277,16 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
       { taskId: task.id, tenantId: task.tenantId, site: task.site, type: task.type },
       'Extension task rate-limited (429) — reset to pending for retry after backoff',
     );
+    if (task.site === 'linkedin') {
+      await logPipelineError({
+        tenantId: task.tenantId,
+        masterAgentId: task.masterAgentId ?? null,
+        step: 'extension.task',
+        tool: 'LINKEDIN_EXTENSION',
+        errorType: 'linkedin_rate_limit',
+        context: { taskId: task.id, site: task.site, type: task.type },
+      });
+    }
     return;
   }
 

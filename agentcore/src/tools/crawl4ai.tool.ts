@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { createRedisConnection, pubRedis } from '../queues/setup.js';
 import logger from '../utils/logger.js';
+import { logPipelineError } from '../utils/pipeline-error.js';
 
 const redis: Redis = createRedisConnection();
 
@@ -179,6 +180,13 @@ export async function scrape(tenantId: string, url: string, _instruction?: strin
           await redis.setex(`ratelimit:crawl4ai:${domain}:last`, 120, String(Date.now() + 55000));
         } catch { /* non-critical */ }
         await recordCrawl4aiFailure(tenantId);
+        await logPipelineError({
+          tenantId,
+          step: 'scrape',
+          tool: 'CRAWL4AI',
+          errorType: 'cloudflare_block',
+          context: { url },
+        });
         return '';
       }
       if (text && text.trim().length >= 100) await redis.setex(cacheKey, CACHE_TTL_SEC, text);

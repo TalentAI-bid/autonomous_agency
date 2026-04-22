@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, count, avg, gt, lt, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, count, avg, gt, lt, inArray, isNull, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents } from '../db/schema/index.js';
+import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents, pipelineErrors } from '../db/schema/index.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -283,6 +283,15 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // POST /api/master-agents/:id/start — Start agent orchestration
   fastify.post<{ Params: { id: string } }>('/:id/start', async (request) => {
     const { id } = request.params;
+    const [prev] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({ status: masterAgents.status }).from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    logger.info(
+      { masterAgentId: id, tenantId: request.tenantId, previousStatus: prev?.status ?? null },
+      'Agent resumed, re-triggering full dispatch via execute()',
+    );
     const [agent] = await withTenant(request.tenantId, async (tx) => {
       return tx.update(masterAgents)
         .set({ status: 'running', updatedAt: new Date() })
@@ -501,4 +510,51 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
 
     return { data, pagination: { hasMore, nextCursor } };
   });
+
+  // GET /api/master-agents/:id/errors — list pipeline errors for a master agent
+  fastify.get<{ Params: { id: string }; Querystring: { limit?: string; unresolved?: string } }>(
+    '/:id/errors',
+    async (request) => {
+      const { id } = request.params;
+      const limit = Math.min(Math.max(parseInt(request.query.limit ?? '20', 10) || 20, 1), 100);
+      const unresolvedOnly = request.query.unresolved !== 'false';
+
+      const conditions = [
+        eq(pipelineErrors.masterAgentId, id),
+        eq(pipelineErrors.tenantId, request.tenantId),
+      ];
+      if (unresolvedOnly) conditions.push(isNull(pipelineErrors.resolvedAt));
+
+      const data = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(pipelineErrors)
+          .where(and(...conditions))
+          .orderBy(desc(pipelineErrors.createdAt))
+          .limit(limit);
+      });
+
+      return { data };
+    },
+  );
+
+  // PATCH /api/master-agents/:id/errors/:errorId/resolve — dismiss a pipeline error
+  fastify.patch<{ Params: { id: string; errorId: string } }>(
+    '/:id/errors/:errorId/resolve',
+    async (request) => {
+      const { id, errorId } = request.params;
+      const [updated] = await withTenant(request.tenantId, async (tx) => {
+        return tx.update(pipelineErrors)
+          .set({ resolvedAt: new Date() })
+          .where(
+            and(
+              eq(pipelineErrors.id, errorId),
+              eq(pipelineErrors.masterAgentId, id),
+              eq(pipelineErrors.tenantId, request.tenantId),
+            ),
+          )
+          .returning();
+      });
+      if (!updated) throw new NotFoundError('PipelineError', errorId);
+      return { data: updated };
+    },
+  );
 }

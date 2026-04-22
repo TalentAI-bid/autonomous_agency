@@ -99,3 +99,6 @@ export type { Product, NewProduct } from './products.js';
 
 export { userTenants } from './user-tenants.js';
 export type { UserTenant, NewUserTenant } from './user-tenants.js';
+
+export { pipelineErrors } from './pipeline-errors.js';
+export type { PipelineError, NewPipelineError } from './pipeline-errors.js';

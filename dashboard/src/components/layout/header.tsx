@@ -2,68 +2,105 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bell, Plus, LogOut, User } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/auth.store';
 import { useRealtimeStore } from '@/stores/realtime.store';
-import { Breadcrumb } from './breadcrumb';
+import { useDashboardAnalytics } from '@/hooks/use-analytics';
+import { useAgents } from '@/hooks/use-agents';
+import { Icon } from '@/components/ui/icon';
+import { Dot } from '@/components/ui/dot';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { apiPost } from '@/lib/api';
 
+function fmtMoney(n?: number | null) {
+  if (n == null) return '—';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(n >= 10000 ? 0 : 1) + 'K';
+  return '$' + n;
+}
+
 export function Header() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { logout } = useAuthStore();
+  const connected = useRealtimeStore((s) => s.connected);
   const events = useRealtimeStore((s) => s.events);
-  const unreadCount = events.filter((e) => {
-    const ms = Date.now() - new Date(e.timestamp).getTime();
-    return ms < 60000; // events in last 60s
-  }).length;
+  const { data: analytics } = useDashboardAnalytics();
+  const { data: agents } = useAgents();
+
+  const unread = events.filter((e) => Date.now() - new Date(e.timestamp).getTime() < 60000).length;
+  const runningAgents = agents?.filter((a) => a.status === 'running').length ?? 0;
+  const totalAgents = agents?.length ?? 0;
+  const leadsToday = analytics?.contacts.total ?? 0;
+  const sent = analytics?.emails.sent ?? 0;
+  const replied = analytics?.emails.replied ?? 0;
+  const replyRate = sent > 0 ? ((replied / sent) * 100).toFixed(1) + '%' : '—';
 
   const handleLogout = async () => {
     try {
       await apiPost('/auth/logout');
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     logout();
     router.push('/login');
   };
 
   return (
-    <header className="h-14 border-b border-border flex items-center px-6 gap-4 bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-      <Breadcrumb />
-
-      <div className="ml-auto flex items-center gap-3">
-        <WorkspaceSwitcher />
-        {/* New Agent CTA */}
-        <Button asChild size="sm" className="gap-1.5">
-          <Link href="/agents/new">
-            <Plus className="w-3.5 h-3.5" />
-            New Agent
-          </Link>
-        </Button>
-
-        {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="w-4 h-4" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-[10px] flex items-center justify-center text-white">
-              {Math.min(unreadCount, 9)}
-            </span>
-          )}
-        </Button>
-
-        {/* User menu */}
-        <div className="flex items-center gap-2 pl-2 border-l border-border">
-          <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center">
-            <User className="w-3.5 h-3.5 text-zinc-300" />
-          </div>
-          <span className="text-sm text-muted-foreground hidden sm:block">
-            {user?.name ?? user?.email ?? 'User'}
-          </span>
-          <Button variant="ghost" size="icon" onClick={handleLogout} title="Logout">
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </div>
+    <div className="topbar">
+      <div className="topbar-cell">
+        <Dot state={connected ? 'live' : 'paused'} />
+        <span className="label">System</span>
+        <span className="val">{connected ? 'LIVE' : 'PAUSED'}</span>
       </div>
-    </header>
+      <div className="topbar-cell">
+        <span className="label">Agents</span>
+        <span className="val">
+          {runningAgents}/{totalAgents}
+        </span>
+        <span className="delta" style={{ color: 'var(--up)' }}>
+          active
+        </span>
+      </div>
+      <div className="topbar-cell">
+        <span className="label">Leads</span>
+        <span className="val">{leadsToday.toLocaleString()}</span>
+      </div>
+      <div className="topbar-cell">
+        <span className="label">Reply rate</span>
+        <span className="val">{replyRate}</span>
+      </div>
+      <div className="topbar-cell">
+        <span className="label">Interviews</span>
+        <span className="val">{analytics?.interviews.scheduled ?? 0}</span>
+      </div>
+
+      <div className="searchbar" role="search">
+        <Icon name="search" size={13} />
+        <span>Jump to agent, lead, company… or type a command</span>
+        <span style={{ marginLeft: 'auto' }}>
+          <kbd>⌘K</kbd>
+        </span>
+      </div>
+
+      <div className="topbar-right">
+        <WorkspaceSwitcher />
+        <Link href="/agents/new" className="btn is-primary is-sm" style={{ gap: 6 }}>
+          <Icon name="plus" size={12} /> New agent
+        </Link>
+        <button className="topbar-cell" type="button" aria-label="Notifications">
+          <Icon name="bell" size={13} />
+          {unread > 0 && <span style={{ fontSize: 11 }}>{Math.min(unread, 9)}</span>}
+        </button>
+        <button
+          className="topbar-cell"
+          type="button"
+          style={{ color: 'var(--ink-2)' }}
+          onClick={handleLogout}
+          title="Logout"
+          aria-label="Logout"
+        >
+          <Icon name="cog" size={13} />
+        </button>
+      </div>
+    </div>
   );
 }

@@ -18,6 +18,7 @@ import { ActivityFeed } from '@/components/agents/activity-feed';
 import { StrategyPanel } from '@/components/agents/strategy-panel';
 import { ActionPlanPanel } from '@/components/agents/action-plan-panel';
 import { QuotaBadge } from '@/components/agents/quota-badge';
+import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
 
@@ -154,6 +155,9 @@ export default function AgentDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pipeline issues banner (visible regardless of active tab) */}
+      <IssuesBanner masterAgentId={id} />
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">

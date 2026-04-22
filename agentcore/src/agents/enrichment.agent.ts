@@ -18,6 +18,7 @@ import {
   type DeepCompanyProfile,
 } from '../prompts/company-deep.prompt.js';
 import logger from '../utils/logger.js';
+import { logPipelineError } from '../utils/pipeline-error.js';
 import { calculateSeoScore, detectSeoIssues } from '../utils/seo-analysis.js';
 
 type StructuredPainPoint = { type: string; severity: 'high' | 'medium' | 'low'; description: string; score?: number; issues?: string[]; roles?: string[] };
@@ -272,6 +273,14 @@ export class EnrichmentAgent extends BaseAgent {
         // Validate domain resolves before scraping (avoids circuit-breaker spam)
         if (companyUrl && !(await domainResolves(companyUrl))) {
           logger.info({ contactId, contactCompanyName, companyUrl }, 'Skipping website scrape — domain does not resolve');
+          await logPipelineError({
+            tenantId: this.tenantId,
+            masterAgentId,
+            step: 'enrichment.contact',
+            tool: 'ENRICHMENT',
+            errorType: 'invalid_domain',
+            context: { contactId, companyName: contactCompanyName, companyUrl },
+          });
           companyUrl = undefined;
         }
 
@@ -359,6 +368,15 @@ export class EnrichmentAgent extends BaseAgent {
 
         if (totalScrapedLen < 200) {
           logger.warn({ contactId, contactCompanyName, totalScrapedLen }, 'Skipping LLM deep analysis — insufficient scraped content');
+          await logPipelineError({
+            tenantId: this.tenantId,
+            masterAgentId,
+            step: 'enrichment.contact',
+            tool: 'ENRICHMENT',
+            errorType: 'scrape_failed',
+            severity: 'warning',
+            context: { contactId, companyName: contactCompanyName, totalScrapedLen },
+          });
           let noContentPreservedData: Record<string, unknown> = {};
           if (contact.companyId) {
             try {
@@ -1093,6 +1111,14 @@ export class EnrichmentAgent extends BaseAgent {
     // Validate domain resolves before scraping (avoids circuit-breaker spam)
     if (companyUrl && !(await domainResolves(companyUrl))) {
       logger.info({ companyId, companyName, companyUrl }, 'Skipping website scrape — domain does not resolve');
+      await logPipelineError({
+        tenantId: this.tenantId,
+        masterAgentId,
+        step: 'enrichment.company',
+        tool: 'ENRICHMENT',
+        errorType: 'invalid_domain',
+        context: { companyId, companyName, companyUrl },
+      });
       await withTenant(this.tenantId, async (tx) => {
         await tx.update(companies)
           .set({ domain: null, updatedAt: new Date() })
@@ -1192,6 +1218,15 @@ export class EnrichmentAgent extends BaseAgent {
 
       if (totalScrapedLen < 200) {
         logger.warn({ companyId, companyName, totalScrapedLen }, 'Skipping LLM deep analysis — insufficient scraped content');
+        await logPipelineError({
+          tenantId: this.tenantId,
+          masterAgentId,
+          step: 'enrichment.company',
+          tool: 'ENRICHMENT',
+          errorType: 'scrape_failed',
+          severity: 'warning',
+          context: { companyId, companyName, totalScrapedLen },
+        });
         await this.saveOrUpdateCompany({
           id: companyId,
           name: companyName,

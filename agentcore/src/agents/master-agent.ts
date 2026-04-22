@@ -14,6 +14,7 @@ import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import { env } from '../config/env.js';
 import * as agentSelectorPrompt from '../prompts/agent-selector.prompt.js';
 import logger from '../utils/logger.js';
+import { logPipelineError } from '../utils/pipeline-error.js';
 
 export class MasterAgent extends BaseAgent {
   constructor(opts: { tenantId: string; masterAgentId: string }) {
@@ -67,6 +68,7 @@ export class MasterAgent extends BaseAgent {
     let queries: string[] = [];
     const dispatchedJobIds: string[] = [];
     let pipelineContext: PipelineContext | undefined;
+    let hiringSignalDispatched = false;
 
     if (hasDiscovery) {
       // 3. Parse requirements using Together AI
@@ -435,6 +437,11 @@ export class MasterAgent extends BaseAgent {
                 // ─── Hiring signal path: server-side LinkedIn Jobs scrape ──
                 // LinkedIn Jobs search is PUBLIC (no login) — scrape via CRAWL4AI
                 if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
+                  hiringSignalDispatched = true;
+                  logger.info(
+                    { bdStrategy, masterAgentId, hasPipelineSteps: !!strategy.pipelineSteps?.length },
+                    'Entering hiring_signal/hybrid dispatch block',
+                  );
                   // Resolve jobTitle with explicit priority chain
                   const resolveJobTitle = (): { value: string; source: string } => {
                     if (pipelineContext?.targetRoles?.[0]) {
@@ -516,15 +523,33 @@ export class MasterAgent extends BaseAgent {
               }
             }
 
-            // If strategist recommended a BD strategy and user didn't set one, save it to config
-            if (strategy.bdStrategy && !agentConfig.bdStrategy) {
+            // Always persist latest strategist output to config so subsequent runs
+            // (resume, restart, re-dispatch) use the freshest bdStrategy / pipelineSteps /
+            // dataSourceStrategy. Previously this was gated on `!agentConfig.bdStrategy`,
+            // which meant stale values won after the first run — causing hiring_signal
+            // missions to silently fall back to WTTJ-style discovery.
+            if (strategy.bdStrategy) {
               try {
+                const mergedConfig = {
+                  ...agentConfig,
+                  bdStrategy: strategy.bdStrategy,
+                  dataSourceStrategy: strategy.dataSourceStrategy ?? agentConfig.dataSourceStrategy,
+                  pipelineSteps: strategy.pipelineSteps ?? agentConfig.pipelineSteps,
+                };
                 await withTenant(this.tenantId, async (tx) => {
                   await tx.update(masterAgents)
-                    .set({ config: { ...agentConfig, bdStrategy: strategy.bdStrategy }, updatedAt: new Date() })
+                    .set({ config: mergedConfig, updatedAt: new Date() })
                     .where(eq(masterAgents.id, masterAgentId));
                 });
-                logger.info({ masterAgentId, bdStrategy: strategy.bdStrategy }, 'Saved strategist BD strategy to agent config');
+                // Reflect the overwrite locally so the downstream dispatch decision
+                // (dispatchBdStrategy ~L708) sees the fresh strategist value.
+                agentConfig.bdStrategy = strategy.bdStrategy;
+                if (strategy.dataSourceStrategy) agentConfig.dataSourceStrategy = strategy.dataSourceStrategy;
+                if (strategy.pipelineSteps) agentConfig.pipelineSteps = strategy.pipelineSteps;
+                logger.info(
+                  { masterAgentId, bdStrategy: strategy.bdStrategy, pipelineStepsCount: strategy.pipelineSteps?.length ?? 0 },
+                  'Strategist output saved to config (overwriting prior)',
+                );
               } catch (saveErr) {
                 logger.warn({ err: saveErr, masterAgentId }, 'Failed to save strategist BD strategy');
               }
@@ -705,9 +730,25 @@ export class MasterAgent extends BaseAgent {
     //    For bdStrategy='hiring_signal', LinkedIn Jobs scrape above already covered
     //    discovery — skip company-finder/crawler entirely to avoid polluting the
     //    pipeline with unrelated industry/SERP results.
-    const dispatchBdStrategy = (agentConfig.bdStrategy as string)
-      || pipelineContext?.sales?.salesStrategy?.bdStrategy
+    // Prefer the freshest strategist output (in-memory from this run) over the
+    // persisted agentConfig — stale config historically caused hiring_signal agents
+    // to fall back to hybrid/WTTJ discovery.
+    const strategistBd = pipelineContext?.sales?.salesStrategy?.bdStrategy as string | undefined;
+    const dispatchBdStrategy =
+      strategistBd
+      || (agentConfig.bdStrategy as string)
       || 'hybrid';
+    logger.info(
+      {
+        masterAgentId,
+        dispatchBdStrategy,
+        sources: {
+          strategist: strategistBd ?? null,
+          agentConfig: (agentConfig.bdStrategy as string) ?? null,
+        },
+      },
+      'Computed dispatchBdStrategy for discovery gate',
+    );
     const skipDiscoveryForHiringSignal = dispatchBdStrategy === 'hiring_signal';
     if (skipDiscoveryForHiringSignal) {
       logger.info(
@@ -915,6 +956,26 @@ export class MasterAgent extends BaseAgent {
         );
         dispatchedJobIds.push(deepJobId);
       }
+    }
+
+    // Assertion: if we skipped the regular discovery gate because this is a
+    // hiring_signal agent, the LinkedIn Jobs dispatch block MUST have run.
+    // If it did not, the pipeline will produce zero discovery — surface it
+    // as a structured error so the UI can tell the user what's wrong.
+    if (skipDiscoveryForHiringSignal && !hiringSignalDispatched) {
+      logger.error(
+        { masterAgentId, dispatchBdStrategy, tenantId: this.tenantId },
+        'CRITICAL: hiring_signal agent skipped discovery but LinkedIn Jobs dispatch never ran',
+      );
+      await logPipelineError({
+        tenantId: this.tenantId,
+        masterAgentId,
+        step: 'dispatch',
+        tool: 'MASTER',
+        errorType: 'wrong_tool',
+        severity: 'error',
+        context: { dispatchBdStrategy, agentConfigBd: (agentConfig.bdStrategy as string) ?? null },
+      });
     }
 
     const dispatchedToAgent = env.USE_COMPANY_FINDER ? 'finder' : 'discovery';

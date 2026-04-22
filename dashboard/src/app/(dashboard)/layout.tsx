@@ -6,16 +6,18 @@ import { useAuthStore } from '@/stores/auth.store';
 import { setAuthInterceptors } from '@/lib/api';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
+import { StatusBar } from '@/components/layout/status-bar';
 import { useWebSocket } from '@/hooks/use-websocket';
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   useWebSocket();
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="app-shell">
       <Sidebar />
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="main">
         <Header />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>{children}</main>
+        <StatusBar />
       </div>
     </div>
   );

@@ -199,3 +199,38 @@ export function useMasterAgentQuota(id: string) {
     refetchInterval: 30000,
   });
 }
+
+// ── Pipeline errors ──────────────────────────────────────────────────────────
+
+export interface PipelineErrorRow {
+  id: string;
+  masterAgentId: string | null;
+  step: string;
+  tool: string;
+  severity: 'error' | 'warning' | 'info';
+  errorType: string;
+  message: string;
+  context: Record<string, unknown> | null;
+  retryable: boolean;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export function useAgentErrors(id: string, unresolved = true) {
+  return useQuery({
+    queryKey: ['agents', id, 'errors', unresolved],
+    queryFn: () => apiGet<PipelineErrorRow[]>(`/master-agents/${id}/errors?unresolved=${unresolved}`),
+    enabled: !!id,
+    staleTime: 10000,
+    refetchInterval: 15000,
+  });
+}
+
+export function useResolveError(masterAgentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (errorId: string) =>
+      apiPatch<PipelineErrorRow>(`/master-agents/${masterAgentId}/errors/${errorId}/resolve`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents', masterAgentId, 'errors'] }),
+  });
+}

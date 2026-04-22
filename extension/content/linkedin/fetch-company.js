@@ -115,26 +115,21 @@
         const seen = new Set();
 
         for (const card of cards) {
-          // Get the name anchor — skip logo/hidden anchors
-          const allAnchors = card.querySelectorAll('a[href*="/in/"]');
-          let nameAnchor = null;
-          for (const a of allAnchors) {
-            const text = (a.textContent || '').trim();
-            if (text.length > 2 && a.getAttribute('aria-hidden') !== 'true' && !text.startsWith('View')) {
-              nameAnchor = a;
-              break;
-            }
-          }
-          if (!nameAnchor) continue;
+          const profileAnchor = findProfileAnchor(card);
+          if (!profileAnchor) continue;
 
-          const profileUrl = (nameAnchor.href || '').split('?')[0];
-          if (seen.has(profileUrl)) continue;
+          const profileUrl = (profileAnchor.href || '').split('?')[0];
+          if (!profileUrl || seen.has(profileUrl)) continue;
           seen.add(profileUrl);
 
-          // Clean name — remove emojis
-          let pName = (nameAnchor.textContent || '').trim().replace(/\s+/g, ' ');
+          let pName = extractPersonName(card);
+          if (!pName) {
+            console.log('[TalentAI cs] li/fetch skipped person — no valid name extracted', { profileUrl });
+            continue;
+          }
+          // Strip emojis from final name
           pName = pName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
-          if (!pName || pName.length < 2 || pName === 'LinkedIn Member') continue;
+          if (!pName) continue;
 
           // Extract title — skip name duplicates, connection-degree text, and
           // screen-reader-only status labels ("Status is online/offline") that
@@ -192,6 +187,92 @@
       people,
     };
   };
+
+  // ─── Name extraction helpers ──────────────────────────────────────────────
+  // LinkedIn renders people cards with the visible text often showing only a
+  // first name (e.g. "Laura"), while the full name lives in the anchor's
+  // aria-label ("View Laura Dijokiene's profile") or a visually-hidden span.
+  // Fall back to the URL slug, properly URL-decoded, for non-Latin characters.
+
+  function isValidName(text) {
+    if (!text) return false;
+    const t = text.trim();
+    if (t.length < 2 || t.length > 150) return false;
+    if (/^Status\s+is/i.test(t)) return false;
+    if (t === 'LinkedIn Member') return false;
+    if (/^View\s+.*profile/i.test(t)) return false;
+    if (/%[0-9A-Fa-f]{2}/.test(t)) return false; // URL-encoded residue
+    return true;
+  }
+
+  function decodeSlugToName(slug) {
+    // Strip trailing LinkedIn hash suffix (e.g. '-94b897255', '-1a64053b9')
+    let cleaned = slug.replace(/-[a-z0-9]{6,}$/i, '');
+    try {
+      cleaned = decodeURIComponent(cleaned);
+    } catch (e) {
+      // leave as-is if decode fails
+    }
+    const name = cleaned
+      .split('-')
+      .filter((part) => part.length > 0)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(' ');
+    return name || null;
+  }
+
+  function findProfileAnchor(card) {
+    const anchors = card.querySelectorAll('a[href*="/in/"]');
+    for (const a of anchors) {
+      const text = (a.textContent || '').trim();
+      if (/^Status\s+is/i.test(text)) continue;
+      if (a.getAttribute('aria-hidden') === 'true') continue;
+      return a;
+    }
+    return anchors[0] || null;
+  }
+
+  function extractPersonName(card) {
+    // Priority 1: full name from visually-hidden a11y span
+    const hiddenSpan = card.querySelector(
+      '.visually-hidden, .a11y-text, [class*="sr-only"], span[aria-label]',
+    );
+    if (hiddenSpan) {
+      const text = (hiddenSpan.textContent || '').trim();
+      if (isValidName(text)) return text;
+    }
+
+    const profileAnchor = findProfileAnchor(card);
+
+    // Priority 2: anchor aria-label ("View NAME's profile")
+    if (profileAnchor) {
+      const ariaLabel = profileAnchor.getAttribute('aria-label') || '';
+      const match = ariaLabel.match(/View\s+(.+?)(?:'s\s+profile|\s+profile)/i);
+      if (match && isValidName(match[1])) {
+        return match[1].trim();
+      }
+    }
+
+    // Priority 3: anchor textContent, cleaned of presence badges / degree
+    if (profileAnchor) {
+      let text = (profileAnchor.textContent || '').trim().replace(/\s+/g, ' ');
+      text = text.replace(/\s*•\s*(?:1st|2nd|3rd)(?:\+)?\s*/g, ' ').trim();
+      text = text.replace(/Status is (online|offline|away)/gi, '').trim();
+      if (isValidName(text)) return text;
+    }
+
+    // Priority 4: URL slug, URL-decoded and title-cased
+    if (profileAnchor) {
+      const href = profileAnchor.getAttribute('href') || '';
+      const slugMatch = href.match(/\/in\/([^\/?#]+)/);
+      if (slugMatch) {
+        const decoded = decodeSlugToName(slugMatch[1]);
+        if (isValidName(decoded)) return decoded;
+      }
+    }
+
+    return null;
+  }
 
   function findDetail(labels) {
     // LinkedIn renders "<dt>Label</dt><dd>Value</dd>" or "<h3>Label</h3><p>Value</p>" etc.

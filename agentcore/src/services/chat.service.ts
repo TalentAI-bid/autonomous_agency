@@ -1,10 +1,11 @@
 import { eq, and, desc, max } from 'drizzle-orm';
 import { withTenant, db } from '../config/database.js';
 import { conversations, conversationMessages, masterAgents, emailListenerConfigs, emailAccounts, tenants, products as productsTable } from '../db/schema/index.js';
-import { complete, completeStream } from '../tools/together-ai.tool.js';
+import { complete, completeStream, extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
 import { parsePDF } from '../tools/pdf-parser.tool.js';
 import { parseDOCX } from '../tools/docx-parser.tool.js';
-import { buildChatSystemPrompt } from '../prompts/chat-agent.prompt.js';
+import { buildChatSystemPrompt, type InferredIntent } from '../prompts/chat-agent.prompt.js';
+import { applySearchChoice, type SearchChoicePayload } from './search-negotiation.service.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { flushEmailQueue } from '../tools/email-queue.tool.js';
@@ -41,6 +42,91 @@ async function loadCompanyContext(tenantId: string) {
   });
 
   return { companyProfile, products: activeProducts };
+}
+
+interface MissionIntent {
+  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid' | null;
+  targetRoles: string[];
+  locations: string[];
+  industries: string[];
+  targetTech: string[];
+  userCompany: string | null;
+  confidence: number;
+  reasoning: string;
+}
+
+async function classifyMissionIntent(tenantId: string, userMessage: string): Promise<MissionIntent | null> {
+  try {
+    const systemPrompt = `You are a B2B sales/recruitment intent classifier. Read the user's mission message and extract structured intent.
+
+Output STRICT JSON matching this shape (no markdown, no explanation):
+{
+  "bdStrategy": "hiring_signal" | "industry_target" | "hybrid" | null,
+  "targetRoles": string[],
+  "locations": string[],
+  "industries": string[],
+  "targetTech": string[],
+  "userCompany": string | null,
+  "confidence": number,
+  "reasoning": string
+}
+
+Classification rules:
+- "hiring_signal" when the user mentions hiring, jobs, recruitment, hires, team-growth, "companies hiring X", "who's hiring". The signal is that the user wants to find companies currently growing a specific role.
+- "industry_target" when the user mentions an industry/vertical/ICP/customer profile without any hiring verbs (e.g. "fintech startups", "SaaS companies in Berlin", "e-commerce SMBs").
+- "hybrid" when BOTH hiring verbs AND a clear industry are present.
+- null when the mission is too vague to pick one (e.g. "help me find leads").
+
+Confidence is a float 0..1. If confidence < 0.7, set bdStrategy=null. Values ≥ 0.9 indicate the strategy is stated explicitly or implied unambiguously.
+
+Extract:
+- targetRoles: technical/business roles being hired for OR targeted (e.g. "Hedera developer", "Head of HR").
+- locations: normalized country/region/city names (e.g. "United Kingdom", "Berlin").
+- industries: industries/verticals/segments mentioned (e.g. "blockchain", "fintech").
+- targetTech: specific technologies mentioned (e.g. "Hedera", "Solidity", "React").
+- userCompany: if the user names their own company, capture it; otherwise null.
+- reasoning: one-sentence why.`;
+
+    const result = await extractJSON<MissionIntent>(
+      tenantId,
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      2,
+      { model: SMART_MODEL, temperature: 0.2, max_tokens: 800 },
+    );
+
+    if (!result || typeof result.confidence !== 'number') return null;
+
+    // Hard-enforce the <0.7 rule in case the LLM ignored it.
+    if (result.confidence < 0.7) result.bdStrategy = null;
+
+    return result;
+  } catch (err) {
+    logger.warn({ err, tenantId }, 'classifyMissionIntent failed');
+    return null;
+  }
+}
+
+/** Heuristic: decide whether a user's free-text reply should be treated as a
+ * broaden-manual search term when pendingSearchChoice is active. Affirmative
+ * short phrases ("yes, continue", "sounds good") should NOT trigger broaden. */
+function looksLikeBroadenTerm(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const wordCount = trimmed.split(/\s+/).length;
+  const lower = trimmed.toLowerCase();
+  const affirmativeTokens = ['yes', 'continue', 'keep', 'sounds good', 'looks good', 'ok', 'okay', 'go ahead', 'proceed', 'sure'];
+  const isShortAffirmative = wordCount < 4 && affirmativeTokens.some(t => lower.includes(t));
+  if (isShortAffirmative) return false;
+
+  // Don't treat clear conversational questions as search terms
+  if (trimmed.endsWith('?') && wordCount > 4) return false;
+
+  // Accept 1–6-word phrases as candidate search terms
+  return wordCount >= 1 && wordCount <= 6;
 }
 
 export async function createConversation(tenantId: string, userId: string) {
@@ -171,11 +257,126 @@ export async function sendMessage(
     loadCompanyContext(tenantId),
   ]);
 
+  // Load master-agent config (for intent classifier gate + pending search choice)
+  let masterAgentConfig: Record<string, unknown> = {};
+  if (conversation.masterAgentId) {
+    const [masterRow] = await withTenant(tenantId, async (tx) => {
+      return tx.select({ config: masterAgents.config }).from(masterAgents)
+        .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+        .limit(1);
+    });
+    masterAgentConfig = (masterRow?.config as Record<string, unknown>) ?? {};
+  }
+
+  const userMessageCountSoFar = allMessages.filter(m => m.role === 'user').length;
+  const pendingSearchChoiceRaw = masterAgentConfig.pendingSearchChoice as
+    | { jobTitle: string; totalFound?: number; locations?: string[] }
+    | undefined;
+
+  // Free-text broaden fallback: if a search negotiation is pending AND the
+  // user's latest message looks like a new search term (not an affirmative),
+  // route it through applySearchChoice before calling the chat LLM.
+  let searchFallbackNote: string | null = null;
+  if (
+    conversation.masterAgentId &&
+    pendingSearchChoiceRaw &&
+    looksLikeBroadenTerm(content)
+  ) {
+    try {
+      const outcome = await applySearchChoice(tenantId, conversation.masterAgentId, {
+        choiceId: 'broaden_manual',
+        userTerm: content.trim(),
+      } satisfies SearchChoicePayload);
+      searchFallbackNote = `[System] Free-text broaden triggered from chat — ran LinkedIn Jobs for "${outcome.appliedTerm}" across ${outcome.locationCount} location(s); found ${outcome.totalFound} companies.`;
+      // Reload the (potentially cleared) config so the prompt reflects reality.
+      if (conversation.masterAgentId) {
+        const [fresh] = await withTenant(tenantId, async (tx) => {
+          return tx.select({ config: masterAgents.config }).from(masterAgents)
+            .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+            .limit(1);
+        });
+        masterAgentConfig = (fresh?.config as Record<string, unknown>) ?? {};
+      }
+    } catch (err) {
+      logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Free-text broaden fallback failed');
+    }
+  }
+
+  // Intent classifier gate: run only when bdStrategy is still null AND we are
+  // within the first two user messages. Persist high-confidence extractions.
+  let inferredIntent: InferredIntent | undefined;
+  const userMessageCountAfter = userMessageCountSoFar + 1; // including the current message
+  if (
+    conversation.masterAgentId &&
+    !masterAgentConfig.bdStrategy &&
+    userMessageCountAfter <= 2
+  ) {
+    const mission = await classifyMissionIntent(tenantId, content);
+    if (mission && mission.bdStrategy) {
+      const conf: 'high' | 'medium' = mission.confidence >= 0.9 ? 'high' : 'medium';
+      inferredIntent = {
+        bdStrategy: mission.bdStrategy,
+        confidence: conf,
+        targetRoles: mission.targetRoles?.length ? mission.targetRoles : undefined,
+        locations: mission.locations?.length ? mission.locations : undefined,
+      };
+
+      if (mission.confidence >= 0.9) {
+        // Merge, preferring user-authored non-empty values in the existing config.
+        const existing = masterAgentConfig;
+        const merged: Record<string, unknown> = { ...existing };
+        const setIfEmpty = (key: string, value: unknown) => {
+          const cur = existing[key];
+          const isEmpty = cur == null || (Array.isArray(cur) && cur.length === 0) || cur === '';
+          if (isEmpty && value != null && !(Array.isArray(value) && value.length === 0) && value !== '') {
+            merged[key] = value;
+          }
+        };
+        setIfEmpty('bdStrategy', mission.bdStrategy);
+        setIfEmpty('targetRoles', mission.targetRoles);
+        setIfEmpty('locations', mission.locations);
+        setIfEmpty('industries', mission.industries);
+        setIfEmpty('targetTech', mission.targetTech);
+        setIfEmpty('userCompany', mission.userCompany);
+
+        try {
+          await withTenant(tenantId, async (tx) => {
+            await tx.update(masterAgents)
+              .set({ config: merged, updatedAt: new Date() })
+              .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)));
+          });
+          masterAgentConfig = merged;
+          logger.info(
+            { tenantId, masterAgentId: conversation.masterAgentId, bdStrategy: mission.bdStrategy, confidence: mission.confidence },
+            'classifyMissionIntent persisted to master_agents.config',
+          );
+        } catch (err) {
+          logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist classifier output');
+        }
+      }
+    }
+  }
+
+  const promptPendingChoice =
+    pendingSearchChoiceRaw && masterAgentConfig.pendingSearchChoice
+      ? { jobTitle: pendingSearchChoiceRaw.jobTitle, totalFound: pendingSearchChoiceRaw.totalFound ?? 0 }
+      : null;
+
   // Build LLM message array
-  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts, companyProfile: companyCtx.companyProfile, products: companyCtx.products });
+  const systemPrompt = buildChatSystemPrompt({
+    emailListeners: listeners,
+    emailAccounts: accounts,
+    companyProfile: companyCtx.companyProfile,
+    products: companyCtx.products,
+    inferredIntent,
+    pendingSearchChoice: promptPendingChoice,
+  });
 
   // Build context block with extracted config and document texts
   const contextParts: string[] = [];
+  if (searchFallbackNote) {
+    contextParts.push(searchFallbackNote);
+  }
   if (conversation.extractedConfig) {
     contextParts.push(`Current extracted configuration:\n${JSON.stringify(conversation.extractedConfig, null, 2)}`);
   }
@@ -372,10 +573,116 @@ export async function* sendMessageStream(
     loadCompanyContext(tenantId),
   ]);
 
+  // Load master-agent config (for intent classifier gate + pending search choice)
+  let masterAgentConfig: Record<string, unknown> = {};
+  if (conversation.masterAgentId) {
+    const [masterRow] = await withTenant(tenantId, async (tx) => {
+      return tx.select({ config: masterAgents.config }).from(masterAgents)
+        .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+        .limit(1);
+    });
+    masterAgentConfig = (masterRow?.config as Record<string, unknown>) ?? {};
+  }
+
+  const userMessageCountSoFar = allMessages.filter(m => m.role === 'user').length;
+  const pendingSearchChoiceRaw = masterAgentConfig.pendingSearchChoice as
+    | { jobTitle: string; totalFound?: number; locations?: string[] }
+    | undefined;
+
+  let searchFallbackNote: string | null = null;
+  if (
+    conversation.masterAgentId &&
+    pendingSearchChoiceRaw &&
+    looksLikeBroadenTerm(content)
+  ) {
+    try {
+      const outcome = await applySearchChoice(tenantId, conversation.masterAgentId, {
+        choiceId: 'broaden_manual',
+        userTerm: content.trim(),
+      } satisfies SearchChoicePayload);
+      searchFallbackNote = `[System] Free-text broaden triggered from chat — ran LinkedIn Jobs for "${outcome.appliedTerm}" across ${outcome.locationCount} location(s); found ${outcome.totalFound} companies.`;
+      const [fresh] = await withTenant(tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+          .limit(1);
+      });
+      masterAgentConfig = (fresh?.config as Record<string, unknown>) ?? {};
+    } catch (err) {
+      logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Free-text broaden fallback failed');
+    }
+  }
+
+  let inferredIntent: InferredIntent | undefined;
+  const userMessageCountAfter = userMessageCountSoFar + 1;
+  if (
+    conversation.masterAgentId &&
+    !masterAgentConfig.bdStrategy &&
+    userMessageCountAfter <= 2
+  ) {
+    const mission = await classifyMissionIntent(tenantId, content);
+    if (mission && mission.bdStrategy) {
+      const conf: 'high' | 'medium' = mission.confidence >= 0.9 ? 'high' : 'medium';
+      inferredIntent = {
+        bdStrategy: mission.bdStrategy,
+        confidence: conf,
+        targetRoles: mission.targetRoles?.length ? mission.targetRoles : undefined,
+        locations: mission.locations?.length ? mission.locations : undefined,
+      };
+
+      if (mission.confidence >= 0.9) {
+        const existing = masterAgentConfig;
+        const merged: Record<string, unknown> = { ...existing };
+        const setIfEmpty = (key: string, value: unknown) => {
+          const cur = existing[key];
+          const isEmpty = cur == null || (Array.isArray(cur) && cur.length === 0) || cur === '';
+          if (isEmpty && value != null && !(Array.isArray(value) && value.length === 0) && value !== '') {
+            merged[key] = value;
+          }
+        };
+        setIfEmpty('bdStrategy', mission.bdStrategy);
+        setIfEmpty('targetRoles', mission.targetRoles);
+        setIfEmpty('locations', mission.locations);
+        setIfEmpty('industries', mission.industries);
+        setIfEmpty('targetTech', mission.targetTech);
+        setIfEmpty('userCompany', mission.userCompany);
+
+        try {
+          await withTenant(tenantId, async (tx) => {
+            await tx.update(masterAgents)
+              .set({ config: merged, updatedAt: new Date() })
+              .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)));
+          });
+          masterAgentConfig = merged;
+          logger.info(
+            { tenantId, masterAgentId: conversation.masterAgentId, bdStrategy: mission.bdStrategy, confidence: mission.confidence },
+            'classifyMissionIntent persisted to master_agents.config (stream)',
+          );
+        } catch (err) {
+          logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist classifier output (stream)');
+        }
+      }
+    }
+  }
+
+  const promptPendingChoice =
+    pendingSearchChoiceRaw && masterAgentConfig.pendingSearchChoice
+      ? { jobTitle: pendingSearchChoiceRaw.jobTitle, totalFound: pendingSearchChoiceRaw.totalFound ?? 0 }
+      : null;
+
   // Build LLM message array
-  const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts, companyProfile: companyCtx.companyProfile, products: companyCtx.products });
+  const systemPrompt = buildChatSystemPrompt({
+    emailListeners: listeners,
+    emailAccounts: accounts,
+    companyProfile: companyCtx.companyProfile,
+    products: companyCtx.products,
+    inferredIntent,
+    pendingSearchChoice: promptPendingChoice,
+  });
 
   const contextParts: string[] = [];
+  if (searchFallbackNote) {
+    contextParts.push(searchFallbackNote);
+  }
   if (conversation.extractedConfig) {
     contextParts.push(`Current extracted configuration:\n${JSON.stringify(conversation.extractedConfig, null, 2)}`);
   }

@@ -461,6 +461,8 @@ export class MasterAgent extends BaseAgent {
                   const LINKEDIN_SCRAPE_DELAY_MS = 8000;
                   const { searchLinkedInJobs } = await import('../tools/linkedin-jobs.tool.js');
                   let isFirstLocation = true;
+                  let totalJobsFound = 0;
+                  const perLocation: Array<{ location: string; count: number }> = [];
                   for (const loc of locs) {
                     if (!isFirstLocation) {
                       await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
@@ -472,9 +474,65 @@ export class MasterAgent extends BaseAgent {
                         { masterAgentId, location: loc, companiesFound: result.companies.length },
                         'Server-side LinkedIn Jobs scrape completed',
                       );
+                      totalJobsFound += result.companies.length;
+                      perLocation.push({ location: loc, count: result.companies.length });
                       dispatched++;
                     } catch (err) {
                       logger.warn({ err, masterAgentId, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
+                      perLocation.push({ location: loc, count: 0 });
+                    }
+                  }
+
+                  // Classify the aggregate outcome and, if weak, negotiate with
+                  // the user via a search_quality_low system_alert. Persist a
+                  // pendingSearchChoice so the route handler + chat fallback can
+                  // re-apply the user's decision later. Pipeline execution
+                  // continues — we don't block on user reply.
+                  const outcome: 'empty' | 'thin' | 'ok' =
+                    totalJobsFound === 0 ? 'empty' : totalJobsFound < 10 ? 'thin' : 'ok';
+                  logger.info(
+                    { masterAgentId, totalJobsFound, outcome, perLocation },
+                    'LinkedIn Jobs dispatch aggregate',
+                  );
+
+                  if (outcome !== 'ok') {
+                    try {
+                      const pendingSearchChoice = {
+                        jobTitle,
+                        locations: [...locs],
+                        perLocation,
+                        firedAt: new Date().toISOString(),
+                        totalFound: totalJobsFound,
+                      };
+                      await withTenant(this.tenantId, async (tx) => {
+                        await tx.update(masterAgents)
+                          .set({
+                            config: { ...agentConfig, pendingSearchChoice },
+                            updatedAt: new Date(),
+                          })
+                          .where(eq(masterAgents.id, masterAgentId));
+                      });
+                      (agentConfig as Record<string, unknown>).pendingSearchChoice = pendingSearchChoice;
+
+                      this.sendMessage(null, 'system_alert', {
+                        action: 'search_quality_low',
+                        severity: 'warning',
+                        outcome,
+                        totalFound: totalJobsFound,
+                        jobTitle,
+                        perLocation,
+                        message:
+                          outcome === 'empty'
+                            ? `I searched LinkedIn Jobs for "${jobTitle}" across ${locs.length} location(s) and found 0 companies. The keyword combo looks too narrow.`
+                            : `I found only ${totalJobsFound} companies for "${jobTitle}". Quality might be thin — happy to broaden.`,
+                        choices: [
+                          { id: 'continue', label: 'Continue with what I have' },
+                          { id: 'broaden_manual', label: 'Let me type a broader term' },
+                          { id: 'broaden_auto', label: 'Broaden it for me' },
+                        ],
+                      });
+                    } catch (persistErr) {
+                      logger.warn({ err: persistErr, masterAgentId }, 'Failed to persist pendingSearchChoice');
                     }
                   }
                 }

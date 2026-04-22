@@ -104,7 +104,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
 
         {/* Body — type-specific rendering */}
         {message.messageType === 'system_alert' ? (
-          <SystemAlertCard content={content} />
+          <SystemAlertCard content={content} masterAgentId={message.masterAgentId} />
         ) : message.messageType === 'data_handoff' ? (
           <div>
             <p className="text-xs text-foreground/90 leading-relaxed">{summary}</p>

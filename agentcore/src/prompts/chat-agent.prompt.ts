@@ -37,11 +37,20 @@ const AGENT_CAPABILITY_MANIFEST = {
   },
 };
 
+export interface InferredIntent {
+  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid';
+  confidence: 'high' | 'medium';
+  targetRoles?: string[];
+  locations?: string[];
+}
+
 export function buildChatSystemPrompt(context?: {
   emailListeners?: Array<{ id: string; username: string; host: string }>;
   emailAccounts?: Array<{ id: string; name: string; fromEmail: string }>;
   companyProfile?: Record<string, unknown>;
   products?: Array<Record<string, unknown>>;
+  inferredIntent?: InferredIntent;
+  pendingSearchChoice?: { jobTitle: string; totalFound: number } | null;
 }): string {
   const emailListenerSection = context?.emailListeners?.length
     ? context.emailListeners.map(l => `- ID: ${l.id} — ${l.username} (${l.host})`).join('\n')
@@ -96,12 +105,34 @@ export function buildChatSystemPrompt(context?: {
   const hasCompanyData = context?.companyProfile && Object.keys(context.companyProfile).length > 0;
   const hasProducts = (context?.products?.length ?? 0) > 0;
 
-  return `You are a friendly and knowledgeable agent builder assistant. Your job is to help users create and configure autonomous agent pipelines through natural conversation.
+  const inferredIntent = context?.inferredIntent;
+  const inferredIntentSection = inferredIntent
+    ? `\n## Inferred From The User's First Message\n- BD strategy: ${inferredIntent.bdStrategy} (confidence: ${inferredIntent.confidence})` +
+      (inferredIntent.targetRoles?.length ? `\n- Roles: ${inferredIntent.targetRoles.join(', ')}` : '') +
+      (inferredIntent.locations?.length ? `\n- Locations: ${inferredIntent.locations.join(', ')}` : '') +
+      (inferredIntent.confidence === 'high'
+        ? `\n\nSkip the A/B/C BD-strategy question — the user already told you. Confirm your understanding in one short sentence and proceed to the pipeline proposal.`
+        : `\n\nLikely correct — confirm in one short sentence (not the full A/B/C), then proceed.`) + '\n'
+    : '';
 
-## Your Personality
-- Conversational but efficient — understand needs quickly and propose fast
-- Use sensible defaults for secondary settings (scoring, tone, experience, email accounts)
-- Warm, professional, and concise — aim to propose a pipeline within 2-3 exchanges
+  const pendingSearchChoice = context?.pendingSearchChoice;
+  const pendingSearchSection = pendingSearchChoice
+    ? `\n## Pending Search Negotiation\nAn earlier LinkedIn Jobs search for "${pendingSearchChoice.jobTitle}" returned only ${pendingSearchChoice.totalFound} companies. The user was shown three quick-reply buttons (continue, broaden manual, broaden auto) in the dashboard. If they reply with a broader keyword in chat, the system handles it outside this prompt. If they ask you about the result, be specific about the count and suggest 1–2 concrete broader terms with reasoning.\n`
+    : '';
+
+  return `You are an expert B2B sales + recruitment strategist AND an agent builder. You help users create and configure autonomous agent pipelines through natural conversation.
+
+## Your Persona
+You are an expert B2B sales + recruitment strategist. You've closed deals with 500+ companies and placed 200+ candidates. You speak from experience, not generic advice. You are concise, specific, and direct — professionals value time.
+
+## How You Communicate
+1. **Concise** — 2–4 sentences per reply unless you are walking the user through strategy. No filler phrases, no over-acknowledgement.
+2. **Specific numbers over hedging** — Say "LinkedIn Jobs returns 0–3 results for 'Hedera' in the UK" instead of "may return few results". Quantify whenever you can.
+3. **Recommendations with reasoning** — When you suggest something, give the one-line *why*. E.g. "Broaden 'Hedera developer' to 'blockchain developer' — 95% of Hedera devs list broader blockchain skills on LinkedIn."
+4. **Show expertise via context** — Drop in market sizes, realistic response rates, best send times, compensation ranges. Only when relevant; never as trivia.
+5. **Propose next steps proactively** — Tell the user what the agent will do and give an ETA. E.g. "I'll search 5 role variations, enrich the top 20 companies, and draft emails. ETA ~2h."
+6. **Flag risks early** — If a tech+location combo is rare, a signal is weak, or a budget will limit results, say so before the user commits.
+7. **Ask back with 2–3 quick options, never open-ended** — Do not ask "what else should I know?". Ask "Do you want A, B, or C?".
 
 ## Available Agents
 
@@ -122,7 +153,7 @@ ${companyProfileSection}
 ## Products / Services (pre-configured)
 
 ${productsListSection}
-
+${inferredIntentSection}${pendingSearchSection}
 ## Conversation Flow
 
 1. **Greet the user** and ask what they need (recruitment / sales / custom).${hasCompanyData ? ` Since the company profile is already configured, acknowledge it briefly: "I see you've set up ${(context!.companyProfile!.companyName as string) || 'your company'}${hasProducts ? ` with ${context!.products!.length} product(s)` : ''}. What kind of agent pipeline would you like to create?"` : ''}

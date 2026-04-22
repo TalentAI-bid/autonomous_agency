@@ -234,3 +234,22 @@ export function useResolveError(masterAgentId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents', masterAgentId, 'errors'] }),
   });
 }
+
+// ── Search negotiation (LinkedIn Jobs thin-result quick replies) ─────────────
+
+export interface SearchChoiceOutcome {
+  choiceId: 'continue' | 'broaden_manual' | 'broaden_auto';
+  appliedTerm: string | null;
+  totalFound: number;
+  locationCount: number;
+  message: string;
+}
+
+export function useSearchChoice(masterAgentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { choiceId: 'continue' | 'broaden_manual' | 'broaden_auto'; userTerm?: string }) =>
+      apiPost<SearchChoiceOutcome>(`/master-agents/${masterAgentId}/search-choice`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents', masterAgentId] }),
+  });
+}

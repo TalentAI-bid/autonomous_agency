@@ -12,6 +12,7 @@ import { flushEmailQueue } from '../tools/email-queue.tool.js';
 import { drainAllPipelineQueues } from '../services/queue.service.js';
 import { resetSearchRateLimits } from '../tools/searxng.tool.js';
 import { getQuotaSnapshot } from '../services/runtime-budget.service.js';
+import { applySearchChoice } from '../services/search-negotiation.service.js';
 import { applyActionPlanAnswers, isActionPlanComplete } from '../prompts/action-plan.prompt.js';
 import type { ActionPlan } from '../db/schema/master-agents.js';
 import type { PipelineContext } from '../types/pipeline-context.js';
@@ -555,6 +556,23 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
       });
       if (!updated) throw new NotFoundError('PipelineError', errorId);
       return { data: updated };
+    },
+  );
+
+  // POST /api/master-agents/:id/search-choice — apply user's reply to a low-quality search
+  const searchChoiceSchema = z.object({
+    choiceId: z.enum(['continue', 'broaden_manual', 'broaden_auto']),
+    userTerm: z.string().min(1).max(120).optional(),
+  });
+
+  fastify.post<{ Params: { id: string } }>(
+    '/:id/search-choice',
+    async (request) => {
+      const parsed = searchChoiceSchema.safeParse(request.body);
+      if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+      const outcome = await applySearchChoice(request.tenantId, request.params.id, parsed.data);
+      return { data: outcome };
     },
   );
 }

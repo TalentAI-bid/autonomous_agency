@@ -27,6 +27,7 @@ export default function ContactDetailPage() {
   const { data: timeline } = useContactTimeline(id);
   const { data: deals } = useDeals({ contactId: id });
   const { data: stages } = useCrmStages();
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -48,7 +49,6 @@ export default function ContactDetailPage() {
     );
   }
 
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
   const deep = (contact.rawData ?? {}) as ContactDeepData;
   const fullName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown';
 

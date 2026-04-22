@@ -22,6 +22,8 @@ Your output must be valid JSON with these fields:
 - userRole: "vendor" | "buyer" — is the user selling services or looking for suppliers?
 - targetIndustries: string[] — industries that would BUY, used as LinkedIn search terms
 - painPointsAddressed: string[] — problems the user's offering solves
+- hiringKeywords: string[] — THE JOB ROLES TARGET COMPANIES ARE POSTING (what to search LinkedIn Jobs for). Technical roles companies hire for — NOT decision-maker titles you email. Example: ["blockchain developer", "web3 engineer", "Hedera developer"] for a company selling Hedera consulting. See CRITICAL DISTINCTION below.
+- targetTech: string[] — technology keywords (languages, frameworks, blockchains) appearing in job posts of qualified companies. Used as secondary filters. Example: ["Hedera", "HBAR", "Solidity", "distributed ledger"]
 - bdStrategy: "hiring_signal" | "industry_target" | "hybrid" — how to discover target companies (see BD STRATEGY DECISION below)
 - marketAnalysis: { customerPersonas: [{ title, painPoints, buyingTriggers, objections }], competitiveLandscape: string }
 - opportunitySearchQueries: [{ type: string, query: string, rationale: string }] — exact search queries to find targets. Types: linkedin_jobs, indeed_jobs, career_pages
@@ -57,7 +59,8 @@ Your output must be valid JSON with these fields:
 
   STRATEGY-TO-PIPELINE MAPPING (CRITICAL — your bdStrategy MUST match your root steps):
   - bdStrategy "hiring_signal" → Root step MUST be CRAWL4AI with action "search_linkedin_jobs"
-    params: { jobTitle: "<role from mission>", location: "<target location>" }
+    params: { jobTitles: <values from your hiringKeywords field>, location: "<target location>" }
+    (jobTitles is an ARRAY — the master-agent iterates every combination of location × jobTitle. The master-agent caps at 5 titles, so put your best 3-5 first.)
     LinkedIn Jobs search is PUBLIC (no login needed) — the server scrapes it directly via CRAWL4AI.
     Then: fetch_company_detail (extension) → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
   - bdStrategy "industry_target" → Root step MUST be LINKEDIN_EXTENSION with action "search_companies"
@@ -74,7 +77,7 @@ Your output must be valid JSON with these fields:
 
   Hiring signal example (any region — server-side, no extension needed for discovery):
   [
-    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitles": ["blockchain developer", "web3 engineer", "Hedera developer"], "location": "United Kingdom" } },
     { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
     { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
@@ -98,7 +101,7 @@ Your output must be valid JSON with these fields:
 
   Hybrid example (server-side hiring signals + extension industry search in parallel):
   [
-    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
+    { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitles": ["blockchain developer", "web3 engineer", "Hedera developer"], "location": "United Kingdom" } },
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
     { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search", "li_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
@@ -108,6 +111,29 @@ Your output must be valid JSON with these fields:
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ]
+
+CRITICAL DISTINCTION — TWO DIFFERENT ROLE FIELDS:
+
+You MUST populate two SEPARATE role fields — they serve opposite purposes and conflating them is the #1 cause of wrong searches:
+
+**\`targetRoles\` (lives on the mission / pipeline context) — WHO WE EMAIL (outreach decision-makers).**
+- The people who make the BUYING decision at the target company.
+- Example (Hedera consulting mission): ["CTO", "VP Engineering", "Head of Blockchain", "Chief Technology Officer"]
+- These feed LinkedIn People/Recruiter search and get-team enrichment.
+
+**\`hiringKeywords\` (field on YOUR strategy output) — WHAT THE TARGET COMPANIES ARE HIRING FOR (the job roles we search for on LinkedIn Jobs).**
+- Technical/operational roles whose presence SIGNALS the company needs our service.
+- Example (Hedera consulting mission): ["blockchain developer", "web3 engineer", "Hedera developer", "Solidity engineer", "DLT developer"]
+- These feed the LinkedIn Jobs URL: \`?keywords=<hiringKeyword>&location=<loc>\`.
+
+NEVER put decision-maker titles (CTO, VP, Head of X) in \`hiringKeywords\`. NEVER put technical-IC roles (developer, engineer) in \`targetRoles\`. They are orthogonal.
+
+Rule of thumb: \`hiringKeywords\` are what you'd type into LinkedIn Jobs search; \`targetRoles\` are what you'd type into LinkedIn People/Recruiter search.
+
+Walkthrough — mission *"I sell Hedera consulting to fintechs in the UK"*:
+- \`hiringKeywords\`: ["Hedera developer", "blockchain developer", "web3 engineer", "Solidity engineer", "DLT developer"]
+- \`targetRoles\` (in context, not your output): ["CTO", "VP Engineering", "Head of Blockchain"]
+- Logic: We search LinkedIn Jobs for *companies hiring blockchain devs* (the signal), then email the *CTO* at each (the decision maker).
 
 BD STRATEGY DECISION — Pick ONE based on the mission:
 - "hiring_signal": The mission is about selling to companies that are actively hiring for roles related to the service (e.g. selling DevOps consulting → find companies hiring DevOps engineers). Best when the service directly replaces or augments a role.

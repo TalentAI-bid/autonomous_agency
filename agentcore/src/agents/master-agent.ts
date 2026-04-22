@@ -446,44 +446,70 @@ export class MasterAgent extends BaseAgent {
                   { bdStrategy, masterAgentId, hasPipelineSteps: !!strategy.pipelineSteps?.length, needsChromeExtension: !!strategy.dataSourceStrategy?.needsChromeExtension },
                   'Entering hiring_signal/hybrid dispatch block',
                 );
-                // Resolve jobTitle with explicit priority chain
-                const resolveJobTitle = (): { value: string; source: string } => {
-                  if (pipelineContext?.targetRoles?.[0]) {
-                    return { value: pipelineContext.targetRoles[0], source: 'pipelineContext.targetRoles' };
+                // Resolve jobTitles (hiring keywords — what companies are POSTING,
+                // NOT decision-maker titles we email). Priority chain:
+                //   1) strategy.pipelineSteps[*].params.jobTitles (array form)
+                //   2) strategy.pipelineSteps[*].params.jobTitle (legacy singular)
+                //   3) strategy.hiringKeywords (new top-level strategy field)
+                //   4) agentConfig.hiringKeywords (persisted override)
+                //   5) generic fallback — DO NOT fall back to targetRoles
+                const resolveJobTitles = (): { value: string[]; source: string } => {
+                  const stepJobTitles = strategy.pipelineSteps
+                    ?.flatMap(s => (s.params?.jobTitles as string[] | undefined) ?? [])
+                    .filter(Boolean) ?? [];
+                  if (stepJobTitles.length) {
+                    return { value: stepJobTitles, source: 'strategy.pipelineSteps.params.jobTitles' };
                   }
-                  if ((agentConfig.targetRoles as string[])?.[0]) {
-                    return { value: (agentConfig.targetRoles as string[])[0], source: 'agentConfig.targetRoles' };
+                  const stepJobTitleSingular = strategy.pipelineSteps
+                    ?.flatMap(s => {
+                      const jt = s.params?.jobTitle as string | undefined;
+                      return jt ? [jt] : [];
+                    }) ?? [];
+                  if (stepJobTitleSingular.length) {
+                    return { value: stepJobTitleSingular, source: 'strategy.pipelineSteps.params.jobTitle (legacy)' };
                   }
-                  if (services[0]) {
-                    return { value: services[0], source: 'agentConfig.services' };
+                  if (strategy.hiringKeywords?.length) {
+                    return { value: strategy.hiringKeywords, source: 'strategy.hiringKeywords' };
                   }
-                  return { value: 'engineer', source: 'fallback' };
+                  const cfgHiring = (agentConfig as Record<string, unknown>).hiringKeywords as string[] | undefined;
+                  if (cfgHiring?.length) {
+                    return { value: cfgHiring, source: 'agentConfig.hiringKeywords' };
+                  }
+                  return { value: ['software engineer', 'developer'], source: 'fallback' };
                 };
-                const { value: jobTitle, source: jobTitleSource } = resolveJobTitle();
-                logger.info({ jobTitle, jobTitleSource, masterAgentId }, 'Resolved jobTitle for LinkedIn Jobs search');
+                const { value: jobTitles, source: jobTitleSource } = resolveJobTitles();
+                logger.info(
+                  { jobTitles, jobTitleSource, count: jobTitles.length, masterAgentId },
+                  'Resolved jobTitles for LinkedIn Jobs search',
+                );
 
-                const LINKEDIN_SCRAPE_DELAY_MS = 8000;
+                const LINKEDIN_SCRAPE_DELAY_MS = 3000;
                 const { searchLinkedInJobs } = await import('../tools/linkedin-jobs.tool.js');
-                let isFirstLocation = true;
+                let isFirstCall = true;
                 let totalJobsFound = 0;
                 const perLocation: Array<{ location: string; count: number }> = [];
+                const cappedJobTitles = jobTitles.slice(0, 5);
+
                 for (const loc of locs) {
-                  if (!isFirstLocation) {
-                    await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
+                  let locCount = 0;
+                  for (const jobTitle of cappedJobTitles) {
+                    if (!isFirstCall) {
+                      await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
+                    }
+                    isFirstCall = false;
+                    try {
+                      const result = await searchLinkedInJobs(this.tenantId, jobTitle, loc, masterAgentId);
+                      logger.info(
+                        { masterAgentId, jobTitle, location: loc, companiesFound: result.companies.length },
+                        'Server-side LinkedIn Jobs scrape completed (per-keyword)',
+                      );
+                      locCount += result.companies.length;
+                    } catch (err) {
+                      logger.warn({ err, masterAgentId, jobTitle, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
+                    }
                   }
-                  isFirstLocation = false;
-                  try {
-                    const result = await searchLinkedInJobs(this.tenantId, jobTitle, loc, masterAgentId);
-                    logger.info(
-                      { masterAgentId, location: loc, companiesFound: result.companies.length },
-                      'Server-side LinkedIn Jobs scrape completed',
-                    );
-                    totalJobsFound += result.companies.length;
-                    perLocation.push({ location: loc, count: result.companies.length });
-                  } catch (err) {
-                    logger.warn({ err, masterAgentId, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
-                    perLocation.push({ location: loc, count: 0 });
-                  }
+                  perLocation.push({ location: loc, count: locCount });
+                  totalJobsFound += locCount;
                 }
 
                 // Classify the aggregate outcome and, if weak, negotiate with
@@ -500,8 +526,10 @@ export class MasterAgent extends BaseAgent {
 
                 if (outcome !== 'ok') {
                   try {
+                    const jobTitleDisplay = cappedJobTitles.join(', ');
                     const pendingSearchChoice = {
-                      jobTitle,
+                      jobTitle: jobTitleDisplay,
+                      jobTitles: cappedJobTitles,
                       locations: [...locs],
                       perLocation,
                       firedAt: new Date().toISOString(),
@@ -522,12 +550,13 @@ export class MasterAgent extends BaseAgent {
                       severity: 'warning',
                       outcome,
                       totalFound: totalJobsFound,
-                      jobTitle,
+                      jobTitle: jobTitleDisplay,
+                      jobTitles: cappedJobTitles,
                       perLocation,
                       message:
                         outcome === 'empty'
-                          ? `I searched LinkedIn Jobs for "${jobTitle}" across ${locs.length} location(s) and found 0 companies. The keyword combo looks too narrow.`
-                          : `I found only ${totalJobsFound} companies for "${jobTitle}". Quality might be thin — happy to broaden.`,
+                          ? `I searched LinkedIn Jobs for "${jobTitleDisplay}" across ${locs.length} location(s) and found 0 companies. The keyword combo looks too narrow.`
+                          : `I found only ${totalJobsFound} companies for "${jobTitleDisplay}". Quality might be thin — happy to broaden.`,
                       choices: [
                         { id: 'continue', label: 'Continue with what I have' },
                         { id: 'broaden_manual', label: 'Let me type a broader term' },

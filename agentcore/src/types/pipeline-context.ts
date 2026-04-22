@@ -112,4 +112,6 @@ export interface SalesStrategy {
     dependsOn: string[];
     params?: Record<string, unknown>;
   }>;
+  hiringKeywords?: string[];
+  targetTech?: string[];
 }

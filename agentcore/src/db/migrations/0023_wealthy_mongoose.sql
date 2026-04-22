@@ -1,0 +1,1 @@
+ALTER TYPE "public"."email_queue_status" ADD VALUE 'pending_approval';

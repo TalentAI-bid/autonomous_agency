@@ -3,7 +3,7 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents } from '../db/schema/index.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
-import { findEmailByPattern } from '../tools/email-finder.tool.js';
+import { findEmailByPattern, probePatternForDomain, applyCachedPatternToTeam, hasCachedPattern } from '../tools/email-finder.tool.js';
 
 import { SMART_MODEL } from '../tools/together-ai.tool.js';
 import { isMegaCorp, shouldSkipDomain } from '../utils/domain-blocklist.js';
@@ -536,6 +536,39 @@ export class EnrichmentAgent extends BaseAgent {
               return aP - bP;
             })
             .slice(0, 3);
+          // Probe-once pre-pass: discover the email pattern for the company
+          // domain BEFORE fanning out the per-person research, so the 3
+          // parallel branches don't each independently probe the same domain.
+          const keyPeopleEmailMap = new Map<string, string>();
+          const kpDomain = (companyDomain || '').replace(/^www\./, '').toLowerCase();
+          if (kpDomain.includes('.') && !kpDomain.includes(' ') && keyPeopleToResearch.length > 0) {
+            try {
+              if (!hasCachedPattern(kpDomain)) {
+                const probeCandidate = keyPeopleToResearch.find((p) => {
+                  const parts = (p.name ?? '').trim().split(/\s+/);
+                  return parts.length >= 2 && parts[0] && parts[parts.length - 1];
+                });
+                if (probeCandidate) {
+                  const parts = probeCandidate.name!.trim().split(/\s+/);
+                  await probePatternForDomain(parts[0]!, parts[parts.length - 1]!, kpDomain);
+                }
+              }
+              const refs = keyPeopleToResearch
+                .map((p) => {
+                  const parts = (p.name ?? '').trim().split(/\s+/);
+                  if (parts.length < 2) return null;
+                  return { name: p.name!, firstName: parts[0]!, lastName: parts.slice(1).join(' ') };
+                })
+                .filter((m): m is { name: string; firstName: string; lastName: string } => m !== null);
+              const fanOut = await applyCachedPatternToTeam(refs, kpDomain);
+              for (const r of fanOut) {
+                if (r.email) keyPeopleEmailMap.set(r.member.name, r.email);
+              }
+            } catch (err) {
+              logger.warn({ err: err instanceof Error ? err.message : String(err), kpDomain }, 'Key people: probe-then-fanout failed');
+            }
+          }
+
           const keyPeopleResults = await Promise.allSettled(
             keyPeopleToResearch.map(async (person) => {
               if (!person.name) return person;
@@ -553,27 +586,21 @@ export class EnrichmentAgent extends BaseAgent {
               let emailMethod: string | undefined;
               let emailAttempts: number | undefined;
 
-              // Find email for this person
+              // Find email for this person — prefer prebuilt cached-pattern hit (no SMTP)
               if (companyDomain) {
                 try {
                   const nameParts = person.name.trim().split(/\s+/);
                   const firstName = nameParts[0] ?? '';
                   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1]! : '';
                   if (firstName && lastName) {
-                    // PRIMARY: Pattern guesser + Reacher SMTP verification
-                    const patternResult = await findEmailByPattern(firstName, lastName, companyDomain);
-                    if (patternResult.email) {
-                      personEmail = patternResult.email;
-                      emailMethod = patternResult.method;
-                      emailAttempts = patternResult.attempts;
-                      logger.info({
-                        contactId, personName: person.name, personEmail,
-                        method: patternResult.method, attempts: patternResult.attempts,
-                        cached: patternResult.method === 'cached_pattern',
-                      }, 'Key person email found');
-                    }
-                    // FALLBACK: Old Generect/emailIntelligence method
-                    if (!personEmail) {
+                    const prebuilt = keyPeopleEmailMap.get(person.name);
+                    if (prebuilt) {
+                      personEmail = prebuilt;
+                      emailMethod = 'cached_pattern';
+                      emailAttempts = 0;
+                      logger.info({ contactId, personName: person.name, personEmail }, 'Key person email from cached pattern (no SMTP)');
+                    } else {
+                      // FALLBACK: Generect/emailIntelligence — only when no pattern is cached for this domain
                       const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId, companyId ?? undefined);
                       if (emailResult.email) {
                         personEmail = emailResult.email;
@@ -1333,6 +1360,56 @@ export class EnrichmentAgent extends BaseAgent {
 
         logger.info({ companyId, companyName, keyPeopleCount: priorityPeople.length }, 'Finding emails for team members');
 
+        // Pre-pass: discover the email pattern for this domain ONCE, then
+        // build emails for every team member from the cached pattern.
+        // This keeps Reacher usage to ≤8 sequential checks per company
+        // regardless of team size.
+        const teamEmailMap = new Map<string, { email: string; method: string; attempts: number }>();
+        const teamDomain = (companyDomain || '').replace(/^www\./, '').toLowerCase();
+        const domainLooksValid = teamDomain.includes('.') && !teamDomain.includes(' ');
+
+        if (domainLooksValid && priorityPeople.length > 0) {
+          try {
+            const cacheHit = hasCachedPattern(teamDomain);
+            if (!cacheHit) {
+              // Pick the first member with a usable first+last name to probe with.
+              const probeCandidate = priorityPeople.find((p) => {
+                const parts = (p.name ?? '').trim().split(/\s+/);
+                return parts.length >= 2 && parts[0] && parts[parts.length - 1];
+              });
+              if (probeCandidate) {
+                const parts = probeCandidate.name!.trim().split(/\s+/);
+                const probeFirst = parts[0]!;
+                const probeLast = parts[parts.length - 1]!;
+                logger.info({ companyId, teamDomain, probeName: probeCandidate.name }, 'Team: probing pattern for unknown domain (sequential)');
+                await probePatternForDomain(probeFirst, probeLast, teamDomain);
+              }
+            } else {
+              logger.info({ companyId, teamDomain }, 'Team: pattern already cached, skipping probe');
+            }
+
+            // Now fan out: every member's email is built from the cached pattern
+            // (zero SMTP cost). Members with no cached pattern get null and fall
+            // through to the per-member Generect fallback below.
+            const memberRefs = priorityPeople
+              .map((p) => {
+                const parts = (p.name ?? '').trim().split(/\s+/);
+                if (parts.length < 2) return null;
+                return { name: p.name!, firstName: parts[0]!, lastName: parts.slice(1).join(' ') };
+              })
+              .filter((m): m is { name: string; firstName: string; lastName: string } => m !== null);
+
+            const fanOut = await applyCachedPatternToTeam(memberRefs, teamDomain);
+            for (const r of fanOut) {
+              if (r.email) {
+                teamEmailMap.set(r.member.name, { email: r.email, method: 'cached_pattern', attempts: 0 });
+              }
+            }
+          } catch (err) {
+            logger.warn({ err: err instanceof Error ? err.message : String(err), companyId, teamDomain }, 'Team: probe-then-fanout failed, falling back to per-member discovery');
+          }
+        }
+
         for (const person of priorityPeople) {
           if (!person.name) continue;
           const nameParts = person.name.trim().split(/\s+/);
@@ -1366,38 +1443,32 @@ export class EnrichmentAgent extends BaseAgent {
             }
           }
 
-          // 2. Find email via pattern guesser + Reacher, then Generect fallback
+          // 2. Find email — first try the prebuilt cached-pattern map (zero SMTP),
+          //    then fall back to per-member Generect lookup if no pattern is cached.
           let personEmail = '';
           let emailMethod: string | undefined;
           let emailAttempts: number | undefined;
           {
             const emailDomain = companyDomain || companyName;
-            try {
-              // PRIMARY: Pattern guesser + Reacher SMTP verification
-              if (emailDomain.includes('.') && !emailDomain.includes(' ')) {
-                const patternResult = await findEmailByPattern(firstName, lastName, emailDomain);
-                if (patternResult.email) {
-                  personEmail = patternResult.email;
-                  emailMethod = patternResult.method;
-                  emailAttempts = patternResult.attempts;
-                  logger.info({
-                    personName: person.name, email: personEmail,
-                    method: patternResult.method, attempts: patternResult.attempts,
-                    cached: patternResult.method === 'cached_pattern',
-                  }, 'Email found for team member');
+            const prebuilt = teamEmailMap.get(person.name);
+            if (prebuilt) {
+              personEmail = prebuilt.email;
+              emailMethod = prebuilt.method;
+              emailAttempts = prebuilt.attempts;
+              logger.info({ personName: person.name, email: personEmail, method: emailMethod }, 'Team member email from cached pattern (no SMTP)');
+            } else {
+              try {
+                if (!personEmail && emailDomain) {
+                  const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
+                  if (emailResult.email) {
+                    personEmail = emailResult.email;
+                    emailMethod = emailResult.method || 'generect_fallback';
+                    logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member via Generect fallback');
+                  }
                 }
+              } catch (err) {
+                logger.warn({ err, personName: person.name }, 'Email finding failed for team member');
               }
-              // FALLBACK: Old Generect/emailIntelligence method
-              if (!personEmail) {
-                const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
-                if (emailResult.email) {
-                  personEmail = emailResult.email;
-                  emailMethod = emailResult.method || 'generect_fallback';
-                  logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member via Generect fallback');
-                }
-              }
-            } catch (err) {
-              logger.warn({ err, personName: person.name }, 'Email finding failed for team member');
             }
           }
 

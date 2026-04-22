@@ -27,7 +27,7 @@ export function createEmailListenerWorker(tenantId: string): Worker {
         agentType: 'email-listen',
       });
       try {
-        const result = await agent.execute(job.data as Record<string, unknown>);
+        const result = await agent.run(job.data as Record<string, unknown>);
         if (task) await completeTaskRecord(tenantId, task.id, result);
         // Clear lastError on success
         if (configId) {

@@ -11,6 +11,10 @@ import { removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/
 import { flushEmailQueue } from '../tools/email-queue.tool.js';
 import { drainAllPipelineQueues } from '../services/queue.service.js';
 import { resetSearchRateLimits } from '../tools/searxng.tool.js';
+import { getQuotaSnapshot } from '../services/runtime-budget.service.js';
+import { applyActionPlanAnswers, isActionPlanComplete } from '../prompts/action-plan.prompt.js';
+import type { ActionPlan } from '../db/schema/master-agents.js';
+import type { PipelineContext } from '../types/pipeline-context.js';
 import logger from '../utils/logger.js';
 import {
   buildSystemPrompt as buildPipelineSystemPrompt,
@@ -143,6 +147,93 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     }
 
     return { success: true };
+  });
+
+  // GET /api/master-agents/:id/action-plan
+  fastify.get<{ Params: { id: string } }>('/:id/action-plan', async (request) => {
+    const { id } = request.params;
+    const [agent] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({ actionPlan: masterAgents.actionPlan, status: masterAgents.status, useCase: masterAgents.useCase })
+        .from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!agent) throw new NotFoundError('MasterAgent', id);
+    return { data: { actionPlan: agent.actionPlan ?? null, status: agent.status, useCase: agent.useCase } };
+  });
+
+  // PATCH /api/master-agents/:id/action-plan — submit answers
+  const actionPlanPatchSchema = z.object({
+    answers: z.record(z.string(), z.string().optional()),
+    skip: z.boolean().optional(),
+  });
+  fastify.patch<{ Params: { id: string } }>('/:id/action-plan', async (request) => {
+    const { id } = request.params;
+    const parsed = actionPlanPatchSchema.safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+    const [agent] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    const existing = (agent.actionPlan as ActionPlan | null);
+    if (!existing) throw new ValidationError('Action plan has not been generated yet — start the agent once to generate it.');
+
+    const merged: ActionPlan = {
+      ...existing,
+      items: existing.items.map((item) => {
+        const ans = parsed.data.answers[item.key];
+        if (ans === undefined) return item;
+        return { ...item, answer: ans };
+      }),
+    };
+
+    if (parsed.data.skip) {
+      merged.status = 'skipped';
+    } else {
+      merged.status = isActionPlanComplete(merged.items) ? 'completed' : 'pending';
+    }
+    if (merged.status !== 'pending') merged.completedAt = new Date().toISOString();
+
+    // Fold answers into config + pipelineContext so the outreach prompts see them
+    const cfg = (agent.config as Record<string, unknown>) ?? {};
+    const pipelineCtx = (cfg.pipelineContext as PipelineContext | undefined);
+    const folded = applyActionPlanAnswers(merged.items, cfg, pipelineCtx);
+
+    const nextStatus = merged.status === 'completed' || merged.status === 'skipped'
+      ? 'idle' // ready to be (re-)started
+      : 'awaiting_action_plan';
+
+    const [updated] = await withTenant(request.tenantId, async (tx) => {
+      return tx.update(masterAgents)
+        .set({
+          actionPlan: merged,
+          status: nextStatus,
+          config: { ...folded.config, pipelineContext: folded.pipelineContext },
+          updatedAt: new Date(),
+        })
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .returning();
+    });
+    return { data: { actionPlan: merged, status: updated?.status } };
+  });
+
+  // GET /api/master-agents/:id/quota — daily runtime usage
+  fastify.get<{ Params: { id: string } }>('/:id/quota', async (request) => {
+    const { id } = request.params;
+    const [agent] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({ dailyRuntimeBudgetMs: masterAgents.dailyRuntimeBudgetMs, status: masterAgents.status })
+        .from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    const snapshot = await getQuotaSnapshot(id, agent.dailyRuntimeBudgetMs);
+    return { data: { ...snapshot, status: agent.status } };
   });
 
   // GET /api/master-agents/:id/agents — List sub-agent configs

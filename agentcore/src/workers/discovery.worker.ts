@@ -39,7 +39,7 @@ export function createDiscoveryWorker(tenantId: string): Worker {
         agentType: 'discovery',
       });
       try {
-        const result = await agent.execute(data);
+        const result = await agent.run(data);
         if (task) await completeTaskRecord(tenantId, task.id, result);
         return result;
       } catch (err: unknown) {

@@ -22,7 +22,7 @@ export function createReplyWorker(tenantId: string): Worker {
         agentType: 'reply',
       });
       try {
-        const result = await agent.execute(job.data as Record<string, unknown>);
+        const result = await agent.run(job.data as Record<string, unknown>);
         if (task) await completeTaskRecord(tenantId, task.id, result);
         return result;
       } catch (err: unknown) {

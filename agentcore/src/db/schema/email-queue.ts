@@ -6,7 +6,7 @@ import { emailAccounts } from './email-accounts.js';
 import { emailThreads } from './email-threads.js';
 
 export const emailQueueStatusEnum = pgEnum('email_queue_status', [
-  'queued', 'sending', 'sent', 'failed', 'cancelled',
+  'queued', 'sending', 'sent', 'failed', 'cancelled', 'pending_approval',
 ]);
 
 export const emailQueue = pgTable('email_queue', {

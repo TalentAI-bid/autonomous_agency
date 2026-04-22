@@ -316,6 +316,8 @@ export class OutreachAgent extends BaseAgent {
         });
       });
     } else {
+      const reviewMode = agent?.reviewMode ?? 'manual';
+      const enqueueStatus: 'queued' | 'pending_approval' = reviewMode === 'manual' ? 'pending_approval' : 'queued';
       const result = await enqueueEmail({
         tenantId: this.tenantId,
         contactId,
@@ -329,9 +331,34 @@ export class OutreachAgent extends BaseAgent {
         masterAgentId,
         campaignId: effectiveCampaignId ?? undefined,
         stepId: stepRecord[0]?.id ?? undefined,
+        status: enqueueStatus,
       });
       queuedId = result.queuedId;
-      messageId = `queued-${queuedId}`;
+      messageId = enqueueStatus === 'pending_approval' ? `pending-${queuedId}` : `queued-${queuedId}`;
+
+      if (enqueueStatus === 'pending_approval') {
+        logger.info({ tenantId: this.tenantId, contactId, queuedId }, 'OutreachAgent: draft saved as pending_approval (manual review mode)');
+        this.sendMessage(null, 'reasoning', {
+          contactName: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim(),
+          emailSubject: email.subject,
+          strategy: 'pending_approval',
+          dryRun: false,
+        });
+        await this.emitEvent('email:drafted', {
+          contactId,
+          campaignId: effectiveCampaignId,
+          stepNumber,
+          queueItemId: queuedId,
+          status: 'pending_approval',
+        });
+        return {
+          contactId,
+          stepNumber,
+          messageId,
+          status: 'pending_approval',
+          queueItemId: queuedId,
+        };
+      }
     }
 
     // 6. Update campaignContact step if available

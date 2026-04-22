@@ -4,6 +4,7 @@ import { emailQueue, emailsSent, emailAccounts } from '../db/schema/index.js';
 import type { EmailQueueItem, EmailAccount } from '../db/schema/index.js';
 import { sendEmail } from '../tools/smtp.tool.js';
 import { selectEmailAccount, incrementQuota, popBatchQueue } from '../tools/email-queue.tool.js';
+import { acquireSmtpSlot } from './smtp-rate-limiter.service.js';
 import { logActivity } from './crm-activity.service.js';
 import { pubRedis } from '../queues/setup.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
@@ -79,6 +80,9 @@ async function sendSingleEmail(tenantId: string, item: EmailQueueItem): Promise<
   if (!account) {
     account = await selectEmailAccount(tenantId);
   }
+
+  // Server-wide SMTP throttle (Contabo cap = 25/min across the whole server)
+  await acquireSmtpSlot();
 
   // Send via SMTP
   const result = await sendEmail({

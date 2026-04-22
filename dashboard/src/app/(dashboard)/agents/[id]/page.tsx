@@ -16,6 +16,8 @@ import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2,
 import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { StrategyPanel } from '@/components/agents/strategy-panel';
+import { ActionPlanPanel } from '@/components/agents/action-plan-panel';
+import { QuotaBadge } from '@/components/agents/quota-badge';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
 
@@ -121,6 +123,7 @@ export default function AgentDetailPage() {
                 <Badge variant={agent.status === 'running' ? 'success' : 'secondary'}>
                   {agent.status}
                 </Badge>
+                <QuotaBadge masterAgentId={id} compact />
               </div>
               <p className="text-sm text-muted-foreground mt-1">{agent.useCase}</p>
               {agent.mission && (
@@ -181,6 +184,9 @@ export default function AgentDetailPage() {
       {/* Tab Content */}
       {activeTab === 'overview' && (
         <>
+          {/* Action plan — gates outreach until the user fills in the required answers */}
+          <ActionPlanPanel masterAgentId={id} />
+
           {/* Agent Monitor */}
           <AgentMonitor masterAgentId={id} />
 

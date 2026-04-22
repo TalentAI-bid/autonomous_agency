@@ -26,7 +26,7 @@ export function createCompanyFinderWorker(tenantId: string): Worker {
       });
 
       try {
-        const result = await agent.execute(data as any);
+        const result = await agent.run(data as any);
         if (task) await completeTaskRecord(tenantId, task.id, result as unknown as Record<string, unknown>);
         return result;
       } catch (err: unknown) {

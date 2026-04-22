@@ -7,6 +7,7 @@ import { contacts, companies, agentTasks, agentActivityLog, masterAgents, agentM
 import type { Contact, NewContact, Company, NewCompany, AgentTask } from '../db/schema/index.js';
 import type { AgentType } from '../queues/queues.js';
 import { complete as togetherComplete, extractJSON as togetherExtractJSON, type ChatMessage } from '../tools/together-ai.tool.js';
+import { addRuntimeMs, isQuotaExhausted, msUntilUtcMidnight } from '../services/runtime-budget.service.js';
 import { complete as claudeComplete } from '../tools/claude.tool.js';
 import { search as searxSearch, type SearchResult } from '../tools/searxng.tool.js';
 import { scrape as crawlScrape } from '../tools/crawl4ai.tool.js';
@@ -572,6 +573,100 @@ export abstract class BaseAgent {
 
   async close(): Promise<void> {
     // No-op: Redis connection is shared across all agent instances
+  }
+
+  /**
+   * Wrapper called by every BullMQ worker. Enforces the master agent's
+   * daily runtime budget (default 1h/day) and records elapsed wall-clock
+   * time against it.
+   *
+   * If the budget is exhausted, the master agent's status is flipped to
+   * `paused_quota` and the job is rejected with a special skipped payload
+   * so the worker can re-queue it. Workers should re-dispatch the same
+   * job with `delay: msUntilUtcMidnight()` when they see this signal.
+   */
+  async run(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const masterAgentId = this.masterAgentId;
+    const isUuid = typeof masterAgentId === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(masterAgentId);
+
+    let budgetMs: number | undefined;
+    if (isUuid) {
+      try {
+        const [row] = await withTenant(this.tenantId, async (tx) => {
+          return tx.select({
+            id: masterAgents.id,
+            budget: masterAgents.dailyRuntimeBudgetMs,
+            status: masterAgents.status,
+          }).from(masterAgents)
+            .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+            .limit(1);
+        });
+        if (row) {
+          budgetMs = row.budget ?? 3_600_000;
+          const exhausted = await isQuotaExhausted(masterAgentId, budgetMs);
+          if (exhausted) {
+            // Flip status (idempotent) and re-dispatch this job to fire after
+            // the daily UTC reset. The worker treats this as a successful job
+            // (no error, no retry) — the actual work happens tomorrow.
+            if (row.status !== 'paused_quota') {
+              await withTenant(this.tenantId, async (tx) => {
+                await tx.update(masterAgents)
+                  .set({ status: 'paused_quota', updatedAt: new Date() })
+                  .where(eq(masterAgents.id, masterAgentId));
+              });
+            }
+            const delayMs = msUntilUtcMidnight();
+            try {
+              await dispatchJob(this.tenantId, this.agentType, input, { delay: delayMs });
+            } catch (err) {
+              logger.warn({ err: err instanceof Error ? err.message : String(err), masterAgentId }, 'run(): failed to re-dispatch quota-skipped job');
+            }
+            logger.info({ tenantId: this.tenantId, masterAgentId, agentType: this.agentType, delayMs }, 'Quota exhausted: re-queued job for next UTC day');
+            return {
+              skipped: true,
+              reason: 'quota_exhausted',
+              requeueDelayMs: delayMs,
+            };
+          }
+
+          // If we were previously paused for quota and now have headroom, clear the flag.
+          if (row.status === 'paused_quota') {
+            await withTenant(this.tenantId, async (tx) => {
+              await tx.update(masterAgents)
+                .set({ status: 'running', updatedAt: new Date() })
+                .where(eq(masterAgents.id, masterAgentId));
+            });
+          }
+        }
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err), masterAgentId }, 'run(): quota check failed, proceeding without gate');
+      }
+    }
+
+    const start = Date.now();
+    try {
+      return await this.execute(input);
+    } finally {
+      const elapsed = Date.now() - start;
+      if (isUuid && elapsed > 0) {
+        try {
+          const total = await addRuntimeMs(masterAgentId, elapsed);
+          if (budgetMs && total >= budgetMs) {
+            // We tipped over budget on this job — flip status so the next
+            // dispatch is gated.
+            await withTenant(this.tenantId, async (tx) => {
+              await tx.update(masterAgents)
+                .set({ status: 'paused_quota', updatedAt: new Date() })
+                .where(eq(masterAgents.id, masterAgentId));
+            });
+            logger.info({ tenantId: this.tenantId, masterAgentId, totalMs: total, budgetMs }, 'Master agent budget exhausted after this job');
+          }
+        } catch (err) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err), masterAgentId, elapsed }, 'run(): failed to record runtime');
+        }
+      }
+    }
   }
 
   abstract execute(input: Record<string, unknown>): Promise<Record<string, unknown>>;

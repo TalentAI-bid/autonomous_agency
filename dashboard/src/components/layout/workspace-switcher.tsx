@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { useWorkspaces, useCreateWorkspace, useSwitchWorkspace } from '@/hooks/use-workspaces';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Building2, ChevronDown, Check, Plus, Loader2 } from 'lucide-react';
 
 export function WorkspaceSwitcher() {
+  const router = useRouter();
   const tenant = useAuthStore((s) => s.tenant);
   const { data: workspaces } = useWorkspaces();
   const switchWorkspace = useSwitchWorkspace();
@@ -40,8 +42,10 @@ export function WorkspaceSwitcher() {
     try {
       await switchWorkspace.mutateAsync(id);
       setOpen(false);
-      // Force full page reload to re-fetch all data
-      window.location.reload();
+      // Soft-refresh server components with the updated auth state.
+      // No window.location.reload() — that races with Zustand persist
+      // hydration and flips the route guard to /login.
+      router.refresh();
     } catch {
       toast({ title: 'Failed to switch workspace', variant: 'destructive' });
     }

@@ -6,6 +6,7 @@ import { contacts, companies, masterAgents, outreachEmails } from '../db/schema/
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { selectEmailAccount, incrementQuota } from '../tools/email-queue.tool.js';
 import { sendEmail } from '../tools/smtp.tool.js';
+import { acquireSmtpSlot } from '../services/smtp-rate-limiter.service.js';
 import { extractJSON, complete, SMART_MODEL } from '../tools/together-ai.tool.js';
 import { extractJSONFromText } from '../utils/json-extract.js';
 import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../prompts/draft-email.prompt.js';
@@ -281,6 +282,9 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     if (!account) {
       throw new ValidationError('No email account configured. Go to Settings > Email to add one.');
     }
+
+    // Server-wide SMTP throttle (Contabo cap = 25/min)
+    await acquireSmtpSlot();
 
     // Send via SMTP
     const htmlBody = body.replace(/\n/g, '<br>');

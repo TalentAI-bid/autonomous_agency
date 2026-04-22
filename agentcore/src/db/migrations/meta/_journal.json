@@ -155,6 +155,20 @@
       "when": 1776630149435,
       "tag": "0021_bouncy_shiver_man",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1776810896730,
+      "tag": "0022_safe_lorna_dane",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1776811334331,
+      "tag": "0023_wealthy_mongoose",
+      "breakpoints": true
     }
   ]
 }

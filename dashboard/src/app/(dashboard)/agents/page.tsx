@@ -9,6 +9,7 @@ import { formatDate } from '@/lib/utils';
 import { Bot, Play, Square, Trash2, Settings, Plus, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
+import { QuotaBadge } from '@/components/agents/quota-badge';
 
 export default function AgentsPage() {
   const { data: res, isLoading } = useAgents();
@@ -108,6 +109,7 @@ export default function AgentsPage() {
                       <Badge variant={statusVariant(agent.status) as 'success' | 'secondary' | 'error' | 'blue'}>
                         {agent.status}
                       </Badge>
+                      <QuotaBadge masterAgentId={agent.id} compact />
                     </div>
                     <p className="text-sm text-muted-foreground mt-0.5 truncate">{agent.useCase}</p>
                     {agent.mission && (

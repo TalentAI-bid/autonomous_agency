@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -84,18 +84,23 @@ export function EmailComposeModal({
     toast({ title: 'Copied to clipboard' });
   }, [subject, body, toast]);
 
-  // Auto-generate draft on first open
-  const handleOpenChange = useCallback((isOpen: boolean) => {
-    if (isOpen && !drafted && !drafting) {
+  // Auto-generate when parent opens us. Radix Dialog's onOpenChange does NOT
+  // fire on programmatic open from the parent, so we drive it from a useEffect.
+  useEffect(() => {
+    if (open && !drafted && !drafting) {
       generateDraft();
     }
-    if (!isOpen) {
+    if (!open) {
       setSubject('');
       setBody('');
       setDrafted(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const handleOpenChange = useCallback((isOpen: boolean) => {
     onOpenChange(isOpen);
-  }, [drafted, drafting, generateDraft, onOpenChange]);
+  }, [onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

@@ -39,13 +39,21 @@ export interface EnqueueEmailOpts {
   masterAgentId?: string;
   campaignId?: string;
   stepId?: string;
+  /** When 'pending_approval', the row is inserted but not pushed to the send queue. */
+  status?: 'queued' | 'pending_approval';
 }
 
 /**
  * Enqueue an email for batch sending.
  * Inserts into DB (durable) and pushes to Redis list for fast pickup.
+ *
+ * When `status: 'pending_approval'` is set, the row is recorded for the
+ * dashboard's review-before-send flow but not pushed to the Redis batch list.
+ * Promote it to actual send by updating the row's status to 'queued' and
+ * RPUSHing its id to `tenant:{tenantId}:email-batch-queue`.
  */
 export async function enqueueEmail(opts: EnqueueEmailOpts): Promise<{ queuedId: string }> {
+  const status = opts.status ?? 'queued';
   const item: NewEmailQueueItem = {
     tenantId: opts.tenantId,
     contactId: opts.contactId,
@@ -58,7 +66,7 @@ export async function enqueueEmail(opts: EnqueueEmailOpts): Promise<{ queuedId: 
     textBody: opts.textBody,
     trackingId: opts.trackingId,
     scheduledAt: opts.scheduledAt,
-    status: 'queued',
+    status,
     masterAgentId: opts.masterAgentId,
     campaignId: opts.campaignId,
     stepId: opts.stepId,
@@ -68,12 +76,28 @@ export async function enqueueEmail(opts: EnqueueEmailOpts): Promise<{ queuedId: 
     return tx.insert(emailQueue).values(item).returning({ id: emailQueue.id });
   });
 
-  // Push to Redis batch queue for fast processing
-  const redisKey = `tenant:${opts.tenantId}:email-batch-queue`;
-  await redis.rpush(redisKey, inserted!.id);
+  if (status === 'queued') {
+    const redisKey = `tenant:${opts.tenantId}:email-batch-queue`;
+    await redis.rpush(redisKey, inserted!.id);
+  }
 
-  logger.info({ tenantId: opts.tenantId, queuedId: inserted!.id, to: opts.toEmail }, 'Email enqueued');
+  logger.info({ tenantId: opts.tenantId, queuedId: inserted!.id, to: opts.toEmail, status }, 'Email enqueued');
   return { queuedId: inserted!.id };
+}
+
+/**
+ * Promote a `pending_approval` row to `queued` and push it to the send batch.
+ * Used by the contact "Send" button after manual review.
+ */
+export async function approveAndQueueEmail(tenantId: string, queueItemId: string): Promise<void> {
+  await withTenant(tenantId, async (tx) => {
+    await tx.update(emailQueue)
+      .set({ status: 'queued' })
+      .where(and(eq(emailQueue.id, queueItemId), eq(emailQueue.tenantId, tenantId), eq(emailQueue.status, 'pending_approval')));
+  });
+  const redisKey = `tenant:${tenantId}:email-batch-queue`;
+  await redis.rpush(redisKey, queueItemId);
+  logger.info({ tenantId, queueItemId }, 'Pending email approved and queued');
 }
 
 /**

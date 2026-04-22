@@ -137,3 +137,65 @@ export function useAgentDocuments(id: string) {
     staleTime: 15000,
   });
 }
+
+// ── Action plan ──────────────────────────────────────────────────────────────
+
+export interface ActionPlanItem {
+  key: string;
+  question: string;
+  required: boolean;
+  answer?: string | null;
+}
+export interface ActionPlan {
+  status: 'pending' | 'completed' | 'skipped';
+  items: ActionPlanItem[];
+  generatedAt?: string;
+  completedAt?: string;
+}
+export interface ActionPlanResponse {
+  actionPlan: ActionPlan | null;
+  status: string;
+  useCase: string;
+}
+
+export function useActionPlan(id: string) {
+  return useQuery({
+    queryKey: ['agents', id, 'action-plan'],
+    queryFn: () => apiGet<ActionPlanResponse>(`/master-agents/${id}/action-plan`),
+    enabled: !!id,
+    staleTime: 15000,
+  });
+}
+
+export function useUpdateActionPlan(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { answers: Record<string, string | undefined>; skip?: boolean }) =>
+      apiPatch<{ actionPlan: ActionPlan; status: string }>(`/master-agents/${id}/action-plan`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents', id] });
+      qc.invalidateQueries({ queryKey: ['agents', id, 'action-plan'] });
+    },
+  });
+}
+
+// ── Quota ────────────────────────────────────────────────────────────────────
+
+export interface QuotaSnapshot {
+  runtimeUsedMs: number;
+  runtimeBudgetMs: number;
+  remainingMs: number;
+  exhausted: boolean;
+  resetsAt: string;
+  status: string;
+}
+
+export function useMasterAgentQuota(id: string) {
+  return useQuery({
+    queryKey: ['agents', id, 'quota'],
+    queryFn: () => apiGet<QuotaSnapshot>(`/master-agents/${id}/quota`),
+    enabled: !!id,
+    staleTime: 15000,
+    refetchInterval: 30000,
+  });
+}

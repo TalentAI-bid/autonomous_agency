@@ -7,6 +7,8 @@ import { AGENT_TYPES } from '../queues/queues.js';
 import { getQueueStatus } from '../services/queue.service.js';
 import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserPrompt } from '../prompts/master-agent.prompt.js';
 import { buildSystemPrompt as discoverySystemPrompt, buildUserPrompt as discoveryUserPrompt } from '../prompts/discovery.prompt.js';
+import { buildActionPlan, isActionPlanComplete } from '../prompts/action-plan.prompt.js';
+import type { ActionPlan } from '../db/schema/master-agents.js';
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
 import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import { env } from '../config/env.js';
@@ -210,6 +212,68 @@ export class MasterAgent extends BaseAgent {
         }
       } catch (err) {
         logger.warn({ err, masterAgentId }, 'Failed to load company profile / products');
+      }
+
+      // 3c-iii. Action plan — generate (if not yet present) and gate the rest
+      // of the pipeline on user completion. Without this, outreach goes out
+      // missing facts the agent can't infer (links, comp band, calendly, etc.).
+      const existingPlan = (agent.actionPlan as ActionPlan | null) ?? null;
+      let actionPlan: ActionPlan;
+      if (!existingPlan) {
+        const items = buildActionPlan(
+          agent.useCase as 'sales' | 'recruitment' | 'custom',
+          pipelineContext,
+          agentConfig,
+        );
+        actionPlan = {
+          status: isActionPlanComplete(items) ? 'completed' : 'pending',
+          items,
+          generatedAt: new Date().toISOString(),
+        };
+      } else {
+        actionPlan = existingPlan;
+      }
+
+      const planNeedsAnswers = actionPlan.status === 'pending';
+      if (planNeedsAnswers) {
+        // Persist plan + flip status; user must answer before pipeline proceeds.
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.update(masterAgents).set({
+            actionPlan,
+            status: 'awaiting_action_plan',
+            config: { ...agentConfig, pipelineContext },
+            updatedAt: new Date(),
+          }).where(eq(masterAgents.id, masterAgentId));
+        });
+        const requiredOpen = actionPlan.items.filter(i => i.required && !i.answer).length;
+        this.sendMessage(null, 'system_alert', {
+          action: 'action_plan_required',
+          severity: 'warning',
+          requiredOpen,
+          totalItems: actionPlan.items.length,
+          message: `I need ${requiredOpen} answer${requiredOpen === 1 ? '' : 's'} from you before outreach can start. Please open the master agent and complete the Action Plan.`,
+        });
+        logger.info(
+          { masterAgentId, requiredOpen, totalItems: actionPlan.items.length },
+          'MasterAgent paused — action plan awaiting user answers',
+        );
+        return {
+          masterAgentId,
+          status: 'awaiting_action_plan',
+          actionPlan,
+          dispatched: 0,
+        };
+      }
+
+      // Action plan exists and is complete (or had nothing required) — persist
+      // it without altering status, then continue with strategist + dispatch.
+      if (!existingPlan) {
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.update(masterAgents).set({
+            actionPlan,
+            updatedAt: new Date(),
+          }).where(eq(masterAgents.id, masterAgentId));
+        });
       }
 
       // 3d. Run strategist INLINE so its search queries feed discovery

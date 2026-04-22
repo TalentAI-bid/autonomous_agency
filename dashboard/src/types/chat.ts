@@ -24,6 +24,13 @@ export interface PipelineProposalData {
   estimatedDuration: string;
 }
 
+export interface QuickReply {
+  id: string;
+  label: string;
+  replyText: string;
+  variant?: 'primary' | 'secondary';
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -32,6 +39,7 @@ export interface ChatMessage {
   content: string;
   metadata?: Record<string, unknown>;
   proposalData?: PipelineProposalData;
+  quickReplies?: QuickReply[];
   orderIndex: number;
   createdAt: string;
 }

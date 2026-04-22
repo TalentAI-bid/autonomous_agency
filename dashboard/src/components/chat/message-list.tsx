@@ -12,6 +12,7 @@ interface MessageListProps {
   onApprove: () => void;
   onRequestChanges: () => void;
   isApproving: boolean;
+  onQuickReply?: (replyText: string) => void;
 }
 
 export function MessageList({
@@ -21,6 +22,7 @@ export function MessageList({
   onApprove,
   onRequestChanges,
   isApproving,
+  onQuickReply,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -37,6 +39,7 @@ export function MessageList({
           onApprove={onApprove}
           onRequestChanges={onRequestChanges}
           isApproving={isApproving}
+          onQuickReply={onQuickReply}
         />
       ))}
       {streamingText !== undefined && (

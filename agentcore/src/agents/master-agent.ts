@@ -420,165 +420,171 @@ export class MasterAgent extends BaseAgent {
               );
             }
 
-            // If strategist says we need the Chrome extension, enqueue LinkedIn tasks.
-            // They stay 'pending' until the user connects their extension; then drain-on-reconnect dispatches them.
-            if (strategy.dataSourceStrategy?.needsChromeExtension) {
-              try {
+            // Dispatch company discovery. Hiring-signal scraping is server-side
+            // (public LinkedIn Jobs pages, no login) and must run regardless of
+            // `needsChromeExtension`. Industry-target search DOES need the
+            // extension (LinkedIn company search requires auth). Previously the
+            // entire block was gated on `needsChromeExtension`, which silently
+            // skipped hiring_signal alerts when the strategist set the flag to
+            // false. Fix 3: split the gate — hiring_signal runs unconditionally.
+            try {
+              const bdStrategy = strategy.bdStrategy || (agentConfig.bdStrategy as string) || 'hybrid';
+              const userRole = strategy.userRole || 'vendor';
+              const targetIndustries = strategy.targetIndustries ?? [];
+              const services = (agentConfig.services as string[]) ?? [];
+              const industries = pipelineContext.sales?.industries ?? [];
+              const locs = pipelineContext.locations ?? [];
+
+              let extensionTasksDispatched = 0;
+
+              // ─── Hiring signal path: server-side LinkedIn Jobs scrape ──
+              // LinkedIn Jobs search is PUBLIC (no login) — scrape via CRAWL4AI.
+              // Runs independently of `needsChromeExtension`.
+              if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
+                hiringSignalDispatched = true;
+                logger.info(
+                  { bdStrategy, masterAgentId, hasPipelineSteps: !!strategy.pipelineSteps?.length, needsChromeExtension: !!strategy.dataSourceStrategy?.needsChromeExtension },
+                  'Entering hiring_signal/hybrid dispatch block',
+                );
+                // Resolve jobTitle with explicit priority chain
+                const resolveJobTitle = (): { value: string; source: string } => {
+                  if (pipelineContext?.targetRoles?.[0]) {
+                    return { value: pipelineContext.targetRoles[0], source: 'pipelineContext.targetRoles' };
+                  }
+                  if ((agentConfig.targetRoles as string[])?.[0]) {
+                    return { value: (agentConfig.targetRoles as string[])[0], source: 'agentConfig.targetRoles' };
+                  }
+                  if (services[0]) {
+                    return { value: services[0], source: 'agentConfig.services' };
+                  }
+                  return { value: 'engineer', source: 'fallback' };
+                };
+                const { value: jobTitle, source: jobTitleSource } = resolveJobTitle();
+                logger.info({ jobTitle, jobTitleSource, masterAgentId }, 'Resolved jobTitle for LinkedIn Jobs search');
+
+                const LINKEDIN_SCRAPE_DELAY_MS = 8000;
+                const { searchLinkedInJobs } = await import('../tools/linkedin-jobs.tool.js');
+                let isFirstLocation = true;
+                let totalJobsFound = 0;
+                const perLocation: Array<{ location: string; count: number }> = [];
+                for (const loc of locs) {
+                  if (!isFirstLocation) {
+                    await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
+                  }
+                  isFirstLocation = false;
+                  try {
+                    const result = await searchLinkedInJobs(this.tenantId, jobTitle, loc, masterAgentId);
+                    logger.info(
+                      { masterAgentId, location: loc, companiesFound: result.companies.length },
+                      'Server-side LinkedIn Jobs scrape completed',
+                    );
+                    totalJobsFound += result.companies.length;
+                    perLocation.push({ location: loc, count: result.companies.length });
+                  } catch (err) {
+                    logger.warn({ err, masterAgentId, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
+                    perLocation.push({ location: loc, count: 0 });
+                  }
+                }
+
+                // Classify the aggregate outcome and, if weak, negotiate with
+                // the user via a search_quality_low system_alert. Persist a
+                // pendingSearchChoice so the route handler + chat fallback can
+                // re-apply the user's decision later. Pipeline execution
+                // continues — we don't block on user reply.
+                const outcome: 'empty' | 'thin' | 'ok' =
+                  totalJobsFound === 0 ? 'empty' : totalJobsFound < 10 ? 'thin' : 'ok';
+                logger.info(
+                  { masterAgentId, totalJobsFound, outcome, perLocation },
+                  'LinkedIn Jobs dispatch aggregate',
+                );
+
+                if (outcome !== 'ok') {
+                  try {
+                    const pendingSearchChoice = {
+                      jobTitle,
+                      locations: [...locs],
+                      perLocation,
+                      firedAt: new Date().toISOString(),
+                      totalFound: totalJobsFound,
+                    };
+                    await withTenant(this.tenantId, async (tx) => {
+                      await tx.update(masterAgents)
+                        .set({
+                          config: { ...agentConfig, pendingSearchChoice },
+                          updatedAt: new Date(),
+                        })
+                        .where(eq(masterAgents.id, masterAgentId));
+                    });
+                    (agentConfig as Record<string, unknown>).pendingSearchChoice = pendingSearchChoice;
+
+                    this.sendMessage(null, 'system_alert', {
+                      action: 'search_quality_low',
+                      severity: 'warning',
+                      outcome,
+                      totalFound: totalJobsFound,
+                      jobTitle,
+                      perLocation,
+                      message:
+                        outcome === 'empty'
+                          ? `I searched LinkedIn Jobs for "${jobTitle}" across ${locs.length} location(s) and found 0 companies. The keyword combo looks too narrow.`
+                          : `I found only ${totalJobsFound} companies for "${jobTitle}". Quality might be thin — happy to broaden.`,
+                      choices: [
+                        { id: 'continue', label: 'Continue with what I have' },
+                        { id: 'broaden_manual', label: 'Let me type a broader term' },
+                        { id: 'broaden_auto', label: 'Broaden it for me' },
+                      ],
+                    });
+                  } catch (persistErr) {
+                    logger.warn({ err: persistErr, masterAgentId }, 'Failed to persist pendingSearchChoice');
+                  }
+                }
+              }
+
+              // ─── Industry target path: search_companies (requires extension)
+              if (
+                (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') &&
+                strategy.dataSourceStrategy?.needsChromeExtension
+              ) {
                 const { enqueueExtensionTask } = await import('../services/extension-dispatcher.js');
-                const bdStrategy = strategy.bdStrategy || (agentConfig.bdStrategy as string) || 'hybrid';
-                const userRole = strategy.userRole || 'vendor';
-                const targetIndustries = strategy.targetIndustries ?? [];
-                const services = (agentConfig.services as string[]) ?? [];
-                const industries = pipelineContext.sales?.industries ?? [];
-                const locs = pipelineContext.locations ?? [];
+                let searchTerms: string[];
+                if (userRole === 'vendor' && targetIndustries.length > 0) {
+                  searchTerms = targetIndustries.slice(0, 5);
+                } else if (targetIndustries.length > 0) {
+                  searchTerms = targetIndustries.slice(0, 5);
+                } else if (industries.length > 0) {
+                  searchTerms = industries.slice(0, 5);
+                } else if (services.length > 0) {
+                  searchTerms = services.slice(0, 5);
+                } else {
+                  searchTerms = ['technology consulting'];
+                }
 
-                let dispatched = 0;
-
-                // ─── Hiring signal path: server-side LinkedIn Jobs scrape ──
-                // LinkedIn Jobs search is PUBLIC (no login) — scrape via CRAWL4AI
-                if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
-                  hiringSignalDispatched = true;
-                  logger.info(
-                    { bdStrategy, masterAgentId, hasPipelineSteps: !!strategy.pipelineSteps?.length },
-                    'Entering hiring_signal/hybrid dispatch block',
-                  );
-                  // Resolve jobTitle with explicit priority chain
-                  const resolveJobTitle = (): { value: string; source: string } => {
-                    if (pipelineContext?.targetRoles?.[0]) {
-                      return { value: pipelineContext.targetRoles[0], source: 'pipelineContext.targetRoles' };
-                    }
-                    if ((agentConfig.targetRoles as string[])?.[0]) {
-                      return { value: (agentConfig.targetRoles as string[])[0], source: 'agentConfig.targetRoles' };
-                    }
-                    if (services[0]) {
-                      return { value: services[0], source: 'agentConfig.services' };
-                    }
-                    return { value: 'engineer', source: 'fallback' };
-                  };
-                  const { value: jobTitle, source: jobTitleSource } = resolveJobTitle();
-                  logger.info({ jobTitle, jobTitleSource, masterAgentId }, 'Resolved jobTitle for LinkedIn Jobs search');
-
-                  const LINKEDIN_SCRAPE_DELAY_MS = 8000;
-                  const { searchLinkedInJobs } = await import('../tools/linkedin-jobs.tool.js');
-                  let isFirstLocation = true;
-                  let totalJobsFound = 0;
-                  const perLocation: Array<{ location: string; count: number }> = [];
+                for (const term of searchTerms) {
                   for (const loc of locs) {
-                    if (!isFirstLocation) {
-                      await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
-                    }
-                    isFirstLocation = false;
-                    try {
-                      const result = await searchLinkedInJobs(this.tenantId, jobTitle, loc, masterAgentId);
-                      logger.info(
-                        { masterAgentId, location: loc, companiesFound: result.companies.length },
-                        'Server-side LinkedIn Jobs scrape completed',
-                      );
-                      totalJobsFound += result.companies.length;
-                      perLocation.push({ location: loc, count: result.companies.length });
-                      dispatched++;
-                    } catch (err) {
-                      logger.warn({ err, masterAgentId, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
-                      perLocation.push({ location: loc, count: 0 });
-                    }
-                  }
-
-                  // Classify the aggregate outcome and, if weak, negotiate with
-                  // the user via a search_quality_low system_alert. Persist a
-                  // pendingSearchChoice so the route handler + chat fallback can
-                  // re-apply the user's decision later. Pipeline execution
-                  // continues — we don't block on user reply.
-                  const outcome: 'empty' | 'thin' | 'ok' =
-                    totalJobsFound === 0 ? 'empty' : totalJobsFound < 10 ? 'thin' : 'ok';
-                  logger.info(
-                    { masterAgentId, totalJobsFound, outcome, perLocation },
-                    'LinkedIn Jobs dispatch aggregate',
-                  );
-
-                  if (outcome !== 'ok') {
-                    try {
-                      const pendingSearchChoice = {
-                        jobTitle,
-                        locations: [...locs],
-                        perLocation,
-                        firedAt: new Date().toISOString(),
-                        totalFound: totalJobsFound,
-                      };
-                      await withTenant(this.tenantId, async (tx) => {
-                        await tx.update(masterAgents)
-                          .set({
-                            config: { ...agentConfig, pendingSearchChoice },
-                            updatedAt: new Date(),
-                          })
-                          .where(eq(masterAgents.id, masterAgentId));
-                      });
-                      (agentConfig as Record<string, unknown>).pendingSearchChoice = pendingSearchChoice;
-
-                      this.sendMessage(null, 'system_alert', {
-                        action: 'search_quality_low',
-                        severity: 'warning',
-                        outcome,
-                        totalFound: totalJobsFound,
-                        jobTitle,
-                        perLocation,
-                        message:
-                          outcome === 'empty'
-                            ? `I searched LinkedIn Jobs for "${jobTitle}" across ${locs.length} location(s) and found 0 companies. The keyword combo looks too narrow.`
-                            : `I found only ${totalJobsFound} companies for "${jobTitle}". Quality might be thin — happy to broaden.`,
-                        choices: [
-                          { id: 'continue', label: 'Continue with what I have' },
-                          { id: 'broaden_manual', label: 'Let me type a broader term' },
-                          { id: 'broaden_auto', label: 'Broaden it for me' },
-                        ],
-                      });
-                    } catch (persistErr) {
-                      logger.warn({ err: persistErr, masterAgentId }, 'Failed to persist pendingSearchChoice');
-                    }
+                    await enqueueExtensionTask({
+                      tenantId: this.tenantId,
+                      masterAgentId,
+                      site: 'linkedin',
+                      type: 'search_companies',
+                      params: { industry: term, location: loc, limit: 20 },
+                      priority: 7,
+                    });
+                    extensionTasksDispatched++;
                   }
                 }
 
-                // ─── Industry target path: search_companies ──────────────
-                if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
-                  let searchTerms: string[];
-                  if (userRole === 'vendor' && targetIndustries.length > 0) {
-                    searchTerms = targetIndustries.slice(0, 5);
-                  } else if (targetIndustries.length > 0) {
-                    searchTerms = targetIndustries.slice(0, 5);
-                  } else if (industries.length > 0) {
-                    searchTerms = industries.slice(0, 5);
-                  } else if (services.length > 0) {
-                    searchTerms = services.slice(0, 5);
-                  } else {
-                    searchTerms = ['technology consulting'];
-                  }
-
-                  for (const term of searchTerms) {
-                    for (const loc of locs) {
-                      await enqueueExtensionTask({
-                        tenantId: this.tenantId,
-                        masterAgentId,
-                        site: 'linkedin',
-                        type: 'search_companies',
-                        params: { industry: term, location: loc, limit: 20 },
-                        priority: 7,
-                      });
-                      dispatched++;
-                    }
-                  }
-                }
-
-                logger.info({ masterAgentId, dispatched, bdStrategy, locs }, 'Chrome-extension LinkedIn tasks enqueued');
-                if (dispatched > 0) {
+                logger.info({ masterAgentId, extensionTasksDispatched, bdStrategy, locs }, 'Chrome-extension LinkedIn tasks enqueued');
+                if (extensionTasksDispatched > 0) {
                   this.sendMessage(null, 'system_alert', {
                     action: 'extension_tasks_enqueued',
                     severity: 'info',
-                    count: dispatched,
-                    message: `Queued ${dispatched} LinkedIn search${dispatched > 1 ? 'es' : ''} for the Chrome extension. They will run as soon as the extension connects.`,
+                    count: extensionTasksDispatched,
+                    message: `Queued ${extensionTasksDispatched} LinkedIn search${extensionTasksDispatched > 1 ? 'es' : ''} for the Chrome extension. They will run as soon as the extension connects.`,
                   });
                 }
-              } catch (extErr) {
-                logger.warn({ err: extErr, masterAgentId }, 'Failed to enqueue Chrome-extension tasks');
               }
+            } catch (extErr) {
+              logger.warn({ err: extErr, masterAgentId }, 'Failed to dispatch LinkedIn tasks');
             }
 
             // Always persist latest strategist output to config so subsequent runs

@@ -109,6 +109,93 @@ Extract:
   }
 }
 
+interface QuickReply {
+  id: string;
+  label: string;
+  replyText: string;
+  variant?: 'primary' | 'secondary';
+}
+
+/** Parse <quick_replies>[{...}]</quick_replies> from the LLM response. If the
+ * tag is missing, synthesize chips from heuristics: A/B/C BD-strategy text +
+ * active pendingSearchChoice mentions. Returns the chips + the cleaned content
+ * (same as input content today — ChatBubble strips the tag itself, so no
+ * server-side stripping of the visible content is needed).
+ */
+function parseQuickReplies(
+  response: string,
+  opts: { pendingSearchChoice?: boolean } = {},
+): QuickReply[] | undefined {
+  // 1. Tag-based (authoritative) path
+  const match = response.match(/<quick_replies>\s*([\s\S]*?)\s*<\/quick_replies>/);
+  if (match) {
+    try {
+      const cleaned = match[1]!.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      const parsed = JSON.parse(cleaned) as unknown;
+      if (Array.isArray(parsed)) {
+        const valid = parsed
+          .filter((c): c is QuickReply =>
+            !!c && typeof (c as { id?: unknown }).id === 'string' &&
+            typeof (c as { label?: unknown }).label === 'string' &&
+            typeof (c as { replyText?: unknown }).replyText === 'string',
+          )
+          .slice(0, 4);
+        if (valid.length > 0) return valid;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to parse <quick_replies> JSON');
+    }
+  }
+
+  const lower = response.toLowerCase();
+
+  // 2. BD-strategy A/B/C heuristic (low-confidence fallback path)
+  const hasBdBlock =
+    lower.includes('hiring signal') && lower.includes('industry target') && (lower.includes('hybrid') || lower.includes('a)') || lower.includes('a.') || lower.includes('**a)**'));
+  if (hasBdBlock) {
+    return [
+      { id: 'bd_a', label: 'A — Hiring Signals', replyText: 'A', variant: 'secondary' },
+      { id: 'bd_b', label: 'B — Industry Target', replyText: 'B', variant: 'secondary' },
+      { id: 'bd_c', label: 'C — Hybrid', replyText: 'C', variant: 'primary' },
+    ];
+  }
+
+  // 3. Thin-search negotiation heuristic — only when we know a pending choice exists
+  if (opts.pendingSearchChoice) {
+    const mentionsSearch =
+      lower.includes('broaden') || lower.includes('thin') || lower.includes('only') ||
+      lower.includes('results') || lower.includes('companies found') || lower.includes('too narrow');
+    if (mentionsSearch) {
+      return [
+        { id: 'continue', label: 'Continue with what I have', replyText: 'Continue with what we have.', variant: 'secondary' },
+        { id: 'broaden_manual', label: 'I\'ll type a broader term', replyText: 'I want to broaden — I\'ll type a term.', variant: 'secondary' },
+        { id: 'broaden_auto', label: 'You choose a broader term', replyText: 'Go ahead, you choose the keywords.', variant: 'primary' },
+      ];
+    }
+  }
+
+  return undefined;
+}
+
+/** Heuristic: the user is delegating the keyword choice to the agent.
+ * Phrases like "you choose", "broaden it for me", "surprise me" map to
+ * choiceId=broaden_auto. Checked BEFORE looksLikeBroadenTerm — otherwise
+ * "you pick" could be mis-categorized as an affirmative short-circuit. */
+function looksLikeAutonomyGrant(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return false;
+  const patterns = [
+    'you choose', 'you pick', 'your call', 'your choice',
+    'be autonomous', 'go autonomous',
+    'broaden it', 'broaden yourself', 'broaden for me', 'broaden it for me',
+    'change the keywords', 'change keywords', 'change the term',
+    'go ahead and broaden', 'you decide', 'decide for me',
+    'surprise me', 'whatever you think', 'use your judgment', 'use your judgement',
+    'do what you think', 'pick for me', 'pick one for me',
+  ];
+  return patterns.some(p => lower.includes(p));
+}
+
 /** Heuristic: decide whether a user's free-text reply should be treated as a
  * broaden-manual search term when pendingSearchChoice is active. Affirmative
  * short phrases ("yes, continue", "sounds good") should NOT trigger broaden. */
@@ -273,30 +360,39 @@ export async function sendMessage(
     | { jobTitle: string; totalFound?: number; locations?: string[] }
     | undefined;
 
-  // Free-text broaden fallback: if a search negotiation is pending AND the
-  // user's latest message looks like a new search term (not an affirmative),
-  // route it through applySearchChoice before calling the chat LLM.
+  // Free-text broaden fallback: if a search negotiation is pending, inspect
+  // the user's latest message. Precedence: autonomy grant → broaden_auto;
+  // otherwise a broaden-like phrase → broaden_manual; otherwise let the LLM
+  // handle it (continue / unrelated chat).
   let searchFallbackNote: string | null = null;
-  if (
-    conversation.masterAgentId &&
-    pendingSearchChoiceRaw &&
-    looksLikeBroadenTerm(content)
-  ) {
+  if (conversation.masterAgentId && pendingSearchChoiceRaw && looksLikeAutonomyGrant(content)) {
+    try {
+      const outcome = await applySearchChoice(tenantId, conversation.masterAgentId, {
+        choiceId: 'broaden_auto',
+      } satisfies SearchChoicePayload);
+      searchFallbackNote = `[System] Autonomous broaden triggered — tried "${outcome.appliedTerm}" across ${outcome.locationCount} location(s); found ${outcome.totalFound} companies.`;
+      const [fresh] = await withTenant(tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+          .limit(1);
+      });
+      masterAgentConfig = (fresh?.config as Record<string, unknown>) ?? {};
+    } catch (err) {
+      logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Autonomy broaden fallback failed');
+    }
+  } else if (conversation.masterAgentId && pendingSearchChoiceRaw && looksLikeBroadenTerm(content)) {
     try {
       const outcome = await applySearchChoice(tenantId, conversation.masterAgentId, {
         choiceId: 'broaden_manual',
         userTerm: content.trim(),
       } satisfies SearchChoicePayload);
       searchFallbackNote = `[System] Free-text broaden triggered from chat — ran LinkedIn Jobs for "${outcome.appliedTerm}" across ${outcome.locationCount} location(s); found ${outcome.totalFound} companies.`;
-      // Reload the (potentially cleared) config so the prompt reflects reality.
-      if (conversation.masterAgentId) {
-        const [fresh] = await withTenant(tenantId, async (tx) => {
-          return tx.select({ config: masterAgents.config }).from(masterAgents)
-            .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
-            .limit(1);
-        });
-        masterAgentConfig = (fresh?.config as Record<string, unknown>) ?? {};
-      }
+      const [fresh] = await withTenant(tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+          .limit(1);
+      });
+      masterAgentConfig = (fresh?.config as Record<string, unknown>) ?? {};
     } catch (err) {
       logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Free-text broaden fallback failed');
     }
@@ -306,11 +402,13 @@ export async function sendMessage(
   // within the first two user messages. Persist high-confidence extractions.
   let inferredIntent: InferredIntent | undefined;
   const userMessageCountAfter = userMessageCountSoFar + 1; // including the current message
-  if (
-    conversation.masterAgentId &&
-    !masterAgentConfig.bdStrategy &&
-    userMessageCountAfter <= 2
-  ) {
+  // Fix 1: the classifier must fire during Create-Agent chat too, before a
+  // master-agent row exists. Read existingBdStrategy from either the saved
+  // master-agent config OR the conversation's extractedConfig snapshot.
+  const extractedCfg = (conversation.extractedConfig as Record<string, unknown> | null)?.config as Record<string, unknown> | undefined;
+  const existingBdStrategy =
+    (masterAgentConfig.bdStrategy as string | undefined) ?? (extractedCfg?.bdStrategy as string | undefined);
+  if (!existingBdStrategy && userMessageCountAfter <= 2) {
     const mission = await classifyMissionIntent(tenantId, content);
     if (mission && mission.bdStrategy) {
       const conf: 'high' | 'medium' = mission.confidence >= 0.9 ? 'high' : 'medium';
@@ -321,8 +419,8 @@ export async function sendMessage(
         locations: mission.locations?.length ? mission.locations : undefined,
       };
 
-      if (mission.confidence >= 0.9) {
-        // Merge, preferring user-authored non-empty values in the existing config.
+      if (mission.confidence >= 0.9 && conversation.masterAgentId) {
+        // Only persist to the master-agent row when one exists (post-approval).
         const existing = masterAgentConfig;
         const merged: Record<string, unknown> = { ...existing };
         const setIfEmpty = (key: string, value: unknown) => {
@@ -353,6 +451,11 @@ export async function sendMessage(
         } catch (err) {
           logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist classifier output');
         }
+      } else if (mission.confidence >= 0.9) {
+        logger.info(
+          { tenantId, conversationId, bdStrategy: mission.bdStrategy, confidence: mission.confidence },
+          'classifyMissionIntent inferred intent pre-approval (no masterAgent yet)',
+        );
       }
     }
   }
@@ -442,6 +545,12 @@ export async function sendMessage(
     }
   }
 
+  // Parse quick-reply chips (LLM tag → fallback heuristics). Skip when we've
+  // already produced a <pipeline_proposal> — the card owns its own buttons.
+  const quickReplies = messageType === 'pipeline_proposal'
+    ? undefined
+    : parseQuickReplies(response, { pendingSearchChoice: !!pendingSearchChoiceRaw });
+
   // Auto-enrich proposal with correct email config IDs (resilient to LLM mistakes)
   if (proposalData) {
     const config = (proposalData.config as Record<string, unknown>) ?? {};
@@ -471,6 +580,7 @@ export async function sendMessage(
   }
 
   // Save assistant message
+  const assistantMetadata = quickReplies ? { quickReplies } : undefined;
   const [assistantMsg] = await withTenant(tenantId, async (tx) => {
     return tx.insert(conversationMessages).values({
       conversationId,
@@ -478,6 +588,7 @@ export async function sendMessage(
       type: messageType,
       content: response,
       proposalData: proposalData,
+      metadata: assistantMetadata,
       orderIndex: maxOrder + 2,
     }).returning();
   });
@@ -590,11 +701,22 @@ export async function* sendMessageStream(
     | undefined;
 
   let searchFallbackNote: string | null = null;
-  if (
-    conversation.masterAgentId &&
-    pendingSearchChoiceRaw &&
-    looksLikeBroadenTerm(content)
-  ) {
+  if (conversation.masterAgentId && pendingSearchChoiceRaw && looksLikeAutonomyGrant(content)) {
+    try {
+      const outcome = await applySearchChoice(tenantId, conversation.masterAgentId, {
+        choiceId: 'broaden_auto',
+      } satisfies SearchChoicePayload);
+      searchFallbackNote = `[System] Autonomous broaden triggered — tried "${outcome.appliedTerm}" across ${outcome.locationCount} location(s); found ${outcome.totalFound} companies.`;
+      const [fresh] = await withTenant(tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)))
+          .limit(1);
+      });
+      masterAgentConfig = (fresh?.config as Record<string, unknown>) ?? {};
+    } catch (err) {
+      logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Autonomy broaden fallback failed (stream)');
+    }
+  } else if (conversation.masterAgentId && pendingSearchChoiceRaw && looksLikeBroadenTerm(content)) {
     try {
       const outcome = await applySearchChoice(tenantId, conversation.masterAgentId, {
         choiceId: 'broaden_manual',
@@ -614,11 +736,11 @@ export async function* sendMessageStream(
 
   let inferredIntent: InferredIntent | undefined;
   const userMessageCountAfter = userMessageCountSoFar + 1;
-  if (
-    conversation.masterAgentId &&
-    !masterAgentConfig.bdStrategy &&
-    userMessageCountAfter <= 2
-  ) {
+  // Fix 1 (stream): same relaxed gate as sendMessage.
+  const extractedCfgStream = (conversation.extractedConfig as Record<string, unknown> | null)?.config as Record<string, unknown> | undefined;
+  const existingBdStrategyStream =
+    (masterAgentConfig.bdStrategy as string | undefined) ?? (extractedCfgStream?.bdStrategy as string | undefined);
+  if (!existingBdStrategyStream && userMessageCountAfter <= 2) {
     const mission = await classifyMissionIntent(tenantId, content);
     if (mission && mission.bdStrategy) {
       const conf: 'high' | 'medium' = mission.confidence >= 0.9 ? 'high' : 'medium';
@@ -629,7 +751,7 @@ export async function* sendMessageStream(
         locations: mission.locations?.length ? mission.locations : undefined,
       };
 
-      if (mission.confidence >= 0.9) {
+      if (mission.confidence >= 0.9 && conversation.masterAgentId) {
         const existing = masterAgentConfig;
         const merged: Record<string, unknown> = { ...existing };
         const setIfEmpty = (key: string, value: unknown) => {
@@ -660,6 +782,11 @@ export async function* sendMessageStream(
         } catch (err) {
           logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist classifier output (stream)');
         }
+      } else if (mission.confidence >= 0.9) {
+        logger.info(
+          { tenantId, conversationId, bdStrategy: mission.bdStrategy, confidence: mission.confidence },
+          'classifyMissionIntent inferred intent pre-approval (stream, no masterAgent yet)',
+        );
       }
     }
   }
@@ -751,6 +878,11 @@ export async function* sendMessageStream(
     }
   }
 
+  // Parse quick-reply chips (stream variant)
+  const quickReplies = messageType === 'pipeline_proposal'
+    ? undefined
+    : parseQuickReplies(fullResponse, { pendingSearchChoice: !!pendingSearchChoiceRaw });
+
   // Auto-enrich proposal
   if (proposalData) {
     const config = (proposalData.config as Record<string, unknown>) ?? {};
@@ -774,6 +906,7 @@ export async function* sendMessageStream(
   }
 
   // Save assistant message
+  const assistantMetadata = quickReplies ? { quickReplies } : undefined;
   const [assistantMsg] = await withTenant(tenantId, async (tx) => {
     return tx.insert(conversationMessages).values({
       conversationId,
@@ -781,6 +914,7 @@ export async function* sendMessageStream(
       type: messageType,
       content: fullResponse,
       proposalData: proposalData,
+      metadata: assistantMetadata,
       orderIndex: maxOrder + 2,
     }).returning();
   });

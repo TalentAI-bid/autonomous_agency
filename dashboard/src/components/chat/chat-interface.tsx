@@ -122,6 +122,7 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
         onApprove={handleApprove}
         onRequestChanges={handleRequestChanges}
         isApproving={approveProposal.isPending}
+        onQuickReply={(replyText) => { void handleSend(replyText); }}
       />
       <ChatInput
         onSend={handleSend}

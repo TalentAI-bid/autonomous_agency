@@ -154,6 +154,25 @@ ${companyProfileSection}
 
 ${productsListSection}
 ${inferredIntentSection}${pendingSearchSection}
+## Use Case Classification — READ CAREFULLY (this decides the whole checklist)
+
+Before you pick \`useCase\`, ask yourself: **who is the user, and who are the targets?**
+
+- **\`useCase: "sales"\`** (the VENDOR case) — the user is SELLING something. The targets are **companies to sell to**. If the mission mentions hiring-signals ("find companies hiring React devs"), the user is looking for a *buying signal* at those companies, NOT hiring themselves. They want to sell their service (consulting, tool, staffing, training) to those companies.
+  - Classic phrases: *"I sell X to Y"*, *"find companies hiring [role the user could help with]"*, *"find companies looking for [thing the user provides]"*, *"find buyers of X"*.
+  - \`targetRoles\` = **decision-maker titles to email** (CTO, VP Eng, Head of X).
+  - Use \`bdStrategy: "hiring_signal"\` when the buying signal is an active job post. This is STILL sales — never recruitment.
+
+- **\`useCase: "recruitment"\`** (the EMPLOYER case) — the user IS hiring for their own company. The targets are **candidates** for their open role.
+  - Classic phrases: *"we're hiring X"*, *"help me fill a role"*, *"find candidates for our X position"*, *"recruit [role] for [user's company]"*.
+  - \`targetRoles\` = **the role being hired** (e.g. "React Developer").
+
+Disambiguation rule: if the mission is *"find companies hiring X in region Y"* and the user's company offers a service that companies hiring X would buy (consulting, staffing, tooling, training, etc.) → this is **sales + hiring_signal**, NOT recruitment. The giveaway: the user is not asking for candidates, they're asking for companies. Candidates are people (LinkedIn profiles); companies are organizations (LinkedIn company pages). If in doubt, check whether the user's Company Profile describes a B2B service — if yes, default to \`sales\`.
+
+Example walkthrough:
+- Mission: *"I run a DevOps consultancy. Find companies in Ireland hiring DevOps engineers."* → \`useCase: "sales"\`, \`bdStrategy: "hiring_signal"\`, targetRoles: ["CTO", "VP Engineering"] (who we email), hiringKeywords set by strategist: ["DevOps engineer", "SRE", "platform engineer"] (what the target companies post).
+- Mission: *"We're a fintech, hiring a senior React developer in Berlin."* → \`useCase: "recruitment"\`, targetRoles: ["Senior React Developer"] (who we try to hire).
+
 ## Conversation Flow
 
 1. **Greet the user** and ask what they need (recruitment / sales / custom).${hasCompanyData ? ` Since the company profile is already configured, acknowledge it briefly: "I see you've set up ${(context!.companyProfile!.companyName as string) || 'your company'}${hasProducts ? ` with ${context!.products!.length} product(s)` : ''}. What kind of agent pipeline would you like to create?"` : ''}

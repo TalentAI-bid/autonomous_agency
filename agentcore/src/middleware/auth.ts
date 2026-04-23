@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 import fjwt from '@fastify/jwt';
 import { env } from '../config/env.js';
 import { UnauthorizedError, ForbiddenError } from '../utils/errors.js';
+import { verifySession } from '../services/auth.service.js';
 
 type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
 
@@ -48,17 +49,28 @@ async function authPlugin(fastify: FastifyInstance) {
       );
       throw new UnauthorizedError('Authentication required');
     }
-
     const token = match[1]!.trim();
+
+    // Primary path: opaque Redis session (dashboard login).
+    const session = await verifySession(token);
+    if (session) {
+      request.tenantId = session.tenantId;
+      request.userId = session.userId;
+      request.userRole = session.role;
+      return;
+    }
+
+    // Fallback: signed JWT (Chrome extension popup uses @fastify/jwt tokens).
     try {
       const decoded = fastify.jwt.verify<JWTPayload>(token);
       request.tenantId = decoded.tenantId;
       request.userId = decoded.userId;
       request.userRole = decoded.role;
+      return;
     } catch (err) {
       request.log.warn(
         { url: request.url, err: err instanceof Error ? err.message : String(err) },
-        'Auth rejected: token verify threw',
+        'Auth rejected: no Redis session and JWT verify failed',
       );
       throw new UnauthorizedError('Invalid or expired token');
     }

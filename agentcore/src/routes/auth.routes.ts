@@ -6,7 +6,8 @@ import { users, tenants, userTenants } from '../db/schema/index.js';
 import {
   hashPassword,
   verifyPassword,
-  generateAccessToken,
+  createSession,
+  destroySession,
 } from '../services/auth.service.js';
 import { createTenant } from '../services/tenant.service.js';
 import { ValidationError, UnauthorizedError } from '../utils/errors.js';
@@ -60,7 +61,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
       role: 'owner',
     });
 
-    const accessToken = generateAccessToken(fastify, {
+    const token = await createSession({
       tenantId: tenant.id,
       userId: user!.id,
       role: 'owner',
@@ -68,7 +69,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
     return reply.status(201).send({
       data: {
-        token: accessToken,
+        token,
         user: { id: user!.id, email: user!.email, name: user!.name, role: user!.role },
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
         workspaces: [{ id: tenant.id, name: tenant.name, slug: tenant.slug, role: 'owner' }],
@@ -90,7 +91,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) throw new UnauthorizedError('Invalid credentials');
 
-    const accessToken = generateAccessToken(fastify, {
+    const token = await createSession({
       tenantId: user.tenantId,
       userId: user.id,
       role: user.role,
@@ -110,7 +111,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
     return {
       data: {
-        token: accessToken,
+        token,
         user: { id: user.id, email: user.email, name: user.name, role: user.role },
         tenant: tenant ? { id: tenant.id, name: tenant.name, slug: tenant.slug } : undefined,
         workspaces,
@@ -118,9 +119,19 @@ export default async function authRoutes(fastify: FastifyInstance) {
     };
   });
 
-  // POST /api/auth/logout — client-driven; the JWT is self-contained so the
-  // server just clears any stale refresh-token cookie left by older clients.
-  fastify.post('/logout', async (_request, reply) => {
+  // POST /api/auth/logout — deletes the Redis session for the Bearer token,
+  // so the token stops working everywhere immediately. Best-effort: we never
+  // fail logout even if the session was already gone or the header is missing.
+  fastify.post('/logout', async (request, reply) => {
+    const header = request.headers.authorization ?? '';
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    if (match) {
+      try {
+        await destroySession(match[1]!.trim());
+      } catch (err) {
+        request.log.warn({ err }, 'destroySession failed during /logout');
+      }
+    }
     reply.clearCookie('refreshToken', { path: '/' });
     return { success: true };
   });

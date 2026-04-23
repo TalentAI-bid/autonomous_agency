@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { tenants, userTenants } from '../db/schema/index.js';
 import { createTenant } from '../services/tenant.service.js';
-import { generateAccessToken } from '../services/auth.service.js';
+import { createSession, destroySession } from '../services/auth.service.js';
 import { NotFoundError, ForbiddenError } from '../utils/errors.js';
 
 const createWorkspaceSchema = z.object({
@@ -81,11 +81,19 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundError('Workspace', tenantId);
 
-    const accessToken = generateAccessToken(fastify, {
+    const token = await createSession({
       tenantId: tenant.id,
       userId: request.userId,
       role: membership.role,
     });
+
+    // Invalidate the previous session so we don't leave a stale token that
+    // still points at the old workspace context.
+    const header = request.headers.authorization ?? '';
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    if (match) {
+      try { await destroySession(match[1]!.trim()); } catch { /* non-fatal */ }
+    }
 
     const workspaces = await db.select({
       id: tenants.id,
@@ -99,7 +107,7 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
 
     return {
       data: {
-        token: accessToken,
+        token,
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
         workspaces,
       },

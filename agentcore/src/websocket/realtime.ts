@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import { subRedis } from '../queues/setup.js';
+import { verifySession } from '../services/auth.service.js';
 import logger from '../utils/logger.js';
 
 /** Track active connections per tenant */
@@ -24,14 +25,23 @@ async function realtimePlugin(fastify: FastifyInstance) {
 
     let tenantId: string;
     let userId: string;
-    try {
-      const decoded = fastify.jwt.verify<{ tenantId: string; userId: string }>(token);
-      tenantId = decoded.tenantId;
-      userId = decoded.userId;
-    } catch {
-      socket.send(JSON.stringify({ error: 'Invalid token' }));
-      socket.close(4001, 'Unauthorized');
-      return;
+
+    // Primary path: opaque Redis session (dashboard).
+    const session = await verifySession(token);
+    if (session) {
+      tenantId = session.tenantId;
+      userId = session.userId;
+    } else {
+      // Fallback: JWT (extension popup / legacy clients).
+      try {
+        const decoded = fastify.jwt.verify<{ tenantId: string; userId: string }>(token);
+        tenantId = decoded.tenantId;
+        userId = decoded.userId;
+      } catch {
+        socket.send(JSON.stringify({ error: 'Invalid token' }));
+        socket.close(4001, 'Unauthorized');
+        return;
+      }
     }
 
     // Register connection

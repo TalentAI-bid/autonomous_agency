@@ -97,5 +97,13 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       agentMessages: [message, ...state.agentMessages].slice(0, MAX_EVENTS),
     })),
 
-  clear: () => set({ events: [], agentStatuses: {}, contactCounts: {}, agentLiveActions: {}, agentMessages: [] }),
+  clear: () =>
+    set({
+      connected: false,
+      events: [],
+      agentStatuses: {},
+      contactCounts: {},
+      agentLiveActions: {},
+      agentMessages: [],
+    }),
 }));

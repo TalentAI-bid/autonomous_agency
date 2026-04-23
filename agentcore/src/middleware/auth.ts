@@ -39,12 +39,27 @@ async function authPlugin(fastify: FastifyInstance) {
   });
 
   fastify.decorate('authenticate', async function (request: FastifyRequest, _reply: FastifyReply) {
+    const header = request.headers.authorization ?? '';
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    if (!match) {
+      request.log.warn(
+        { url: request.url, hasAuth: !!request.headers.authorization },
+        'Auth rejected: missing or malformed Authorization header',
+      );
+      throw new UnauthorizedError('Authentication required');
+    }
+
+    const token = match[1]!.trim();
     try {
-      const decoded = await request.jwtVerify<JWTPayload>();
+      const decoded = fastify.jwt.verify<JWTPayload>(token);
       request.tenantId = decoded.tenantId;
       request.userId = decoded.userId;
       request.userRole = decoded.role;
-    } catch (_err) {
+    } catch (err) {
+      request.log.warn(
+        { url: request.url, err: err instanceof Error ? err.message : String(err) },
+        'Auth rejected: token verify threw',
+      );
       throw new UnauthorizedError('Invalid or expired token');
     }
   });

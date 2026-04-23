@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -27,7 +28,9 @@ function initials(source?: string | null) {
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const connected = useRealtimeStore((s) => s.connected);
+  const resetRealtime = useRealtimeStore((s) => s.clear);
   const { user, tenant } = useAuthStore();
   const logout = useAuthStore((s) => s.logout);
   const { data: agents } = useAgents();
@@ -41,6 +44,11 @@ export function Sidebar() {
       // best-effort — the client-side state clear below is what matters
     }
     logout();
+    queryClient.clear();
+    resetRealtime();
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('agentcore-auth');
+    }
     router.replace('/login');
   }
 

@@ -4,10 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { tenants, userTenants } from '../db/schema/index.js';
 import { createTenant } from '../services/tenant.service.js';
-import {
-  generateAccessToken,
-  generateRefreshToken,
-} from '../services/auth.service.js';
+import { generateAccessToken } from '../services/auth.service.js';
 import { NotFoundError, ForbiddenError } from '../utils/errors.js';
 
 const createWorkspaceSchema = z.object({
@@ -70,7 +67,6 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
 
     const { tenantId } = parsed.data;
 
-    // Verify user belongs to this workspace
     const [membership] = await db.select({
       role: userTenants.role,
     })
@@ -82,29 +78,15 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
       throw new ForbiddenError('You do not belong to this workspace');
     }
 
-    // Look up tenant
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundError('Workspace', tenantId);
 
-    // Issue new JWT
     const accessToken = generateAccessToken(fastify, {
       tenantId: tenant.id,
       userId: request.userId,
       role: membership.role,
     });
 
-    // Issue new refresh token
-    const refreshToken = await generateRefreshToken(request.userId, tenant.id);
-
-    reply.setCookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/',
-    });
-
-    // Fetch updated workspaces list
     const workspaces = await db.select({
       id: tenants.id,
       name: tenants.name,

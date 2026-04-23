@@ -12,6 +12,8 @@ import {
 } from '../services/auth.service.js';
 import { ValidationError, UnauthorizedError } from '../utils/errors.js';
 import { pubRedis } from '../queues/setup.js';
+import { env } from '../config/env.js';
+import { readLatest } from './extension-distribution.routes.js';
 import logger from '../utils/logger.js';
 
 function generateApiKey(): { key: string; hash: string } {
@@ -72,6 +74,38 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
         tenant: tenant ? { id: tenant.id, name: tenant.name, slug: tenant.slug } : undefined,
       },
     };
+  });
+
+  // GET /api/extension/latest — current released version, download URLs, notes.
+  // Used by the dashboard install page and the extension itself.
+  fastify.get('/latest', async (_request, reply) => {
+    try {
+      const latest = await readLatest();
+      return {
+        data: {
+          version: latest.version,
+          extensionId: latest.extensionId,
+          zipUrl: `${env.PUBLIC_API_URL}/extension/talentai-v${latest.version}.zip`,
+          crxUrl: `${env.PUBLIC_API_URL}/extension/talentai-v${latest.version}.crx`,
+          releaseNotes: latest.releaseNotes ?? '',
+          releasedAt: latest.releasedAt ?? null,
+          sizeBytes: latest.sizeBytes ?? null,
+        },
+      };
+    } catch (err) {
+      logger.warn({ err }, 'Extension latest.json not available');
+      return reply.code(503).send({ error: 'No extension release available yet' });
+    }
+  });
+
+  // POST /api/extension/event — lightweight telemetry hook.
+  fastify.post('/event', async (request) => {
+    const body = (request.body ?? {}) as { event?: string; version?: string };
+    logger.info(
+      { event: body.event, version: body.version },
+      'Extension event',
+    );
+    return { data: { ok: true } };
   });
 
   // POST /api/extension/auth/refresh   { refreshToken }

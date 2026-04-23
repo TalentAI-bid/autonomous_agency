@@ -44,6 +44,7 @@ import opportunityRoutes from './routes/opportunity.routes.js';
 import agentRoomRoutes from './routes/agent-room.routes.js';
 import linkedinRoutes from './routes/linkedin.routes.js';
 import extensionRoutes from './routes/extension.routes.js';
+import extensionDistributionRoutes from './routes/extension-distribution.routes.js';
 import productRoutes from './routes/product.routes.js';
 import workspaceRoutes from './routes/workspace.routes.js';
 import copilotRoutes from './routes/copilot.routes.js';
@@ -181,6 +182,11 @@ async function buildApp() {
 
   // Tracking pixel route — registered WITHOUT /api prefix (email clients hit this directly)
   await fastify.register(trackingRoutes, { prefix: '/track' });
+
+  // Extension distribution — public CRX + updates.xml live at `/extension/*`
+  // (no /api prefix) because Chrome will call these URLs literally as they
+  // appear in manifest.json `update_url`.
+  await fastify.register(extensionDistributionRoutes, { prefix: '/extension' });
 
   return fastify;
 }

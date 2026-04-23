@@ -7,9 +7,6 @@ import {
   hashPassword,
   verifyPassword,
   generateAccessToken,
-  generateRefreshToken,
-  rotateRefreshToken,
-  invalidateRefreshToken,
 } from '../services/auth.service.js';
 import { createTenant } from '../services/tenant.service.js';
 import { ValidationError, UnauthorizedError } from '../utils/errors.js';
@@ -37,20 +34,17 @@ export default async function authRoutes(fastify: FastifyInstance) {
     }
     const { email, password, name, tenantName, tenantSlug, productType } = parsed.data;
 
-    // Check if email already exists
     const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (existing.length > 0) {
       throw new ValidationError('Email already registered');
     }
 
-    // Create tenant
     const tenant = await createTenant({
       name: tenantName,
       slug: tenantSlug,
       productType,
     });
 
-    // Create owner user
     const passwordHash = await hashPassword(password);
     const [user] = await db.insert(users).values({
       tenantId: tenant.id,
@@ -60,27 +54,16 @@ export default async function authRoutes(fastify: FastifyInstance) {
       role: 'owner',
     }).returning();
 
-    // Link user to tenant in user_tenants
     await db.insert(userTenants).values({
       userId: user!.id,
       tenantId: tenant.id,
       role: 'owner',
     });
 
-    // Generate tokens
     const accessToken = generateAccessToken(fastify, {
       tenantId: tenant.id,
       userId: user!.id,
       role: 'owner',
-    });
-    const refreshToken = await generateRefreshToken(user!.id, tenant.id);
-
-    reply.setCookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
-      path: '/',
     });
 
     return reply.status(201).send({
@@ -94,7 +77,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
   });
 
   // POST /api/auth/login
-  fastify.post('/login', async (request, reply) => {
+  fastify.post('/login', async (request) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new ValidationError('Invalid input', parsed.error.flatten());
@@ -112,17 +95,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
       userId: user.id,
       role: user.role,
     });
-    const refreshToken = await generateRefreshToken(user.id, user.tenantId);
 
-    reply.setCookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/',
-    });
-
-    // Look up tenant + all workspaces for response
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, user.tenantId)).limit(1);
 
     const workspaces = await db.select({
@@ -145,62 +118,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
     };
   });
 
-  // POST /api/auth/refresh
-  fastify.post('/refresh', async (request, reply) => {
-    const token = (request.cookies as Record<string, string>).refreshToken;
-    if (!token) throw new UnauthorizedError('No refresh token');
-
-    const result = await rotateRefreshToken(token);
-    if (!result) throw new UnauthorizedError('Invalid refresh token');
-
-    // Look up user for role
-    const [user] = await db.select().from(users).where(eq(users.id, result.userId)).limit(1);
-    if (!user) throw new UnauthorizedError('User not found');
-
-    const accessToken = generateAccessToken(fastify, {
-      tenantId: result.tenantId,
-      userId: result.userId,
-      role: user.role,
-    });
-
-    reply.setCookie('refreshToken', result.newToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/',
-    });
-
-    // Return user + tenant so the client can recover full session on cold load
-    // without a second round-trip.
-    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId)).limit(1);
-
-    const workspaces = await db.select({
-      id: tenants.id,
-      name: tenants.name,
-      slug: tenants.slug,
-      role: userTenants.role,
-    })
-      .from(userTenants)
-      .innerJoin(tenants, eq(userTenants.tenantId, tenants.id))
-      .where(eq(userTenants.userId, user.id));
-
-    return {
-      data: {
-        token: accessToken,
-        user: { id: user.id, email: user.email, name: user.name, role: user.role },
-        tenant: tenant ? { id: tenant.id, name: tenant.name, slug: tenant.slug } : undefined,
-        workspaces,
-      },
-    };
-  });
-
-  // POST /api/auth/logout
-  fastify.post('/logout', async (request, reply) => {
-    const token = (request.cookies as Record<string, string>).refreshToken;
-    if (token) {
-      await invalidateRefreshToken(token);
-    }
+  // POST /api/auth/logout — client-driven; the JWT is self-contained so the
+  // server just clears any stale refresh-token cookie left by older clients.
+  fastify.post('/logout', async (_request, reply) => {
     reply.clearCookie('refreshToken', { path: '/' });
     return { success: true };
   });

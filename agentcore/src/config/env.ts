@@ -50,6 +50,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),
   PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
+  // Directory containing extension release artefacts (talentai-v*.zip,
+  // talentai-v*.crx, latest.json). Populated by extension/scripts/release.sh.
+  EXTENSION_RELEASES_DIR: z.string().default('/opt/autonomous_agency/extension-releases'),
   // Comma-separated list of allowed CORS origins. `chrome-extension://*` is
   // always allowed automatically (extension popup → backend).
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173'),

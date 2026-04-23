@@ -1,14 +1,12 @@
-import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
+import axios, { type AxiosInstance, type AxiosResponse, AxiosError } from 'axios';
 import type { ApiResponse, PaginatedResponse } from '@/types';
 import { useAuthStore } from '@/stores/auth.store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-// Create axios instance
 const axiosInstance: AxiosInstance = axios.create({
   baseURL: `${API_URL}/api`,
   headers: { 'Content-Type': 'application/json' },
-  withCredentials: true, // for refresh token cookie
 });
 
 let onUnauthorized: (() => void) | null = null;
@@ -17,9 +15,9 @@ export function setAuthInterceptors(unauthorizedHandler: () => void) {
   onUnauthorized = unauthorizedHandler;
 }
 
-// Request interceptor — read token straight from the store on every request so
+// Request interceptor — read token live from the store on every request so
 // there is no window where a child useQuery effect can fire before a parent
-// useEffect assigns the token getter.
+// useEffect wires up auth.
 axiosInstance.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) {
@@ -28,48 +26,13 @@ axiosInstance.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor — handle 401 with refresh
-let isRefreshing = false;
-let refreshQueue: Array<(token: string) => void> = [];
-
+// Response interceptor — auth is a single 7-day JWT, no refresh machinery.
+// On 401, the token is either missing or expired; bounce the user to /login.
 axiosInstance.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const original = error.config;
-    // CORS-blocked 401s appear as network errors with no response
-    const is401 = error.response?.status === 401;
-    const isCorsBlocked = !error.response && error.code === 'ERR_NETWORK';
-    if ((is401 || isCorsBlocked) && !original._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          refreshQueue.push((token) => {
-            original.headers.Authorization = `Bearer ${token}`;
-            resolve(axiosInstance(original));
-          });
-        });
-      }
-
-      original._retry = true;
-      isRefreshing = true;
-
-      try {
-        const res = await axiosInstance.post<{ data: { token: string } }>('/auth/refresh');
-        const newToken = res.data.data.token;
-
-        useAuthStore.getState().setToken(newToken);
-
-        refreshQueue.forEach((cb) => cb(newToken));
-        refreshQueue = [];
-        isRefreshing = false;
-
-        original.headers.Authorization = `Bearer ${newToken}`;
-        return axiosInstance(original);
-      } catch {
-        isRefreshing = false;
-        refreshQueue = [];
-        onUnauthorized?.();
-        return Promise.reject(error);
-      }
+  (error: AxiosError) => {
+    if (error.response?.status === 401) {
+      onUnauthorized?.();
     }
     return Promise.reject(error);
   },

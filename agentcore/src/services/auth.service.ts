@@ -5,8 +5,8 @@ import type { Redis } from 'ioredis';
 import { createRedisConnection } from '../queues/setup.js';
 
 const BCRYPT_ROUNDS = 12;
-const ACCESS_TOKEN_EXPIRY = '15m';
-const REFRESH_TOKEN_EXPIRY_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const ACCESS_TOKEN_EXPIRY = '7d';
+const REFRESH_TOKEN_EXPIRY_SECONDS = 7 * 24 * 60 * 60; // 7 days — used by extension flow only
 
 let redis: Redis | null = null;
 

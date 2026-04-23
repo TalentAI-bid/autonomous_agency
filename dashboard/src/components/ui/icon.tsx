@@ -7,7 +7,7 @@ export type IconName =
   | 'arrowUp' | 'arrowDn' | 'check' | 'x' | 'eye'
   | 'brain' | 'zap' | 'doc' | 'globe' | 'calendar'
   | 'target' | 'radio' | 'send' | 'msg' | 'database'
-  | 'star' | 'reply' | 'commandLine';
+  | 'star' | 'reply' | 'commandLine' | 'signOut';
 
 const PATHS: Record<IconName, ReactElement> = {
   dash:   <><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></>,
@@ -45,6 +45,7 @@ const PATHS: Record<IconName, ReactElement> = {
   star:   <><path d="M12 3l2.6 6.2 6.4.5-4.9 4.3 1.5 6.5L12 17l-5.6 3.5 1.5-6.5L3 9.7l6.4-.5L12 3z"/></>,
   reply:  <><path d="M9 17L4 12l5-5M4 12h12a4 4 0 014 4v3"/></>,
   commandLine: <><path d="M4 17l6-6-6-6M12 19h8"/></>,
+  signOut: <><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H3"/></>,
 };
 
 export function Icon({

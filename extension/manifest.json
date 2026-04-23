@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "TalentAI Scraper",
-  "version": "0.1.0",
-  "description": "Feeds LinkedIn, Google Maps, and Crunchbase data from your authenticated browser sessions into your TalentAI backend.",
+  "name": "TalentAI Workspace",
+  "short_name": "TalentAI",
+  "version": "1.0.0",
+  "description": "Save LinkedIn pages to your TalentAI workspace for lead research and recruitment.",
+
+  "__MUST_SET_KEY__": "Paste the base64 public key from `extension/scripts/release.sh` (Part 1 setup) as the \"key\" field below, then delete this __MUST_SET_KEY__ line. Without a stable key, the extension ID rotates on every reload and auto-update breaks.",
+
+  "update_url": "https://agents.api.talentailabs.com/extension/updates.xml",
+
   "permissions": ["storage", "activeTab", "scripting", "alarms", "tabs"],
   "host_permissions": [
     "*://*.linkedin.com/*",

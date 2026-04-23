@@ -54,8 +54,6 @@ class WebSocketManager {
 
       this.ws.onopen = () => {
         this.reconnectDelay = 1000;
-        // Prefer the freshest token from the store (it may have been rotated
-        // by an axios-driven /auth/refresh since this connection was opened).
         const liveToken = useAuthStore.getState().token ?? this.token;
         if (liveToken) {
           this.token = liveToken;

@@ -76,9 +76,22 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
     };
   });
 
-  // GET /api/extension/latest — current released version, download URLs, notes.
-  // Used by the dashboard install page and the extension itself.
+  // GET /api/extension/latest — shareable download link.
+  // 302-redirects to the signed ZIP of the current release so users can click
+  // this URL directly (from emails, docs, etc.) and get the file.
   fastify.get('/latest', async (_request, reply) => {
+    try {
+      const latest = await readLatest();
+      const zipUrl = `${env.PUBLIC_API_URL}/extension/talentai-v${latest.version}.zip`;
+      return reply.redirect(zipUrl, 302);
+    } catch (err) {
+      logger.warn({ err }, 'Extension latest.json not available');
+      return reply.code(503).send({ error: 'No extension release available yet' });
+    }
+  });
+
+  // GET /api/extension/latest/info — JSON metadata for the dashboard install page.
+  fastify.get('/latest/info', async (_request, reply) => {
     try {
       const latest = await readLatest();
       return {
@@ -87,6 +100,7 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           extensionId: latest.extensionId,
           zipUrl: `${env.PUBLIC_API_URL}/extension/talentai-v${latest.version}.zip`,
           crxUrl: `${env.PUBLIC_API_URL}/extension/talentai-v${latest.version}.crx`,
+          downloadUrl: `${env.PUBLIC_API_URL}/api/extension/latest`,
           releaseNotes: latest.releaseNotes ?? '',
           releasedAt: latest.releasedAt ?? null,
           sizeBytes: latest.sizeBytes ?? null,

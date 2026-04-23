@@ -31,6 +31,7 @@ type LatestExtensionRelease = {
   extensionId: string;
   zipUrl: string;
   crxUrl: string;
+  downloadUrl: string;
   releaseNotes: string;
   releasedAt: string | null;
   sizeBytes: number | null;
@@ -124,12 +125,13 @@ export default function LinkedInExtensionPage() {
   const [tab, setTab] = useState<TabKey>('install');
   const latestQ = useQuery<LatestExtensionRelease>({
     queryKey: ['ext-latest'],
-    queryFn: () => apiGet<LatestExtensionRelease>('/extension/latest'),
+    queryFn: () => apiGet<LatestExtensionRelease>('/extension/latest/info'),
     // Don't hammer a 503 if no release has been cut yet.
     retry: false,
     staleTime: 60_000,
   });
   const latest = latestQ.data;
+  const downloadHref = latest?.downloadUrl ?? latest?.zipUrl;
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-10">
@@ -162,11 +164,11 @@ export default function LinkedInExtensionPage() {
             <Button
               size="lg"
               className="gap-2"
-              disabled={!latest?.zipUrl}
-              asChild={!!latest?.zipUrl}
+              disabled={!downloadHref}
+              asChild={!!downloadHref}
             >
-              {latest?.zipUrl ? (
-                <a href={latest.zipUrl} download>
+              {downloadHref ? (
+                <a href={downloadHref} download>
                   <Download className="w-4 h-4" />
                   Download the extension
                 </a>

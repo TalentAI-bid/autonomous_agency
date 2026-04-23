@@ -11,12 +11,14 @@ interface AuthState {
   tenantId: string | null;
   workspaces: Workspace[];
   isAuthenticated: boolean;
+  hasHydrated: boolean;
 
   login: (token: string, user: User, tenant: Tenant, workspaces?: Workspace[]) => void;
   logout: () => void;
   setToken: (token: string) => void;
   setWorkspaces: (workspaces: Workspace[]) => void;
   switchWorkspace: (token: string, tenant: Tenant, workspaces: Workspace[]) => void;
+  setHasHydrated: (v: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -28,6 +30,7 @@ export const useAuthStore = create<AuthState>()(
       tenantId: null,
       workspaces: [],
       isAuthenticated: false,
+      hasHydrated: false,
 
       login: (token, user, tenant, workspaces) =>
         set({
@@ -44,11 +47,13 @@ export const useAuthStore = create<AuthState>()(
 
       switchWorkspace: (token, tenant, workspaces) =>
         set({ token, tenant, tenantId: tenant.id, workspaces }),
+
+      setHasHydrated: (v) => set({ hasHydrated: v }),
     }),
     {
       name: 'agentcore-auth',
       storage: createJSONStorage(() =>
-        typeof window !== 'undefined' ? sessionStorage : {
+        typeof window !== 'undefined' ? localStorage : {
           getItem: () => null,
           setItem: () => {},
           removeItem: () => {},
@@ -62,6 +67,9 @@ export const useAuthStore = create<AuthState>()(
         workspaces: state.workspaces,
         isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     },
   ),
 );

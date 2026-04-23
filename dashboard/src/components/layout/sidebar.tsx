@@ -42,6 +42,10 @@ export function Sidebar() {
     { href: '/crm', label: 'Pipeline', icon: 'deal' },
     { href: '/analytics', label: 'Analytics', icon: 'chart' },
   ];
+  const setup: NavItem[] = [
+    { href: '/settings/company', label: 'Company Profile', icon: 'flag' },
+    { href: '/settings/products', label: 'Products', icon: 'zap' },
+  ];
   const tools: NavItem[] = [
     { href: '/mailbox', label: 'Inbox', icon: 'mail' },
     { href: '/schedule', label: 'Meetings', icon: 'calendar' },
@@ -76,6 +80,8 @@ export function Sidebar() {
         {workspace.map(renderItem)}
         <div className="nav-section">Data</div>
         {data.map(renderItem)}
+        <div className="nav-section">Setup</div>
+        {setup.map(renderItem)}
         <div className="nav-section">Tools</div>
         {tools.map(renderItem)}
       </div>

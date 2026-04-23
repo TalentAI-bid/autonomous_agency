@@ -7,6 +7,7 @@ import { setAuthInterceptors } from '@/lib/api';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { StatusBar } from '@/components/layout/status-bar';
+import { OnboardingBanner } from '@/components/layout/onboarding-banner';
 import { useWebSocket } from '@/hooks/use-websocket';
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
@@ -16,6 +17,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="main">
         <Header />
+        <OnboardingBanner />
         <main style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>{children}</main>
         <StatusBar />
       </div>
@@ -24,7 +26,10 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, token, logout } = useAuthStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.token);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+  const logout = useAuthStore((s) => s.logout);
   const router = useRouter();
 
   useEffect(() => {
@@ -38,14 +43,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [logout, router]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!hasHydrated) return;
+    if (!isAuthenticated || !token) {
       router.replace('/login');
     }
-  }, [isAuthenticated, router]);
+  }, [hasHydrated, isAuthenticated, token, router]);
 
-  if (!isAuthenticated || !token) {
-    return null;
-  }
+  if (!hasHydrated) return null;
+  if (!isAuthenticated || !token) return null;
 
   return <DashboardContent>{children}</DashboardContent>;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,11 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { User, Building, Key, Bell } from 'lucide-react';
+import { User, Building, Key, Bell, Building2, Package, ChevronRight } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
 
   function copyToken() {
     if (token) {
@@ -26,6 +27,45 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground text-sm mt-1">Manage your account and workspace preferences</p>
+      </div>
+
+      {/* Company Profile + Products — quick access */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card
+          onClick={() => router.push('/settings/company')}
+          className="cursor-pointer transition-colors hover:border-primary"
+        >
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Building2 className="w-4 h-4" />
+                Company Profile
+              </span>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardTitle>
+            <CardDescription>
+              Your company identity, positioning, and ideal customer profile
+            </CardDescription>
+          </CardHeader>
+        </Card>
+
+        <Card
+          onClick={() => router.push('/settings/products')}
+          className="cursor-pointer transition-colors hover:border-primary"
+        >
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Package className="w-4 h-4" />
+                Products & Services
+              </span>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardTitle>
+            <CardDescription>
+              Manage what you sell — agents use this to personalize outreach
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
 
       {/* Profile */}

@@ -5,11 +5,15 @@ import { env } from '../config/env.js';
 
 async function rateLimitPlugin(fastify: FastifyInstance) {
   await fastify.register(rateLimit, {
-    max: 100,
+    // Dashboard + workers open many parallel queries per page (agents, contacts,
+    // companies, analytics, refetch intervals, WS invalidations). 100/min is
+    // way too low and starves a legitimate logged-in user in seconds.
+    max: 5000,
     timeWindow: '1 minute',
-    redis: undefined, // Will use in-memory by default; set Redis client for production
+    redis: undefined, // In-memory is fine for a single node; Redis-backed is per-instance only.
     keyGenerator: (request) => {
-      // Per-tenant + per-user rate limiting
+      // Per-tenant + per-user. Falls back to ip when the request hasn't hit
+      // the authenticate hook yet (login, register, health).
       const tenantId = (request as any).tenantId || 'anonymous';
       const userId = (request as any).userId || request.ip;
       return `${tenantId}:${userId}`;
@@ -25,8 +29,7 @@ async function rateLimitPlugin(fastify: FastifyInstance) {
         },
       },
     }),
-    // Skip rate limiting in test environment
-    ...(env.NODE_ENV === 'test' ? { max: 10000 } : {}),
+    ...(env.NODE_ENV === 'test' ? { max: 100000 } : {}),
   });
 }
 

@@ -79,6 +79,19 @@ export function errorHandler(
     statusCode = error.statusCode;
     code = (error as FastifyError).code || 'ERROR';
     message = error.message;
+  } else if (
+    // @fastify/rate-limit (and a few other plugins) throw errors whose shape
+    // is `{ error: { code, message, details } }` without a top-level statusCode.
+    // Without this branch we'd default to 500 and log "Internal server error"
+    // for every rate-limit hit, which is noise.
+    typeof (error as unknown as Record<string, unknown>).error === 'object' &&
+    (error as unknown as Record<string, unknown>).error !== null
+  ) {
+    const nested = (error as unknown as { error: Record<string, unknown> }).error;
+    code = typeof nested.code === 'string' ? nested.code : 'ERROR';
+    message = typeof nested.message === 'string' ? nested.message : error.message;
+    details = nested.details;
+    statusCode = code === 'RATE_LIMIT_EXCEEDED' ? 429 : 400;
   }
 
   if (statusCode >= 500) {

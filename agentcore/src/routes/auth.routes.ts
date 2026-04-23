@@ -171,7 +171,28 @@ export default async function authRoutes(fastify: FastifyInstance) {
       path: '/',
     });
 
-    return { data: { token: accessToken } };
+    // Return user + tenant so the client can recover full session on cold load
+    // without a second round-trip.
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId)).limit(1);
+
+    const workspaces = await db.select({
+      id: tenants.id,
+      name: tenants.name,
+      slug: tenants.slug,
+      role: userTenants.role,
+    })
+      .from(userTenants)
+      .innerJoin(tenants, eq(userTenants.tenantId, tenants.id))
+      .where(eq(userTenants.userId, user.id));
+
+    return {
+      data: {
+        token: accessToken,
+        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        tenant: tenant ? { id: tenant.id, name: tenant.name, slug: tenant.slug } : undefined,
+        workspaces,
+      },
+    };
   });
 
   // POST /api/auth/logout

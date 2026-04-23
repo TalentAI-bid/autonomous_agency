@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
 import type { ApiResponse, PaginatedResponse } from '@/types';
+import { useAuthStore } from '@/stores/auth.store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -10,21 +11,17 @@ const axiosInstance: AxiosInstance = axios.create({
   withCredentials: true, // for refresh token cookie
 });
 
-// Token getter — set by auth store after initialization
-let getToken: (() => string | null) | null = null;
 let onUnauthorized: (() => void) | null = null;
 
-export function setAuthInterceptors(
-  tokenGetter: () => string | null,
-  unauthorizedHandler: () => void,
-) {
-  getToken = tokenGetter;
+export function setAuthInterceptors(unauthorizedHandler: () => void) {
   onUnauthorized = unauthorizedHandler;
 }
 
-// Request interceptor — add JWT
+// Request interceptor — read token straight from the store on every request so
+// there is no window where a child useQuery effect can fire before a parent
+// useEffect assigns the token getter.
 axiosInstance.interceptors.request.use((config) => {
-  const token = getToken?.();
+  const token = useAuthStore.getState().token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -59,8 +56,6 @@ axiosInstance.interceptors.response.use(
         const res = await axiosInstance.post<{ data: { token: string } }>('/auth/refresh');
         const newToken = res.data.data.token;
 
-        // Update token in store (dynamically imported to avoid circular deps)
-        const { useAuthStore } = await import('@/stores/auth.store');
         useAuthStore.getState().setToken(newToken);
 
         refreshQueue.forEach((cb) => cb(newToken));

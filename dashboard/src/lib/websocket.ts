@@ -1,4 +1,5 @@
 import type { AgentEvent } from '@/types';
+import { useAuthStore } from '@/stores/auth.store';
 
 type EventHandler = (event: AgentEvent) => void;
 
@@ -53,9 +54,12 @@ class WebSocketManager {
 
       this.ws.onopen = () => {
         this.reconnectDelay = 1000;
-        // Send auth token
-        if (this.token) {
-          this.ws!.send(JSON.stringify({ type: 'auth', token: this.token }));
+        // Prefer the freshest token from the store (it may have been rotated
+        // by an axios-driven /auth/refresh since this connection was opened).
+        const liveToken = useAuthStore.getState().token ?? this.token;
+        if (liveToken) {
+          this.token = liveToken;
+          this.ws!.send(JSON.stringify({ type: 'auth', token: liveToken }));
         }
         this.dispatchInternal('ws:connected', {});
       };

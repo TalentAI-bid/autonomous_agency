@@ -9,12 +9,13 @@ import type { AgentEvent } from '@/types';
 
 export function useWebSocket() {
   const token = useAuthStore((s) => s.token);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const { addEvent, updateAgentStatus, incrementContactCount, setConnected, updateAgentLiveAction, addAgentMessage } = useRealtimeStore();
   const queryClient = useQueryClient();
   const initialized = useRef(false);
 
   useEffect(() => {
-    if (!token || initialized.current) return;
+    if (!hasHydrated || !token || initialized.current) return;
     initialized.current = true;
 
     wsManager.connect(token);
@@ -125,7 +126,7 @@ export function useWebSocket() {
       wsManager.disconnect();
       initialized.current = false;
     };
-  }, [token, addEvent, updateAgentStatus, incrementContactCount, setConnected, updateAgentLiveAction, addAgentMessage, queryClient]);
+  }, [hasHydrated, token, addEvent, updateAgentStatus, incrementContactCount, setConnected, updateAgentLiveAction, addAgentMessage, queryClient]);
 
   const connected = useRealtimeStore((s) => s.connected);
   return { connected };

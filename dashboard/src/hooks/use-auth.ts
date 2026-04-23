@@ -15,13 +15,10 @@ export function useInitAuth() {
   const router = useRouter();
 
   useEffect(() => {
-    setAuthInterceptors(
-      () => useAuthStore.getState().token,
-      () => {
-        logout();
-        router.push('/login');
-      },
-    );
+    setAuthInterceptors(() => {
+      logout();
+      router.push('/login');
+    });
   }, [logout, router]);
 
   return { token };

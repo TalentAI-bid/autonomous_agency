@@ -3,7 +3,7 @@ import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import { enqueueExtensionTask } from '../services/extension-dispatcher.js';
 import { eq, and } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { companies } from '../db/schema/index.js';
+import { companies, opportunities } from '../db/schema/index.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
@@ -151,6 +151,50 @@ export async function searchLinkedInJobs(
         masterAgentId,
       );
       logger.debug({ companyId: savedRow.id, name: c.companyName, linkedinUrl: c.linkedinUrl }, 'Saved company from LinkedIn Jobs');
+
+      // Materialize as an `opportunities` row so the dashboard's Opportunities
+      // tab surfaces this hiring signal. Dedup on (masterAgentId, companyId, title)
+      // so re-scraping the same search doesn't duplicate rows. Non-fatal —
+      // a failure here must not abort the scrape loop.
+      if (masterAgentId) {
+        try {
+          await withTenant(tenantId, async (tx) => {
+            const existing = await tx
+              .select({ id: opportunities.id })
+              .from(opportunities)
+              .where(
+                and(
+                  eq(opportunities.tenantId, tenantId),
+                  eq(opportunities.masterAgentId, masterAgentId),
+                  eq(opportunities.companyId, savedRow.id),
+                  eq(opportunities.title, c.jobTitle),
+                ),
+              )
+              .limit(1);
+            if (existing.length > 0) return;
+
+            await tx.insert(opportunities).values({
+              tenantId,
+              masterAgentId,
+              title: c.jobTitle,
+              opportunityType: 'hiring_signal',
+              sourcePlatform: 'linkedin_jobs',
+              sourceUrl: c.linkedinUrl ?? undefined,
+              companyName: c.companyName,
+              companyId: savedRow.id,
+              location: c.location ?? undefined,
+              buyingIntentScore: 70,
+              urgency: 'soon',
+              status: 'new',
+            });
+          });
+        } catch (err) {
+          logger.debug(
+            { err, companyId: savedRow.id, jobTitle: c.jobTitle },
+            'Failed to insert hiring_signal opportunity (non-fatal)',
+          );
+        }
+      }
 
       // Auto-queue fetch_company to get full company details via extension
       if (c.linkedinUrl) {

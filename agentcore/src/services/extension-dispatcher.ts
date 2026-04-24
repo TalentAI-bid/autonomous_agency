@@ -492,8 +492,8 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
           if (existing) continue;
         }
 
-        await withTenant(task.tenantId, async (tx) => {
-          await tx.insert(contacts).values({
+        const [inserted] = await withTenant(task.tenantId, async (tx) => {
+          return tx.insert(contacts).values({
             tenantId: task.tenantId,
             firstName: pFirstName,
             lastName: pLastName,
@@ -503,8 +503,26 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
             companyName: name,
             source: 'linkedin_profile',
             rawData: { discoverySource: 'linkedin_extension_people', ...person },
-          });
+          }).returning({ id: contacts.id });
         });
+
+        // Chain per-contact enrichment so findEmailByPattern + Reacher
+        // verification run for this person. Without this dispatch, the
+        // hiring-signal flow saves contacts that never get an email.
+        if (inserted && task.masterAgentId) {
+          try {
+            await dispatchJob(task.tenantId, 'enrichment', {
+              contactId: inserted.id,
+              masterAgentId: task.masterAgentId,
+              source: 'linkedin_extension_people',
+            });
+          } catch (err) {
+            logger.debug(
+              { err, contactId: inserted.id },
+              'Failed to dispatch per-contact enrichment (non-fatal)',
+            );
+          }
+        }
       } catch (err) {
         logger.debug({ err, person: person.name }, 'Failed to save LinkedIn person (non-fatal)');
       }

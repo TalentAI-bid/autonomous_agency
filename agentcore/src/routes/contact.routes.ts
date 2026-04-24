@@ -10,6 +10,7 @@ import { acquireSmtpSlot } from '../services/smtp-rate-limiter.service.js';
 import { extractJSON, complete, SMART_MODEL } from '../tools/together-ai.tool.js';
 import { extractJSONFromText } from '../utils/json-extract.js';
 import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../prompts/draft-email.prompt.js';
+import { findEmailByPattern } from '../tools/email-finder.tool.js';
 import logger from '../utils/logger.js';
 
 const createContactSchema = z.object({
@@ -328,6 +329,78 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     logger.info({ tenantId: request.tenantId, contactId: id, messageId: result.messageId }, 'Outreach email sent');
 
     return { data: { success: true, messageId: result.messageId, outreachEmailId: saved!.id } };
+  });
+
+  // POST /api/contacts/:id/find-email — Manual fallback: pattern-guess + Reacher
+  // verification. The auto pipeline also runs this via enrichment, but the button
+  // lets the user trigger it on demand for a specific contact.
+  fastify.post<{ Params: { id: string } }>('/:id/find-email', async (request) => {
+    const { id } = request.params;
+
+    const [contact] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(contacts)
+        .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!contact) throw new NotFoundError('Contact', id);
+
+    if (contact.email) {
+      return {
+        data: {
+          email: contact.email,
+          verified: contact.emailVerified,
+          method: 'already_set',
+          attempts: 0,
+        },
+      };
+    }
+
+    if (!contact.firstName || !contact.lastName) {
+      throw new ValidationError('Contact is missing firstName or lastName');
+    }
+
+    let domain: string | null = null;
+    if (contact.companyId) {
+      const [company] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select({ domain: companies.domain }).from(companies)
+          .where(and(eq(companies.id, contact.companyId!), eq(companies.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      domain = company?.domain ?? null;
+    }
+
+    if (!domain) {
+      throw new ValidationError('Cannot find email: linked company has no domain yet');
+    }
+
+    const result = await findEmailByPattern(contact.firstName, contact.lastName, domain);
+    const verified = result.email != null && (result.method === 'smtp_verified' || result.method === 'cached_pattern');
+
+    if (result.email) {
+      await withTenant(request.tenantId, async (tx) => {
+        await tx.update(contacts)
+          .set({ email: result.email!, emailVerified: verified, updatedAt: new Date() })
+          .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)));
+      });
+      logger.info(
+        { contactId: id, email: result.email, method: result.method, attempts: result.attempts },
+        'Manual find-email: pattern match persisted',
+      );
+    } else {
+      logger.info(
+        { contactId: id, method: result.method, attempts: result.attempts, domain },
+        'Manual find-email: no match',
+      );
+    }
+
+    return {
+      data: {
+        email: result.email,
+        verified,
+        method: result.method,
+        attempts: result.attempts,
+      },
+    };
   });
 
   // GET /api/contacts/:id/outreach-emails — List outreach emails for a contact

@@ -2,7 +2,8 @@
 
 import { use } from 'react';
 import { useCompany } from '@/hooks/use-companies';
-import { useContacts } from '@/hooks/use-contacts';
+import { useContacts, useFindContactEmail } from '@/hooks/use-contacts';
+import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -12,6 +13,7 @@ import {
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
   Mail, ExternalLink, Search, Linkedin, CheckCircle2,
   AlertTriangle, TrendingDown, FileText, Brain, ShieldAlert,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { CompanyDeepData, PainPoint } from '@/types';
@@ -21,6 +23,36 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const { data: company, isLoading } = useCompany(id);
   const { data: contactsRes } = useContacts({ companyId: id });
   const companyContacts = contactsRes?.data ?? [];
+  const findEmail = useFindContactEmail();
+  const { toast } = useToast();
+
+  const handleFindEmail = async (contactId: string) => {
+    try {
+      const result = await findEmail.mutateAsync(contactId);
+      if (result.email) {
+        toast({
+          title: 'Email found',
+          description: `${result.email}${result.verified ? ' (verified)' : ''}`,
+        });
+      } else {
+        toast({
+          title: 'No email found',
+          description:
+            result.method === 'daily_limit'
+              ? 'Reacher daily verification cap reached; try again tomorrow.'
+              : result.method === 'exhausted'
+              ? 'Tried all common patterns; none verified.'
+              : result.method === 'no_patterns'
+              ? 'Missing first/last name.'
+              : `Method: ${result.method}`,
+          variant: 'destructive',
+        });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Email lookup failed';
+      toast({ title: 'Email lookup failed', description: message, variant: 'destructive' });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -214,7 +246,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                         {contact.title && (
                           <p className="text-xs text-muted-foreground truncate">{contact.title}</p>
                         )}
-                        {contact.email && (
+                        {contact.email ? (
                           <div className="flex items-center gap-1 mt-0.5">
                             <a href={`mailto:${contact.email}`} className="text-xs text-blue-400 hover:underline truncate">
                               {contact.email}
@@ -223,6 +255,21 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                               <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />
                             )}
                           </div>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-1 h-6 text-xs gap-1"
+                            disabled={findEmail.isPending && findEmail.variables === contact.id}
+                            onClick={() => handleFindEmail(contact.id)}
+                          >
+                            {findEmail.isPending && findEmail.variables === contact.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Mail className="w-3 h-3" />
+                            )}
+                            Find email
+                          </Button>
                         )}
                       </div>
                     </div>

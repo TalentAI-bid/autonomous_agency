@@ -1,8 +1,15 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiGetPaginated, apiPatch } from '@/lib/api';
+import { apiGet, apiGetPaginated, apiPatch, apiPost } from '@/lib/api';
 import type { Contact, ContactFilters, PaginatedResponse } from '@/types';
+
+export interface FindEmailResult {
+  email: string | null;
+  verified: boolean;
+  method: string;
+  attempts: number;
+}
 
 export function useContacts(filters?: ContactFilters) {
   return useQuery({
@@ -28,6 +35,17 @@ export function useUpdateContact() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['contacts'] });
       qc.invalidateQueries({ queryKey: ['contacts', vars.id] });
+    },
+  });
+}
+
+export function useFindContactEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiPost<FindEmailResult>(`/contacts/${id}/find-email`),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      qc.invalidateQueries({ queryKey: ['contacts', id] });
     },
   });
 }

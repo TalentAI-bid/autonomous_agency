@@ -17,7 +17,8 @@ dashboard/yarn.lock
 
 agentcore/node_modules
 agentcore/dist
-
+imagecopy.png
+image.png
 # Logs
 logs
 *.log

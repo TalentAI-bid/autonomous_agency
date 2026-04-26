@@ -5,6 +5,7 @@ import { createRedisConnection } from '../queues/setup.js';
 import { decrypt } from '../utils/crypto.js';
 import type { EmailAccount } from '../db/schema/index.js';
 import logger from '../utils/logger.js';
+import { appendToSentFolder } from './imap-sent-append.tool.js';
 
 export interface SendEmailOpts {
   tenantId: string;
@@ -34,9 +35,11 @@ function getTransporterFromEnv() {
 function getTransporterFromAccount(account: EmailAccount) {
   if (!account.smtpHost) throw new Error(`Email account ${account.id} has no SMTP host configured`);
   const password = account.smtpPass ? decrypt(account.smtpPass) : undefined;
+  const port = account.smtpPort ?? 587;
   return nodemailer.createTransport({
     host: account.smtpHost,
-    port: account.smtpPort ?? 587,
+    port,
+    secure: port === 465,
     auth: account.smtpUser ? { user: account.smtpUser, pass: password } : undefined,
   });
 }
@@ -71,14 +74,35 @@ export async function sendEmail(opts: SendEmailOpts): Promise<{ messageId: strin
     ? getTransporterFromAccount(emailAccount)
     : getTransporterFromEnv();
 
-  const info = await transporter.sendMail({
+  const streamTx = nodemailer.createTransport({ streamTransport: true, buffer: true });
+  const composed = await streamTx.sendMail({
     from,
     to,
     subject,
     html: htmlWithTracking,
     text: text ?? html.replace(/<[^>]+>/g, ''),
   });
+  const rawMessage = composed.message as Buffer;
 
-  logger.info({ tenantId, from, to, messageId: info.messageId }, 'Email sent');
-  return { messageId: info.messageId as string };
+  const info = await transporter.sendMail({
+    envelope: { from, to },
+    raw: rawMessage,
+  });
+
+  const messageId = info.messageId as string;
+  logger.info({ tenantId, from, to, messageId }, 'Email sent');
+
+  if (emailAccount) {
+    const result = await appendToSentFolder({
+      tenantId,
+      emailAccount,
+      rawMessage,
+      messageId,
+    });
+    if (result.appended) {
+      logger.info({ tenantId, accountId: emailAccount.id, mailbox: result.mailbox, messageId }, 'IMAP appended to Sent');
+    }
+  }
+
+  return { messageId };
 }

@@ -66,6 +66,7 @@ export function Sidebar() {
   const setup: NavItem[] = [
     { href: '/settings/company', label: 'Company Profile', icon: 'flag' },
     { href: '/settings/products', label: 'Products', icon: 'zap' },
+    { href: '/settings/email', label: 'Email Accounts', icon: 'mail' },
     { href: '/linkedin-extension', label: 'LinkedIn Extension', icon: 'globe' },
   ];
   const tools: NavItem[] = [

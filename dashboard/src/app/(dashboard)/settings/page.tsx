@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { User, Building, Key, Bell, Building2, Package, ChevronRight } from 'lucide-react';
+import { User, Building, Key, Bell, Building2, Package, ChevronRight, Mail } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
@@ -29,8 +29,8 @@ export default function SettingsPage() {
         <p className="text-muted-foreground text-sm mt-1">Manage your account and workspace preferences</p>
       </div>
 
-      {/* Company Profile + Products — quick access */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Company Profile + Products + Email — quick access */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card
           onClick={() => router.push('/settings/company')}
           className="cursor-pointer transition-colors hover:border-primary"
@@ -63,6 +63,24 @@ export default function SettingsPage() {
             </CardTitle>
             <CardDescription>
               Manage what you sell — agents use this to personalize outreach
+            </CardDescription>
+          </CardHeader>
+        </Card>
+
+        <Card
+          onClick={() => router.push('/settings/email')}
+          className="cursor-pointer transition-colors hover:border-primary"
+        >
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Mail className="w-4 h-4" />
+                Email Accounts
+              </span>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardTitle>
+            <CardDescription>
+              SMTP sending accounts and IMAP/POP inbox listeners
             </CardDescription>
           </CardHeader>
         </Card>

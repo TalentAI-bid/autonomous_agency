@@ -4,6 +4,12 @@ const $ = (id) => document.getElementById(id);
 
 const els = {
   statusBadge: $('status-badge'),
+  // update banner
+  updateSection: $('update-section'),
+  updateVersion: $('update-version'),
+  updateNotes: $('update-notes'),
+  updateDownloadBtn: $('update-download-btn'),
+  updateDismissBtn: $('update-dismiss-btn'),
   // signed-out
   signinSection: $('signin-section'),
   email: $('email'),
@@ -22,6 +28,24 @@ const els = {
   usageSection: $('usage-section'),
   usageBody: $('usage-body'),
 };
+
+async function refreshUpdateBanner() {
+  try {
+    const { updateAvailable } = await chrome.storage.local.get('updateAvailable');
+    if (!updateAvailable?.version) {
+      els.updateSection.hidden = true;
+      return;
+    }
+    els.updateVersion.textContent = updateAvailable.version;
+    els.updateNotes.textContent = updateAvailable.releaseNotes
+      ? ` — ${updateAvailable.releaseNotes}`
+      : '';
+    els.updateSection.hidden = false;
+  } catch (_) {
+    // Storage unavailable — hide silently.
+    els.updateSection.hidden = true;
+  }
+}
 
 async function refresh() {
   try {
@@ -200,5 +224,23 @@ els.password.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') els.signinBtn.click();
 });
 
+// Update banner: open download URL in a new tab.
+els.updateDownloadBtn.addEventListener('click', async () => {
+  const { updateAvailable } = await chrome.storage.local.get('updateAvailable');
+  if (updateAvailable?.downloadUrl) {
+    chrome.tabs.create({ url: updateAvailable.downloadUrl });
+  }
+});
+
+// Update banner: clear it. The next hourly check-update tick will re-flag if
+// the server still has a newer version than the user's current install.
+els.updateDismissBtn.addEventListener('click', async () => {
+  await chrome.storage.local.remove('updateAvailable');
+  await chrome.action.setBadgeText({ text: '' });
+  els.updateSection.hidden = true;
+});
+
 refresh();
+refreshUpdateBanner();
 setInterval(refresh, 3000);
+setInterval(refreshUpdateBanner, 5000);

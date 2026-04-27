@@ -480,17 +480,69 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true; // async sendResponse
 });
 
+// ─── Update check ──────────────────────────────────────────────────────────
+// Self-hosted CRX auto-update is blocked on consumer Chrome since 2018, so
+// we poll the backend's latest.json and surface a "NEW" badge + popup banner
+// when a newer version is published. We never auto-download or auto-reload.
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`${DEFAULT_SERVER}/extension/latest.json`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const latest = await res.json();
+    const remoteVersion = String(latest.version || '').trim();
+    const currentVersion = chrome.runtime.getManifest().version;
+    if (!remoteVersion || !isNewerVersion(remoteVersion, currentVersion)) {
+      // No update — also clear any stale banner if the user already updated past it.
+      const { updateAvailable } = await chrome.storage.local.get('updateAvailable');
+      if (updateAvailable && !isNewerVersion(updateAvailable.version, currentVersion)) {
+        await chrome.storage.local.remove('updateAvailable');
+        await chrome.action.setBadgeText({ text: '' });
+      }
+      return;
+    }
+    await chrome.storage.local.set({
+      updateAvailable: {
+        version: remoteVersion,
+        releasedAt: latest.releasedAt ?? null,
+        releaseNotes: latest.releaseNotes ?? null,
+        downloadUrl: `${DEFAULT_SERVER}/extension/talentai-v${remoteVersion}.zip`,
+        seenAt: Date.now(),
+      },
+    });
+    await chrome.action.setBadgeText({ text: 'NEW' });
+    await chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+  } catch {
+    // Silent — offline / server down is normal.
+  }
+}
+
+function isNewerVersion(remote, local) {
+  const r = String(remote).split('.').map((n) => parseInt(n, 10) || 0);
+  const l = String(local).split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(r.length, l.length);
+  for (let i = 0; i < len; i++) {
+    const ri = r[i] ?? 0;
+    const li = l[i] ?? 0;
+    if (ri > li) return true;
+    if (ri < li) return false;
+  }
+  return false;
+}
+
 // ─── Lifecycle ─────────────────────────────────────────────────────────────
-chrome.runtime.onInstalled.addListener(() => { ensureConnected(); });
-chrome.runtime.onStartup.addListener(() => { ensureConnected(); });
+chrome.runtime.onInstalled.addListener(() => { ensureConnected(); checkForUpdate(); });
+chrome.runtime.onStartup.addListener(() => { ensureConnected(); checkForUpdate(); });
 // Also attempt a connection when the worker first wakes up.
 ensureConnected();
+checkForUpdate();
 
 // Keepalive alarm — MV3 workers get terminated after 30s of inactivity; fire
 // at ~24s so we always beat Chrome's idle-kill timer with a healthy margin.
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
 // Token refresh alarm — checked every 10 minutes; refreshes if within the 3-min window.
 chrome.alarms.create('refresh-token', { periodInMinutes: 10 });
+// Update check alarm — once an hour. Cheap; matches Chrome's own update cadence.
+chrome.alarms.create('check-update', { periodInMinutes: 60 });
 
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'keepalive') {
@@ -513,5 +565,10 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (remainingMs < 3 * 60 * 1000) {
       try { await refreshSession(); } catch (_) { /* next authedFetch will retry */ }
     }
+    return;
+  }
+  if (a.name === 'check-update') {
+    await checkForUpdate();
+    return;
   }
 });

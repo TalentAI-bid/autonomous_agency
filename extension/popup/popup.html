@@ -11,6 +11,23 @@
       <span id="status-badge" class="badge idle">idle</span>
     </header>
 
+    <!-- ─── Update available banner (shown when a newer release is detected) -->
+    <section id="update-section" class="update-banner" hidden>
+      <div class="update-title">Update available</div>
+      <div class="update-meta">
+        Version <span id="update-version">—</span> is ready
+        <span id="update-notes" class="muted small"></span>
+      </div>
+      <div class="row">
+        <button id="update-download-btn" class="primary">Download</button>
+        <button id="update-dismiss-btn" class="secondary">Dismiss</button>
+      </div>
+      <p class="muted footnote">
+        After download, drag the new ZIP into <code>chrome://extensions</code>
+        with Developer Mode enabled.
+      </p>
+    </section>
+
     <!-- ─── Signed-out state ─────────────────────────────────────────── -->
     <section id="signin-section" hidden>
       <h2>Sign in</h2>

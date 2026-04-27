@@ -201,8 +201,31 @@
     if (/^Status\s+is/i.test(t)) return false;
     if (t === 'LinkedIn Member') return false;
     if (/^View\s+.*profile/i.test(t)) return false;
+    // Reject anything still containing the screen-reader "View ... profile"
+    // suffix anywhere in the string (catches concatenated "NameView Name's profile").
+    if (/View\s+.+?(?:'s\s+profile|\s+profile)/i.test(t)) return false;
+    if (/\bprofile\b/i.test(t)) return false;
     if (/%[0-9A-Fa-f]{2}/.test(t)) return false; // URL-encoded residue
     return true;
+  }
+
+  // LinkedIn renders <a> with both visible name + a screen-reader span like
+  // "View Saurabh Kaushik's profile". textContent concatenates the two with no
+  // whitespace, yielding strings like "Saurabh KaushikView Saurabh Kaushik's profile".
+  // This helper extracts the full NAME from inside that pattern, or strips the
+  // suffix when only a prefix is the real name.
+  function cleanLinkedInA11yText(text) {
+    if (!text) return text;
+    let t = text.trim();
+    // Pattern A: "View NAME('s) profile" embedded → return NAME (it's the full name).
+    const m = t.match(/View\s+(.+?)(?:'s\s+profile|\s+profile)/i);
+    if (m && m[1]) {
+      const inner = m[1].trim();
+      if (inner.length >= 2 && inner.length <= 100) return inner;
+    }
+    // Pattern B: trailing "...View NAME profile" with no clean inner match → strip.
+    t = t.replace(/\s*View\s+\S.*?(?:'s\s+profile|\s+profile)\s*$/i, '').trim();
+    return t;
   }
 
   function decodeSlugToName(slug) {
@@ -233,13 +256,21 @@
   }
 
   function extractPersonName(card) {
-    // Priority 1: full name from visually-hidden a11y span
+    // Priority 1: full name from visually-hidden a11y span. Prefer the
+    // aria-label attribute when the matched element exposes one, since
+    // textContent of these spans is often the verbose "View NAME's profile".
     const hiddenSpan = card.querySelector(
       '.visually-hidden, .a11y-text, [class*="sr-only"], span[aria-label]',
     );
     if (hiddenSpan) {
+      const ariaLabel = hiddenSpan.getAttribute && hiddenSpan.getAttribute('aria-label');
+      if (ariaLabel) {
+        const cleaned = cleanLinkedInA11yText(ariaLabel.trim());
+        if (isValidName(cleaned)) return cleaned;
+      }
       const text = (hiddenSpan.textContent || '').trim();
-      if (isValidName(text)) return text;
+      const cleanedText = cleanLinkedInA11yText(text);
+      if (isValidName(cleanedText)) return cleanedText;
     }
 
     const profileAnchor = findProfileAnchor(card);
@@ -254,10 +285,12 @@
     }
 
     // Priority 3: anchor textContent, cleaned of presence badges / degree
+    // and the embedded "View NAME's profile" screen-reader-only string.
     if (profileAnchor) {
       let text = (profileAnchor.textContent || '').trim().replace(/\s+/g, ' ');
       text = text.replace(/\s*•\s*(?:1st|2nd|3rd)(?:\+)?\s*/g, ' ').trim();
       text = text.replace(/Status is (online|offline|away)/gi, '').trim();
+      text = cleanLinkedInA11yText(text);
       if (isValidName(text)) return text;
     }
 

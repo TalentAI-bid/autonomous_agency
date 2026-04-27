@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, lt, ilike, sql } from 'drizzle-orm';
+import { eq, and, desc, lt, ilike, sql, or } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { contacts, companies, masterAgents, outreachEmails } from '../db/schema/index.js';
+import { contacts, companies, masterAgents, outreachEmails, opportunities } from '../db/schema/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { selectEmailAccount, incrementQuota } from '../tools/email-queue.tool.js';
 import { sendEmail } from '../tools/smtp.tool.js';
@@ -10,6 +10,8 @@ import { acquireSmtpSlot } from '../services/smtp-rate-limiter.service.js';
 import { extractJSON, complete, SMART_MODEL } from '../tools/together-ai.tool.js';
 import { extractJSONFromText } from '../utils/json-extract.js';
 import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../prompts/draft-email.prompt.js';
+import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
+import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-generation.js';
 import { findEmailByPattern } from '../tools/email-finder.tool.js';
 import logger from '../utils/logger.js';
 
@@ -202,8 +204,108 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       masterAgent = ma ?? null;
     }
 
-    const systemPrompt = buildDraftEmailSystemPrompt(masterAgent, company);
-    const userPrompt = buildDraftEmailUserPrompt(contact, company, hint);
+    // For sales/recruitment master agents, use the rich auto-outreach prompts
+    // (sales-email-generation / recruitment-email-generation) so manual drafts
+    // match the quality of automated sends. Fall back to the basic
+    // draft-email.prompt.ts otherwise.
+    const useCase = masterAgent?.useCase;
+    const useRichPrompts = !!masterAgent && (useCase === 'sales' || useCase === 'recruitment');
+
+    let systemPrompt: string;
+    let userPrompt: string;
+    let promptVariant: string;
+
+    if (useRichPrompts) {
+      // Load best-matching opportunity (mirrors outreach.agent.ts)
+      const oppConditions = [eq(opportunities.masterAgentId, masterAgent!.id)];
+      if (contact.companyId) {
+        oppConditions.push(or(eq(opportunities.contactId, id), eq(opportunities.companyId, contact.companyId))!);
+      } else {
+        oppConditions.push(eq(opportunities.contactId, id));
+      }
+      const [opp] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(opportunities)
+          .where(and(...oppConditions))
+          .orderBy(desc(opportunities.buyingIntentScore))
+          .limit(1);
+      });
+
+      const config = (masterAgent!.config as Record<string, unknown>) ?? {};
+      const pipelineCtx = (config.pipelineContext as Record<string, unknown>) ?? {};
+      const contactRaw = (contact.rawData ?? {}) as Record<string, unknown>;
+      const companyRaw = (company?.rawData ?? {}) as Record<string, unknown>;
+
+      const ctx: EmailGenerationContext = {
+        contact: {
+          firstName: contact.firstName ?? 'there',
+          lastName: contact.lastName ?? undefined,
+          title: contact.title ?? undefined,
+          skills: (contact.skills as string[] | undefined) ?? (contactRaw.skills as string[] | undefined),
+          experience: Array.isArray(contact.experience) ? contact.experience.length : undefined,
+          linkedinUrl: contact.linkedinUrl ?? undefined,
+          summary: (contactRaw.summary as string) ?? undefined,
+          seniorityLevel: (contactRaw.seniorityLevel as string) ?? undefined,
+          location: contact.location ?? undefined,
+        },
+        company: {
+          name: company?.name ?? contact.companyName ?? undefined,
+          domain: company?.domain ?? undefined,
+          industry: company?.industry ?? undefined,
+          size: company?.size ?? undefined,
+          techStack: (company?.techStack as string[] | undefined) ?? undefined,
+          funding: company?.funding ?? undefined,
+          description: company?.description ?? undefined,
+          recentNews: (companyRaw.recentNews as string[]) ?? undefined,
+          products: (companyRaw.products as string[]) ?? undefined,
+          foundedYear: (companyRaw.foundedYear as number) ?? undefined,
+          headquarters: (companyRaw.headquarters as string) ?? undefined,
+          competitors: (companyRaw.competitors as string[]) ?? undefined,
+          recentFunding: (companyRaw.recentFunding as string) ?? undefined,
+          keyPeople: (companyRaw.keyPeople as Array<{ name: string; title: string }>) ?? undefined,
+        },
+        sender: {
+          companyName: (config.senderCompanyName as string) ?? masterAgent!.name ?? undefined,
+          companyDescription: (config.senderCompanyDescription as string) ?? masterAgent!.description ?? undefined,
+          services: (config.services as string[]) ?? undefined,
+          caseStudies: (config.caseStudies as Array<{ title: string; result: string }>) ?? undefined,
+          differentiators: (config.differentiators as string[]) ?? undefined,
+          valueProposition: (config.valueProposition as string) ?? undefined,
+          callToAction: (config.callToAction as string) ?? undefined,
+          calendlyUrl: (config.calendlyUrl as string) ?? undefined,
+          website: (config.senderWebsite as string) ?? undefined,
+          senderFirstName: (config.senderFirstName as string) ?? (pipelineCtx.senderFirstName as string) ?? undefined,
+          senderTitle: (config.senderTitle as string) ?? (pipelineCtx.senderTitle as string) ?? undefined,
+          products: ((pipelineCtx.sales as Record<string, unknown>)?.products as Array<{ name: string; description?: string | null; keyFeatures?: string[] | null; painPointsSolved?: string[] | null }>) ?? undefined,
+        },
+        campaign: {
+          tone: (config.emailTone as string) ?? 'professional',
+          useCase,
+          emailRules: (config.emailRules as string[]) ?? undefined,
+          stepNumber: 1,
+          totalSteps: 1,
+        },
+        opportunity: opp ? {
+          type: opp.opportunityType,
+          title: opp.title,
+          description: opp.description ?? undefined,
+          buyingIntentScore: opp.buyingIntentScore,
+          technologies: (opp.technologies as string[]) ?? undefined,
+          source: opp.source ?? undefined,
+        } : undefined,
+      };
+
+      const built = useCase === 'sales'
+        ? buildSalesEmailPrompt(ctx)
+        : buildRecruitmentEmailPrompt(ctx);
+      systemPrompt = built.system;
+      userPrompt = hint ? `${built.user}\n\nADDITIONAL USER HINT: ${hint}` : built.user;
+      promptVariant = `${useCase}-rich`;
+    } else {
+      systemPrompt = buildDraftEmailSystemPrompt(masterAgent, company);
+      userPrompt = buildDraftEmailUserPrompt(contact, company, hint);
+      promptVariant = 'draft-email-fallback';
+    }
+
     const messages: Array<{ role: 'system' | 'user'; content: string }> = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -215,6 +317,7 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       companyName: company?.name,
       systemPromptLen: systemPrompt.length,
       userPromptLen: userPrompt.length,
+      promptVariant,
       model: SMART_MODEL,
     }, 'draft-email: starting LLM call');
 

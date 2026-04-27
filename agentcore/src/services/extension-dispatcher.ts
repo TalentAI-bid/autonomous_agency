@@ -473,11 +473,20 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     // Save people from LinkedIn company /people/ tab as contacts (best-effort, max 10)
     const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
     for (const person of rawPeople.slice(0, 10)) {
-      if (!person.name || person.name.length < 2) continue;
-      const nameParts = person.name.split(/\s+/);
+      const cleanName = sanitizePersonName(person.name);
+      if (!cleanName) {
+        logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');
+        continue;
+      }
+      const nameParts = cleanName.split(/\s+/);
       const pFirstName = nameParts[0] || '';
       const pLastName = nameParts.slice(1).join(' ') || '';
       if (!pFirstName || !pLastName) continue;
+      // Final guard: reject if either part still smells like LinkedIn a11y junk.
+      if (/^(view|profile)$/i.test(pFirstName) || /\b(view|profile)\b/i.test(pLastName)) {
+        logger.debug({ pFirstName, pLastName }, 'Skipping person — name parts contain view/profile junk');
+        continue;
+      }
 
       try {
         // Dedup by linkedinUrl
@@ -605,6 +614,39 @@ function sanitizeTitle(raw: string | undefined | null): string | undefined {
   if (!trimmed) return undefined;
   if (JUNK_TITLE_REGEX.test(trimmed)) return undefined;
   return trimmed;
+}
+
+// Defensive sanitiser for person names coming from the LinkedIn extension.
+// LinkedIn's accessibility markup concatenates the visible name with a
+// screen-reader span like "View NAME's profile" and `textContent` reads both
+// with no separator → "Saurabh KaushikView Saurabh Kaushik's profile".
+// We:
+//   1. Extract the inner NAME from any embedded "View NAME's profile" pattern.
+//   2. Otherwise strip a trailing "View ... profile" suffix.
+//   3. Reject anything that still contains "view"/"profile" as a word, or that
+//      lacks a sensible first-last shape.
+function sanitizePersonName(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  let name = raw.trim().replace(/\s+/g, ' ');
+  if (name.length < 2) return null;
+
+  // Pattern A: "View NAME('s) profile" embedded → use NAME (the full name).
+  const inner = name.match(/View\s+(.+?)(?:'s\s+profile|\s+profile)/i);
+  if (inner && inner[1]) {
+    const candidate = inner[1].trim();
+    if (candidate.length >= 2 && candidate.length <= 100) name = candidate;
+  } else {
+    // Pattern B: trailing "View ... profile" → strip.
+    name = name.replace(/\s*View\s+\S.*?(?:'s\s+profile|\s+profile)\s*$/i, '').trim();
+  }
+
+  // Strip trailing punctuation residue.
+  name = name.replace(/[‘’'"`]+\s*$/, '').trim();
+
+  if (name.length < 2 || name.length > 100) return null;
+  if (/\b(profile|view)\b/i.test(name)) return null;
+  if (/%[0-9A-Fa-f]{2}/.test(name)) return null;
+  return name;
 }
 
 function extractDomain(url: string): string | undefined {

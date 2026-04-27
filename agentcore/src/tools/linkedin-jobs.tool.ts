@@ -251,6 +251,22 @@ const LOCATION_ALIASES: Record<string, string[]> = {
   'spain': ['spain', 'madrid', 'barcelona', 'valencia', 'seville', 'bilbao', 'malaga'],
   'united states': ['united states', 'usa', 'us', 'new york', 'san francisco', 'los angeles', 'chicago', 'seattle', 'austin', 'boston', 'denver', 'miami', 'atlanta'],
   'estonia': ['estonia', 'tallinn', 'tartu'],
+  'belgium': ['belgium', 'brussels', 'antwerp', 'ghent', 'gent', 'leuven', 'liège', 'liege', 'charleroi', 'bruges', 'brugge', 'namur', 'mons', 'ostend', 'hasselt', 'mechelen', 'flanders', 'wallonia', 'brabant'],
+  'netherlands': ['netherlands', 'holland', 'amsterdam', 'rotterdam', 'the hague', 'den haag', 'utrecht', 'eindhoven', 'groningen', 'tilburg', 'almere', 'breda', 'nijmegen'],
+  'italy': ['italy', 'rome', 'roma', 'milan', 'milano', 'naples', 'napoli', 'turin', 'torino', 'palermo', 'bologna', 'florence', 'firenze', 'genoa', 'genova', 'verona'],
+  'switzerland': ['switzerland', 'zurich', 'zürich', 'geneva', 'geneve', 'bern', 'basel', 'lausanne', 'lucerne', 'st. gallen'],
+  'portugal': ['portugal', 'lisbon', 'lisboa', 'porto', 'braga', 'coimbra', 'faro'],
+  'poland': ['poland', 'warsaw', 'warszawa', 'krakow', 'kraków', 'gdansk', 'gdańsk', 'wroclaw', 'wrocław', 'poznan', 'poznań', 'łódź', 'lodz'],
+  'sweden': ['sweden', 'stockholm', 'gothenburg', 'göteborg', 'malmö', 'malmo', 'uppsala', 'västerås'],
+  'norway': ['norway', 'oslo', 'bergen', 'trondheim', 'stavanger', 'drammen'],
+  'denmark': ['denmark', 'copenhagen', 'københavn', 'aarhus', 'odense', 'aalborg'],
+  'finland': ['finland', 'helsinki', 'espoo', 'tampere', 'vantaa', 'oulu', 'turku'],
+  'austria': ['austria', 'vienna', 'wien', 'graz', 'linz', 'salzburg', 'innsbruck'],
+  'czech republic': ['czech republic', 'czechia', 'prague', 'praha', 'brno', 'ostrava'],
+  'lithuania': ['lithuania', 'vilnius', 'kaunas', 'klaipeda'],
+  'latvia': ['latvia', 'riga', 'daugavpils', 'liepaja'],
+  'canada': ['canada', 'toronto', 'vancouver', 'montreal', 'montréal', 'calgary', 'ottawa', 'edmonton', 'winnipeg'],
+  'australia': ['australia', 'sydney', 'melbourne', 'brisbane', 'perth', 'adelaide'],
 };
 
 // ─── Parsing ──────────────────────────────────────────────────────────────────
@@ -443,24 +459,36 @@ function parseViaLineFallback(markdown: string): LinkedInJobCompany[] {
  *  - "Hedera Smart Contract Developer" → has "hedera" → accepted
  */
 function filterByKeyword(results: LinkedInJobCompany[], searchJobTitle: string): LinkedInJobCompany[] {
-  const keywords = searchJobTitle.toLowerCase().split(/\s+/).filter(k => k.length > 2);
-  if (keywords.length === 0) return results;
+  // Token-overlap match: tokens of length >= 4 are considered "significant" (e.g.
+  // "developer", "engineer", "machine", "learning"). Accept the row if any
+  // significant token from the search query appears in the parsed job title.
+  // Tokens of length < 4 (the, of, to, ai, ml, ui, ux, qa, …) are too noisy to
+  // anchor a match on, so they're dropped.
+  const tokens = searchJobTitle
+    .toLowerCase()
+    .split(/[\s/,&()-]+/)
+    .filter(t => t.length >= 4);
 
-  const primaryKeyword = keywords[0]!;
+  if (tokens.length === 0) {
+    // Query was all short tokens — fall back to strict full-string match so we
+    // don't accept everything (e.g. avoid letting a "QA" search match every job).
+    const lower = searchJobTitle.toLowerCase().trim();
+    return results.filter(r => r.jobTitle.toLowerCase().includes(lower));
+  }
 
-  const primaryMatches = results.filter(r => {
+  const matches = results.filter(r => {
     const title = r.jobTitle.toLowerCase();
-    return title.includes(primaryKeyword);
+    return tokens.some(t => title.includes(t));
   });
 
-  if (primaryMatches.length === 0 && results.length > 0) {
+  if (matches.length === 0 && results.length > 0) {
     logger.warn(
-      { searchJobTitle, primaryKeyword, resultCount: results.length },
-      'LinkedIn Jobs keyword filter matched zero — returning empty (strict match required)',
+      { searchJobTitle, tokens, resultCount: results.length },
+      'LinkedIn Jobs keyword filter matched zero — returning empty (token-overlap match required)',
     );
   }
 
-  return primaryMatches;
+  return matches;
 }
 
 /**
@@ -476,7 +504,11 @@ function filterByLocation(results: LinkedInJobCompany[], searchLocation: string)
   const validTerms = LOCATION_ALIASES[locLower] || [locLower];
 
   const filtered = results.filter(r => {
-    if (!r.location) return true; // keep if no location data (can't exclude)
+    // Reject rows with no parsed location string. Previously these were
+    // auto-kept as a safety net, but that lets ambiguous markdown-parse
+    // outputs leak in under hiring-signal runs and produces wrong-country
+    // results when the parsed location is genuinely missing.
+    if (!r.location) return false;
     const loc = r.location.toLowerCase();
 
     // Keep if location matches any valid term
@@ -489,13 +521,17 @@ function filterByLocation(results: LinkedInJobCompany[], searchLocation: string)
     return false;
   });
 
-  // If filter removed everything, return original (location data may be bad)
+  // If the filter rejected everything, that's the correct answer for
+  // off-target results. Previously we returned the unfiltered set as a
+  // "filter must be broken" fallback — but that silently let cross-border
+  // bleed-through (UK / NL / FR jobs under a Belgium search) get persisted.
+  // If you see this warn frequently for a specific country, the fix is to
+  // add it to LOCATION_ALIASES, NOT to bypass the filter.
   if (filtered.length === 0 && results.length > 0) {
     logger.warn(
       { searchLocation, validTerms, resultCount: results.length },
-      'LinkedIn Jobs location filter matched nothing — returning unfiltered results',
+      'LinkedIn Jobs location filter rejected all results — returning empty',
     );
-    return results;
   }
 
   return filtered;

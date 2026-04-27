@@ -488,7 +488,7 @@ export class MasterAgent extends BaseAgent {
                 let isFirstCall = true;
                 let totalJobsFound = 0;
                 const perLocation: Array<{ location: string; count: number }> = [];
-                const cappedJobTitles = jobTitles.slice(0, 5);
+                const cappedJobTitles = jobTitles.slice(0, 10);
 
                 for (const loc of locs) {
                   let locCount = 0;
@@ -520,7 +520,15 @@ export class MasterAgent extends BaseAgent {
                 const outcome: 'empty' | 'thin' | 'ok' =
                   totalJobsFound === 0 ? 'empty' : totalJobsFound < 10 ? 'thin' : 'ok';
                 logger.info(
-                  { masterAgentId, totalJobsFound, outcome, perLocation },
+                  {
+                    masterAgentId,
+                    jobTitleCount: cappedJobTitles.length,
+                    locationCount: locs.length,
+                    totalJobsFound,
+                    outcome,
+                    perLocation,
+                    fetchCompanyEnqueueExpected: totalJobsFound,
+                  },
                   'LinkedIn Jobs dispatch aggregate',
                 );
 

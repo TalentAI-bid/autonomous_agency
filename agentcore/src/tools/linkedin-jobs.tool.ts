@@ -4,6 +4,7 @@ import { enqueueExtensionTask } from '../services/extension-dispatcher.js';
 import { eq, and } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies, opportunities } from '../db/schema/index.js';
+import { Country, State, City } from 'country-state-city';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
@@ -241,33 +242,61 @@ export async function searchLinkedInJobs(
   return { companies: unique, raw: markdown };
 }
 
-// ─── Location aliases for validation ──────────────────────────────────────────
+// ─── Location resolution (country/state/city via country-state-city) ─────────
 
-const LOCATION_ALIASES: Record<string, string[]> = {
-  'united kingdom': ['united kingdom', 'uk', 'london', 'manchester', 'birmingham', 'edinburgh', 'glasgow', 'bristol', 'leeds', 'liverpool', 'cambridge', 'oxford', 'england', 'scotland', 'wales', 'belfast', 'cardiff', 'nottingham', 'sheffield', 'newcastle', 'reading', 'brighton'],
-  'france': ['france', 'paris', 'lyon', 'marseille', 'bordeaux', 'toulouse', 'nantes', 'lille', 'strasbourg', 'montpellier', 'nice'],
-  'germany': ['germany', 'berlin', 'munich', 'hamburg', 'frankfurt', 'cologne', 'düsseldorf', 'stuttgart', 'dortmund', 'essen', 'leipzig', 'dresden'],
-  'ireland': ['ireland', 'dublin', 'cork', 'galway', 'limerick', 'waterford'],
-  'spain': ['spain', 'madrid', 'barcelona', 'valencia', 'seville', 'bilbao', 'malaga'],
-  'united states': ['united states', 'usa', 'us', 'new york', 'san francisco', 'los angeles', 'chicago', 'seattle', 'austin', 'boston', 'denver', 'miami', 'atlanta'],
-  'estonia': ['estonia', 'tallinn', 'tartu'],
-  'belgium': ['belgium', 'brussels', 'antwerp', 'ghent', 'gent', 'leuven', 'liège', 'liege', 'charleroi', 'bruges', 'brugge', 'namur', 'mons', 'ostend', 'hasselt', 'mechelen', 'flanders', 'wallonia', 'brabant'],
-  'netherlands': ['netherlands', 'holland', 'amsterdam', 'rotterdam', 'the hague', 'den haag', 'utrecht', 'eindhoven', 'groningen', 'tilburg', 'almere', 'breda', 'nijmegen'],
-  'italy': ['italy', 'rome', 'roma', 'milan', 'milano', 'naples', 'napoli', 'turin', 'torino', 'palermo', 'bologna', 'florence', 'firenze', 'genoa', 'genova', 'verona'],
-  'switzerland': ['switzerland', 'zurich', 'zürich', 'geneva', 'geneve', 'bern', 'basel', 'lausanne', 'lucerne', 'st. gallen'],
-  'portugal': ['portugal', 'lisbon', 'lisboa', 'porto', 'braga', 'coimbra', 'faro'],
-  'poland': ['poland', 'warsaw', 'warszawa', 'krakow', 'kraków', 'gdansk', 'gdańsk', 'wroclaw', 'wrocław', 'poznan', 'poznań', 'łódź', 'lodz'],
-  'sweden': ['sweden', 'stockholm', 'gothenburg', 'göteborg', 'malmö', 'malmo', 'uppsala', 'västerås'],
-  'norway': ['norway', 'oslo', 'bergen', 'trondheim', 'stavanger', 'drammen'],
-  'denmark': ['denmark', 'copenhagen', 'københavn', 'aarhus', 'odense', 'aalborg'],
-  'finland': ['finland', 'helsinki', 'espoo', 'tampere', 'vantaa', 'oulu', 'turku'],
-  'austria': ['austria', 'vienna', 'wien', 'graz', 'linz', 'salzburg', 'innsbruck'],
-  'czech republic': ['czech republic', 'czechia', 'prague', 'praha', 'brno', 'ostrava'],
-  'lithuania': ['lithuania', 'vilnius', 'kaunas', 'klaipeda'],
-  'latvia': ['latvia', 'riga', 'daugavpils', 'liepaja'],
-  'canada': ['canada', 'toronto', 'vancouver', 'montreal', 'montréal', 'calgary', 'ottawa', 'edmonton', 'winnipeg'],
-  'australia': ['australia', 'sydney', 'melbourne', 'brisbane', 'perth', 'adelaide'],
-};
+// Cache the resolved alias set per location string so we don't re-walk the
+// full country/state/city dataset on every scrape. Keys are lowercased.
+const aliasCache = new Map<string, Set<string>>();
+
+/**
+ * Build the set of acceptable location-substrings for a given search location.
+ *
+ * Resolution strategy:
+ *  1. Try to match the input against a country (by full name or ISO-2 code).
+ *     If found, the alias set is { country name, all states ≥3 chars, all
+ *     cities ≥3 chars }. The 2-char ISO code is intentionally NOT added —
+ *     LinkedIn-parsed locations virtually never contain bare ISO codes, and
+ *     adding them would false-positive on common 2-letter substrings (e.g.
+ *     "be" matching "Berlin", "fr" matching "Frankfurt").
+ *  2. Otherwise the alias set is just the raw lowercased input — the user
+ *     passed a city, region, or free-form string. Substring match against
+ *     that single term is the safest degradation.
+ *
+ * The full city list is included (no slice cap). country-state-city has up
+ * to ~9k cities for large countries; substring-matching ~30 parsed rows
+ * against 9k aliases is well under 100ms and the result is cached per
+ * unique searchLocation, so the cost is paid at most once per agent run.
+ */
+function resolveLocationAliases(searchLocation: string): Set<string> {
+  const key = searchLocation.toLowerCase().trim();
+  const cached = aliasCache.get(key);
+  if (cached) return cached;
+
+  const aliases = new Set<string>();
+
+  const country = Country.getAllCountries().find(c =>
+    c.name.toLowerCase() === key || c.isoCode.toLowerCase() === key,
+  );
+
+  if (country) {
+    aliases.add(country.name.toLowerCase());
+
+    for (const state of State.getStatesOfCountry(country.isoCode)) {
+      if (state.name.length >= 3) aliases.add(state.name.toLowerCase());
+    }
+
+    const cities = City.getCitiesOfCountry(country.isoCode) ?? [];
+    for (const city of cities) {
+      if (city.name.length >= 3) aliases.add(city.name.toLowerCase());
+    }
+  } else {
+    // Unresolved input — keep the raw term as the only alias.
+    if (key.length >= 3) aliases.add(key);
+  }
+
+  aliasCache.set(key, aliases);
+  return aliases;
+}
 
 // ─── Parsing ──────────────────────────────────────────────────────────────────
 
@@ -498,21 +527,25 @@ function filterByKeyword(results: LinkedInJobCompany[], searchJobTitle: string):
 function filterByLocation(results: LinkedInJobCompany[], searchLocation: string): LinkedInJobCompany[] {
   if (!searchLocation) return results;
 
-  const locLower = searchLocation.toLowerCase().trim();
-
-  // Build list of valid location terms for this target
-  const validTerms = LOCATION_ALIASES[locLower] || [locLower];
+  const aliases = resolveLocationAliases(searchLocation);
 
   const filtered = results.filter(r => {
-    // Reject rows with no parsed location string. Previously these were
-    // auto-kept as a safety net, but that lets ambiguous markdown-parse
-    // outputs leak in under hiring-signal runs and produces wrong-country
-    // results when the parsed location is genuinely missing.
-    if (!r.location) return false;
+    // Trust LinkedIn's URL-level location filter for rows where our
+    // markdown parser failed to extract a location string. The parser is
+    // brittle (relies on emoji/heuristic regex over scraped HTML) and
+    // frequently misses location text even on correctly-localised jobs.
+    // Auto-rejecting these silently dropped legitimate in-country jobs
+    // and produced 0-result regressions on supported countries (e.g.
+    // France/DevOps query). Cross-border bleed-through is handled by
+    // the alias resolver above and the no-fallback-to-unfiltered change
+    // below.
+    if (!r.location) return true;
     const loc = r.location.toLowerCase();
 
-    // Keep if location matches any valid term
-    if (validTerms.some(term => loc.includes(term))) return true;
+    // Substring match against any alias (country name, ISO code, state, city).
+    for (const alias of aliases) {
+      if (loc.includes(alias)) return true;
+    }
 
     // Keep remote jobs (they could be in the target region)
     if (loc.includes('remote') || loc.includes('hybrid')) return true;
@@ -526,10 +559,12 @@ function filterByLocation(results: LinkedInJobCompany[], searchLocation: string)
   // "filter must be broken" fallback — but that silently let cross-border
   // bleed-through (UK / NL / FR jobs under a Belgium search) get persisted.
   // If you see this warn frequently for a specific country, the fix is to
-  // add it to LOCATION_ALIASES, NOT to bypass the filter.
+  // pass a more specific searchLocation (the country-state-city dataset
+  // already covers all ISO countries; if a country is unresolvable, the
+  // alias set degrades to the raw input string).
   if (filtered.length === 0 && results.length > 0) {
     logger.warn(
-      { searchLocation, validTerms, resultCount: results.length },
+      { searchLocation, aliasCount: aliases.size, resultCount: results.length },
       'LinkedIn Jobs location filter rejected all results — returning empty',
     );
   }

@@ -286,7 +286,7 @@ export class MasterAgent extends BaseAgent {
 
           // Run with 60s timeout; fall back to fire-and-forget if it takes too long
           const strategyPromise = strategist.execute({ job: 'initialStrategy', masterAgentId, pipelineContext });
-          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 60000));
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 180000));
           const strategyResult = await Promise.race([strategyPromise, timeoutPromise]);
 
           await strategist.close();
@@ -428,7 +428,7 @@ export class MasterAgent extends BaseAgent {
             // skipped hiring_signal alerts when the strategist set the flag to
             // false. Fix 3: split the gate — hiring_signal runs unconditionally.
             try {
-              const bdStrategy = strategy.bdStrategy || (agentConfig.bdStrategy as string) || 'hybrid';
+              const bdStrategy = strategy.bdStrategy || 'hybrid';
               const userRole = strategy.userRole || 'vendor';
               const targetIndustries = strategy.targetIndustries ?? [];
               const services = (agentConfig.services as string[]) ?? [];
@@ -826,18 +826,22 @@ export class MasterAgent extends BaseAgent {
     // Prefer the freshest strategist output (in-memory from this run) over the
     // persisted agentConfig — stale config historically caused hiring_signal agents
     // to fall back to hybrid/WTTJ discovery.
+    // Trust ONLY the freshest strategist output. Persisted agentConfig.bdStrategy is
+    // intentionally NOT consulted here — when the inline strategist times out or
+    // throws, we must NOT silently inherit a stale `hiring_signal` decision from a
+    // prior run, because the LinkedIn Jobs dispatch lives inside the strategist
+    // success branch. Inheriting stale config would skip discovery and produce zero
+    // results. The strategist itself is responsible for always returning a strategy
+    // (retry + deterministic fallback live in StrategistAgent).
     const strategistBd = pipelineContext?.sales?.salesStrategy?.bdStrategy as string | undefined;
-    const dispatchBdStrategy =
-      strategistBd
-      || (agentConfig.bdStrategy as string)
-      || 'hybrid';
+    const dispatchBdStrategy = strategistBd || 'hybrid';
     logger.info(
       {
         masterAgentId,
         dispatchBdStrategy,
         sources: {
           strategist: strategistBd ?? null,
-          agentConfig: (agentConfig.bdStrategy as string) ?? null,
+          agentConfigIgnored: (agentConfig.bdStrategy as string) ?? null,
         },
       },
       'Computed dispatchBdStrategy for discovery gate',

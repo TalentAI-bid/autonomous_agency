@@ -51,11 +51,13 @@ export class StrategistAgent extends BaseAgent {
       mission = agent?.mission ?? undefined;
     } catch { /* continue without mission */ }
 
-    // Call LLM for strategy
-    const strategy = await this.extractJSON<SalesStrategy>([
-      { role: 'system', content: buildInitialStrategySystemPrompt() },
-      { role: 'user', content: buildInitialStrategyUserPrompt(ctx, mission) },
-    ], undefined, { model: SMART_MODEL, temperature: 0.4 });
+    // Call LLM for strategy. Wrap in retry + deterministic fallback so the
+    // strategist always returns a usable SalesStrategy, even when the LLM is
+    // flaky. The discovery gate in master-agent (master-agent.ts:830) trusts
+    // ONLY this output — there is intentionally no agentConfig fallback there
+    // — so this method is the single source of truth for bdStrategy and must
+    // not throw or return null.
+    const strategy = await this.generateStrategyWithFallback(ctx, mission, masterAgentId);
 
     // Safety net: the LLM occasionally picks bdStrategy='hiring_signal' for
     // industry-only missions when regional coverage is limited, which makes
@@ -118,5 +120,69 @@ export class StrategistAgent extends BaseAgent {
 
     logger.info({ masterAgentId }, 'StrategistAgent initial strategy completed');
     return { strategy, status: 'completed' };
+  }
+
+  /**
+   * Run extractJSON with a single retry, then fall back to a deterministic
+   * strategy derived from the mission text. Never throws — the master-agent
+   * discovery gate depends on ALWAYS having a strategist-produced bdStrategy.
+   */
+  private async generateStrategyWithFallback(
+    ctx: PipelineContext,
+    mission: string | undefined,
+    masterAgentId: string,
+  ): Promise<SalesStrategy> {
+    const messages = [
+      { role: 'system' as const, content: buildInitialStrategySystemPrompt() },
+      { role: 'user' as const, content: buildInitialStrategyUserPrompt(ctx, mission) },
+    ];
+
+    const maxAttempts = 2;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.extractJSON<SalesStrategy>(
+          messages,
+          undefined,
+          { model: SMART_MODEL, temperature: 0.4 },
+        );
+      } catch (err) {
+        lastErr = err;
+        logger.warn(
+          { err, attempt, maxAttempts, masterAgentId },
+          'StrategistAgent: extractJSON attempt failed',
+        );
+      }
+    }
+
+    logger.error(
+      { err: lastErr, masterAgentId, missionExcerpt: (mission ?? '').slice(0, 200) },
+      'StrategistAgent: all extractJSON attempts failed — using deterministic fallback strategy',
+    );
+    return this.buildDeterministicStrategy(mission);
+  }
+
+  /**
+   * Build a minimal but valid SalesStrategy from the mission text alone.
+   * Picks bdStrategy via the same regex heuristic the chat-service intent
+   * classifier uses. Empty arrays are intentional — the master-agent
+   * dispatcher gracefully degrades to agentConfig.hiringKeywords / services
+   * when strategy fields are missing.
+   */
+  private buildDeterministicStrategy(mission: string | undefined): SalesStrategy {
+    const intent = detectMissionStrategyFromText(mission ?? '');
+    const bdStrategy: SalesStrategy['bdStrategy'] = intent.recommended ?? 'industry_target';
+    return {
+      reasoning:
+        'Deterministic fallback strategy — LLM call failed after retries. ' +
+        'bdStrategy was derived from mission-text heuristics; downstream ' +
+        'discovery uses agentConfig defaults for keywords/services.',
+      userRole: 'vendor',
+      bdStrategy,
+      targetIndustries: [],
+      painPointsAddressed: [],
+      opportunitySearchQueries: [],
+      hiringKeywords: [],
+    };
   }
 }

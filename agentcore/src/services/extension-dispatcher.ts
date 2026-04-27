@@ -70,7 +70,11 @@ export async function enqueueExtensionTask(params: {
 // ─── Dispatch ───────────────────────────────────────────────────────────────
 
 export async function tryDispatch(tenantId: string, taskId: string): Promise<boolean> {
-  // Load active session + task
+  // Load active session + task. Diagnostic for the no-session case is
+  // emitted inside the callback so the operator can see in production logs
+  // exactly why a fetch_company queue isn't draining (extension session
+  // offline; tasks stay `pending` and are picked up by drainPending() on
+  // reconnect).
   const result = await withTenant(tenantId, async (tx) => {
     const [task] = await tx
       .select()
@@ -91,6 +95,14 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
       )
       .orderBy(desc(extensionSessions.lastSeenAt))
       .limit(1);
+
+    if (!session) {
+      logger.info(
+        { taskId, tenantId, masterAgentId: task.masterAgentId, type: task.type },
+        'Extension task queued but not dispatched — no connected extension session',
+      );
+    }
+
     return { task, session: session ?? null };
   });
 

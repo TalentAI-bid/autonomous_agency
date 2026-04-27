@@ -454,10 +454,18 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
     const { cursor } = request.query;
 
+    // Show every company discovered by this agent, regardless of enrichment
+    // state. The previous `data_completeness >= 10` filter silently hid all
+    // newly-discovered companies until the extension's fetch_company task
+    // completed — when that task failed or the extension was offline, the
+    // user could see only 1-2 enriched rows out of 20-30 discovered, with
+    // no way to tell the others existed. The dashboard renders empty
+    // industry/size/HQ fields gracefully and now exposes pipeline state
+    // honestly: discovered-but-unenriched companies show up so the user
+    // can see what's queued and diagnose extension-dispatch issues.
     const conditions = [
       eq(companies.masterAgentId, id),
       eq(companies.tenantId, request.tenantId),
-      sql`COALESCE(${companies.dataCompleteness}, 0) >= 10`,
     ];
     if (cursor) {
       try {

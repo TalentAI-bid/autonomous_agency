@@ -489,10 +489,17 @@ export class MasterAgent extends BaseAgent {
                 let totalJobsFound = 0;
                 const perLocation: Array<{ location: string; count: number }> = [];
                 const cappedJobTitles = jobTitles.slice(0, 10);
+                // Per-keyword counts summed across all locations. Used for the
+                // user-facing 0-result alert so the message can break down
+                // exactly which keyword bucket returned what — diagnoses
+                // parser/filter issues vs. genuinely thin keyword choices.
+                const perKeyword: Array<{ keyword: string; count: number }> =
+                  cappedJobTitles.map(k => ({ keyword: k, count: 0 }));
 
                 for (const loc of locs) {
                   let locCount = 0;
-                  for (const jobTitle of cappedJobTitles) {
+                  for (let i = 0; i < cappedJobTitles.length; i++) {
+                    const jobTitle = cappedJobTitles[i]!;
                     if (!isFirstCall) {
                       await new Promise(r => setTimeout(r, LINKEDIN_SCRAPE_DELAY_MS));
                     }
@@ -504,6 +511,7 @@ export class MasterAgent extends BaseAgent {
                         'Server-side LinkedIn Jobs scrape completed (per-keyword)',
                       );
                       locCount += result.companies.length;
+                      perKeyword[i]!.count += result.companies.length;
                     } catch (err) {
                       logger.warn({ err, masterAgentId, jobTitle, location: loc }, 'Server-side LinkedIn Jobs scrape failed');
                     }
@@ -540,6 +548,7 @@ export class MasterAgent extends BaseAgent {
                       jobTitles: cappedJobTitles,
                       locations: [...locs],
                       perLocation,
+                      perKeyword,
                       firedAt: new Date().toISOString(),
                       totalFound: totalJobsFound,
                     };
@@ -553,6 +562,10 @@ export class MasterAgent extends BaseAgent {
                     });
                     (agentConfig as Record<string, unknown>).pendingSearchChoice = pendingSearchChoice;
 
+                    const perKeywordSummary = perKeyword
+                      .map(k => `${k.keyword}: ${k.count}`)
+                      .join(', ');
+
                     this.sendMessage(null, 'system_alert', {
                       action: 'search_quality_low',
                       severity: 'warning',
@@ -561,10 +574,11 @@ export class MasterAgent extends BaseAgent {
                       jobTitle: jobTitleDisplay,
                       jobTitles: cappedJobTitles,
                       perLocation,
+                      perKeyword,
                       message:
                         outcome === 'empty'
-                          ? `I searched LinkedIn Jobs for "${jobTitleDisplay}" across ${locs.length} location(s) and found 0 companies. The keyword combo looks too narrow.`
-                          : `I found only ${totalJobsFound} companies for "${jobTitleDisplay}". Quality might be thin — happy to broaden.`,
+                          ? `Searched LinkedIn Jobs in ${locs.join(', ')} — found 0 matching jobs across ${cappedJobTitles.length} keyword(s). Per keyword: ${perKeywordSummary}. The page rendered fine — likely a parser/filter issue or genuinely thin keywords. Try broader terms or check logs.`
+                          : `Found ${totalJobsFound} companies for "${jobTitleDisplay}" across ${locs.length} location(s). Per keyword: ${perKeywordSummary}. Happy to broaden if quality looks thin.`,
                       choices: [
                         { id: 'continue', label: 'Continue with what I have' },
                         { id: 'broaden_manual', label: 'Let me type a broader term' },

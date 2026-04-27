@@ -244,58 +244,127 @@ export async function searchLinkedInJobs(
 
 // ─── Location resolution (country/state/city via country-state-city) ─────────
 
-// Cache the resolved alias set per location string so we don't re-walk the
-// full country/state/city dataset on every scrape. Keys are lowercased.
-const aliasCache = new Map<string, Set<string>>();
+// Two-tier alias set:
+//  - `phrase` (multi-word, length ≥ 4): matched with `loc.includes(alias)`.
+//    Examples: "new york", "île-de-france", "the hague". Safe because spaces
+//    naturally bound the match.
+//  - `token` (single-word, length ≥ 2): matched as a whole token by splitting
+//    the parsed location on `[\s,/.()]+` and checking exact equality.
+//    Examples: "paris", "lyon", "fr", "be", "ny", "tx". This prevents the
+//    cross-country false positives that pure substring match produced (e.g.
+//    French commune "Eu" matching "EU" tokens, US town "Cana" matching
+//    "Canada", ISO code "be" matching "Berlin").
+interface LocationAliases {
+  phrase: Set<string>;
+  token: Set<string>;
+}
+
+const aliasCache = new Map<string, LocationAliases>();
+
+// Common alt-codes that don't appear in country-state-city's iso-2 list but
+// are the natural input for English-speaking users. Lower-cased lookup keys
+// → canonical iso-2 code in the dataset.
+const COUNTRY_ALT_CODES: Record<string, string> = {
+  'uk': 'gb',
+  'usa': 'us',
+  'u.k.': 'gb',
+  'u.s.': 'us',
+  'u.s.a.': 'us',
+};
+
+// Built once at module load so we can detect "this parsed location names a
+// foreign country/state" without per-call allocation. Tokens cover ISO-2
+// country codes + single-word country names + 2-char alphabetic state codes
+// (US/CA/AU/MX-style: NY, TX, CA, ON, NSW…). Phrases cover multi-word
+// country names ("united states", "south africa", "czech republic"). Used
+// by filterByLocation to reject rows where the parsed location explicitly
+// names a country/state other than the searched one — defends against:
+//   - US-search matching "Toronto, Canada" because the US dataset has a
+//     city called "Toronto, OH"
+//   - UK-search matching "New York, NY" because the UK dataset has a city
+//     called "York"
+const ALL_FOREIGN_TOKENS = new Set<string>();
+const ALL_FOREIGN_PHRASES = new Set<string>();
+for (const c of Country.getAllCountries()) {
+  const name = c.name.toLowerCase();
+  if (/\s/.test(name)) ALL_FOREIGN_PHRASES.add(name);
+  else ALL_FOREIGN_TOKENS.add(name);
+  ALL_FOREIGN_TOKENS.add(c.isoCode.toLowerCase());
+  for (const s of State.getStatesOfCountry(c.isoCode)) {
+    if (s.isoCode.length === 2 && /^[a-z]+$/i.test(s.isoCode)) {
+      ALL_FOREIGN_TOKENS.add(s.isoCode.toLowerCase());
+    }
+  }
+}
+// Add common alt-codes so the foreign-country guard catches "London, UK" in
+// a non-UK search even though the dataset's UK ISO code is "GB".
+for (const alt of Object.keys(COUNTRY_ALT_CODES)) ALL_FOREIGN_TOKENS.add(alt);
 
 /**
- * Build the set of acceptable location-substrings for a given search location.
+ * Build the alias set for a given search location.
  *
- * Resolution strategy:
- *  1. Try to match the input against a country (by full name or ISO-2 code).
- *     If found, the alias set is { country name, all states ≥3 chars, all
- *     cities ≥3 chars }. The 2-char ISO code is intentionally NOT added —
- *     LinkedIn-parsed locations virtually never contain bare ISO codes, and
- *     adding them would false-positive on common 2-letter substrings (e.g.
- *     "be" matching "Berlin", "fr" matching "Frankfurt").
- *  2. Otherwise the alias set is just the raw lowercased input — the user
- *     passed a city, region, or free-form string. Substring match against
- *     that single term is the safest degradation.
+ *  1. If the input resolves to a country (by full name or ISO-2 code), the
+ *     alias set is { country name, country ISO-2, all states (name + 2-char
+ *     alphabetic code), all cities }.
+ *  2. Otherwise the alias set holds just the raw lowercased input — the user
+ *     passed a city/region/free-form string.
  *
- * The full city list is included (no slice cap). country-state-city has up
- * to ~9k cities for large countries; substring-matching ~30 parsed rows
- * against 9k aliases is well under 100ms and the result is cached per
- * unique searchLocation, so the cost is paid at most once per agent run.
+ * Numeric and 3-letter state codes (e.g. French INSEE numbers "01"–"95",
+ * Belgian local codes like "VAN"/"BRU") are intentionally skipped because
+ * LinkedIn-parsed locations don't use them; adding them would only create
+ * noise.
  */
-function resolveLocationAliases(searchLocation: string): Set<string> {
+function resolveLocationAliases(searchLocation: string): LocationAliases {
   const key = searchLocation.toLowerCase().trim();
   const cached = aliasCache.get(key);
   if (cached) return cached;
 
-  const aliases = new Set<string>();
+  const phrase = new Set<string>();
+  const token = new Set<string>();
+
+  const add = (raw: string | undefined | null) => {
+    if (!raw) return;
+    const t = raw.toLowerCase().trim();
+    if (t.length < 2) return;
+    if (/\s/.test(t)) {
+      if (t.length >= 4) phrase.add(t);
+    } else {
+      token.add(t);
+    }
+  };
+
+  // Normalise common alt-codes (UK -> GB, USA -> US) before the dataset lookup.
+  const lookupKey = COUNTRY_ALT_CODES[key] ?? key;
 
   const country = Country.getAllCountries().find(c =>
-    c.name.toLowerCase() === key || c.isoCode.toLowerCase() === key,
+    c.name.toLowerCase() === lookupKey || c.isoCode.toLowerCase() === lookupKey,
   );
 
   if (country) {
-    aliases.add(country.name.toLowerCase());
+    add(country.name);
+    add(country.isoCode);
+    // Include the alt-code itself if the user typed one ("UK" → also accept
+    // "uk" as a token alias so "Paris, UK" is matched).
+    if (key !== lookupKey) add(key);
 
     for (const state of State.getStatesOfCountry(country.isoCode)) {
-      if (state.name.length >= 3) aliases.add(state.name.toLowerCase());
+      add(state.name);
+      if (state.isoCode.length === 2 && /^[a-z]+$/i.test(state.isoCode)) {
+        add(state.isoCode);
+      }
     }
 
     const cities = City.getCitiesOfCountry(country.isoCode) ?? [];
     for (const city of cities) {
-      if (city.name.length >= 3) aliases.add(city.name.toLowerCase());
+      add(city.name);
     }
   } else {
-    // Unresolved input — keep the raw term as the only alias.
-    if (key.length >= 3) aliases.add(key);
+    add(key);
   }
 
-  aliasCache.set(key, aliases);
-  return aliases;
+  const result = { phrase, token };
+  aliasCache.set(key, result);
+  return result;
 }
 
 // ─── Parsing ──────────────────────────────────────────────────────────────────
@@ -541,10 +610,36 @@ function filterByLocation(results: LinkedInJobCompany[], searchLocation: string)
     // below.
     if (!r.location) return true;
     const loc = r.location.toLowerCase();
+    const tokens = loc.split(/[\s,/.()]+/).filter(Boolean);
 
-    // Substring match against any alias (country name, ISO code, state, city).
-    for (const alias of aliases) {
-      if (loc.includes(alias)) return true;
+    // Foreign-country/state guard: if the parsed location names a country
+    // or US/CA/AU-style state code that's NOT in our alias set, reject. This
+    // catches:
+    //   - US dataset has a city "Toronto, OH"; without this guard, US search
+    //     would falsely accept "Toronto, Canada".
+    //   - UK dataset has the historic city "York"; without this guard, UK
+    //     search would falsely accept "New York, NY" via the "york" token.
+    for (const t of tokens) {
+      if (ALL_FOREIGN_TOKENS.has(t) && !aliases.token.has(t)) return false;
+    }
+    for (const p of ALL_FOREIGN_PHRASES) {
+      if (loc.includes(p) && !aliases.phrase.has(p)) return false;
+    }
+
+    // Multi-word phrases ("new york", "île-de-france"): substring match —
+    // spaces naturally bound the match.
+    for (const p of aliases.phrase) {
+      if (loc.includes(p)) return true;
+    }
+
+    // Single-word names + ISO codes ("paris", "lyon", "fr", "ny"):
+    // whole-token match. Splitting on common separators (whitespace, commas,
+    // slashes, dots, parens) and comparing whole tokens prevents the
+    // cross-country false positives a pure substring match produced
+    // (e.g. US town "Cana" matching "Canada", French commune "Eu"
+    // matching the "EU" abbreviation, ISO "be" matching "Berlin").
+    for (const t of tokens) {
+      if (aliases.token.has(t)) return true;
     }
 
     // Keep remote jobs (they could be in the target region)
@@ -564,7 +659,12 @@ function filterByLocation(results: LinkedInJobCompany[], searchLocation: string)
   // alias set degrades to the raw input string).
   if (filtered.length === 0 && results.length > 0) {
     logger.warn(
-      { searchLocation, aliasCount: aliases.size, resultCount: results.length },
+      {
+        searchLocation,
+        phraseCount: aliases.phrase.size,
+        tokenCount: aliases.token.size,
+        resultCount: results.length,
+      },
       'LinkedIn Jobs location filter rejected all results — returning empty',
     );
   }

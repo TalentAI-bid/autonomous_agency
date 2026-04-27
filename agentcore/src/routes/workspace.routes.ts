@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { tenants, userTenants } from '../db/schema/index.js';
+import { tenants, userTenants, users } from '../db/schema/index.js';
 import { createTenant } from '../services/tenant.service.js';
 import { createSession, destroySession } from '../services/auth.service.js';
 import { NotFoundError, ForbiddenError } from '../utils/errors.js';
@@ -32,6 +32,25 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
       .from(userTenants)
       .innerJoin(tenants, eq(userTenants.tenantId, tenants.id))
       .where(eq(userTenants.userId, request.userId));
+
+    // Read-side fallback: if the user's home tenant (users.tenantId) is missing
+    // from user_tenants (legacy signups), fold it into the list so the switcher
+    // doesn't hide it. /login also writes a user_tenants row defensively, but
+    // existing active sessions need the read-side guarantee too.
+    const [self] = await db.select({ tenantId: users.tenantId })
+      .from(users)
+      .where(eq(users.id, request.userId))
+      .limit(1);
+
+    if (self?.tenantId && !workspaces.some((w) => w.id === self.tenantId)) {
+      const [home] = await db.select({
+        id: tenants.id,
+        name: tenants.name,
+        slug: tenants.slug,
+        plan: tenants.plan,
+      }).from(tenants).where(eq(tenants.id, self.tenantId)).limit(1);
+      if (home) workspaces.push({ ...home, role: 'owner' });
+    }
 
     return { data: workspaces };
   });

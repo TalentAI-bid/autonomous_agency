@@ -9,6 +9,7 @@ import {
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
 import { createRedisConnection } from '../queues/setup.js';
 import { SMART_MODEL } from '../tools/together-ai.tool.js';
+import { detectMissionStrategyFromText } from '../utils/mission-intent.js';
 import logger from '../utils/logger.js';
 
 const redis = createRedisConnection();
@@ -55,6 +56,31 @@ export class StrategistAgent extends BaseAgent {
       { role: 'system', content: buildInitialStrategySystemPrompt() },
       { role: 'user', content: buildInitialStrategyUserPrompt(ctx, mission) },
     ], undefined, { model: SMART_MODEL, temperature: 0.4 });
+
+    // Safety net: the LLM occasionally picks bdStrategy='hiring_signal' for
+    // industry-only missions when regional coverage is limited, which makes
+    // master-agent dispatch (master-agent.ts:443 vs :574) take the wrong path.
+    // If the mission text has clear industry markers and no hiring verbs, force
+    // industry_target and clear stale pipelineSteps so the dispatcher rebuilds
+    // root steps from targetIndustries instead of generic jobTitles.
+    const intent = detectMissionStrategyFromText(mission ?? '');
+    if (
+      strategy.bdStrategy === 'hiring_signal' &&
+      intent.hasIndustryMentions &&
+      !intent.hasHiringVerbs
+    ) {
+      logger.warn(
+        {
+          masterAgentId,
+          missionExcerpt: (mission ?? '').slice(0, 200),
+          originalBdStrategy: strategy.bdStrategy,
+          recommendedByHeuristic: intent.recommended,
+        },
+        'Strategist safety-net: overriding hiring_signal → industry_target for industry-only mission',
+      );
+      strategy.bdStrategy = 'industry_target';
+      strategy.pipelineSteps = undefined;
+    }
 
     // Save to masterAgent.config.salesStrategy
     await withTenant(this.tenantId, async (tx) => {

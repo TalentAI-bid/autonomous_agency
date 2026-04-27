@@ -39,9 +39,14 @@ const envSchema = z.object({
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
 
   // Email encryption
   EMAIL_ENCRYPTION_KEY: z.string().optional(),
+
+  // Dashboard URL used in transactional emails (e.g. invite links).
+  // Defaults to localhost so dev works out of the box; production must set this.
+  DASHBOARD_URL: z.string().url().default('http://localhost:3000'),
 
   // Feature flags
   USE_COMPANY_FINDER: z.coerce.boolean().default(true),

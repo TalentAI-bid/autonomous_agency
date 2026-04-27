@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { User, Building, Key, Bell, Building2, Package, ChevronRight, Mail } from 'lucide-react';
+import { User, Building, Key, Bell, Building2, Package, ChevronRight, Mail, Users } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
@@ -81,6 +81,24 @@ export default function SettingsPage() {
             </CardTitle>
             <CardDescription>
               SMTP sending accounts and IMAP/POP inbox listeners
+            </CardDescription>
+          </CardHeader>
+        </Card>
+
+        <Card
+          onClick={() => router.push('/settings/team')}
+          className="cursor-pointer transition-colors hover:border-primary"
+        >
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                Team
+              </span>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </CardTitle>
+            <CardDescription>
+              Invite employees, manage roles, and revoke pending invitations
             </CardDescription>
           </CardHeader>
         </Card>

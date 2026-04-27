@@ -10,7 +10,11 @@ import {
   destroySession,
 } from '../services/auth.service.js';
 import { createTenant } from '../services/tenant.service.js';
-import { ValidationError, UnauthorizedError } from '../utils/errors.js';
+import {
+  findActiveInvitationByToken,
+  markInvitationAccepted,
+} from '../services/invitation.service.js';
+import { ValidationError, UnauthorizedError, NotFoundError, ConflictError } from '../utils/errors.js';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -91,6 +95,14 @@ export default async function authRoutes(fastify: FastifyInstance) {
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) throw new UnauthorizedError('Invalid credentials');
 
+    // Defensive backfill: ensure the user's home tenant (users.tenantId) has a
+    // matching user_tenants row. Older signups predate the bridge table, so the
+    // workspace-switcher would otherwise omit the user's original tenant the
+    // moment they create a second workspace.
+    await db.insert(userTenants)
+      .values({ userId: user.id, tenantId: user.tenantId, role: 'owner' })
+      .onConflictDoNothing();
+
     const token = await createSession({
       tenantId: user.tenantId,
       userId: user.id,
@@ -117,6 +129,122 @@ export default async function authRoutes(fastify: FastifyInstance) {
         workspaces,
       },
     };
+  });
+
+  // GET /api/auth/invitations/:token — preview an invite (public, no auth).
+  fastify.get<{ Params: { token: string } }>('/invitations/:token', async (request) => {
+    const invite = await findActiveInvitationByToken(request.params.token);
+    if (!invite) throw new NotFoundError('Invitation');
+
+    const [tenant] = await db.select({ name: tenants.name })
+      .from(tenants).where(eq(tenants.id, invite.tenantId)).limit(1);
+    let inviterEmail: string | null = null;
+    let inviterName: string | null = null;
+    if (invite.invitedBy) {
+      const [inviter] = await db.select({ email: users.email, name: users.name })
+        .from(users).where(eq(users.id, invite.invitedBy)).limit(1);
+      inviterEmail = inviter?.email ?? null;
+      inviterName = inviter?.name ?? null;
+    }
+
+    return {
+      data: {
+        email: invite.email,
+        role: invite.role,
+        tenantName: tenant?.name ?? 'Workspace',
+        inviterEmail,
+        inviterName,
+        expiresAt: invite.expiresAt,
+      },
+    };
+  });
+
+  // POST /api/auth/invitations/:token/accept
+  // Two flows:
+  //  - Existing user (users.email matches invited email) → just attach to tenant.
+  //  - New user → create user + attach to tenant. Requires { name, password }.
+  fastify.post<{ Params: { token: string } }>('/invitations/:token/accept', async (request, reply) => {
+    const acceptSchema = z.object({
+      name: z.string().min(1).optional(),
+      password: z.string().min(8).optional(),
+    });
+    const parsed = acceptSchema.safeParse(request.body ?? {});
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+    const invite = await findActiveInvitationByToken(request.params.token);
+    if (!invite) throw new NotFoundError('Invitation');
+
+    const [existingUser] = await db.select().from(users)
+      .where(eq(users.email, invite.email)).limit(1);
+
+    let userId: string;
+    let userRecord: { id: string; email: string; name: string | null; role: string };
+
+    if (existingUser) {
+      // Add membership row (idempotent).
+      await db.insert(userTenants).values({
+        userId: existingUser.id,
+        tenantId: invite.tenantId,
+        role: invite.role,
+      }).onConflictDoNothing();
+      userId = existingUser.id;
+      userRecord = {
+        id: existingUser.id,
+        email: existingUser.email,
+        name: existingUser.name,
+        role: existingUser.role,
+      };
+    } else {
+      if (!parsed.data.password || !parsed.data.name) {
+        throw new ValidationError('name and password are required for new users');
+      }
+      const passwordHash = await hashPassword(parsed.data.password);
+      const [created] = await db.insert(users).values({
+        tenantId: invite.tenantId,
+        email: invite.email,
+        passwordHash,
+        name: parsed.data.name,
+        role: 'member',
+      }).returning();
+      if (!created) throw new ConflictError('Failed to create user');
+      await db.insert(userTenants).values({
+        userId: created.id,
+        tenantId: invite.tenantId,
+        role: invite.role,
+      });
+      userId = created.id;
+      userRecord = { id: created.id, email: created.email, name: created.name, role: created.role };
+    }
+
+    await markInvitationAccepted(invite.id, userId);
+
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, invite.tenantId)).limit(1);
+    if (!tenant) throw new NotFoundError('Tenant');
+
+    const token = await createSession({
+      tenantId: invite.tenantId,
+      userId,
+      role: invite.role,
+    });
+
+    const workspaces = await db.select({
+      id: tenants.id,
+      name: tenants.name,
+      slug: tenants.slug,
+      role: userTenants.role,
+    })
+      .from(userTenants)
+      .innerJoin(tenants, eq(userTenants.tenantId, tenants.id))
+      .where(eq(userTenants.userId, userId));
+
+    return reply.status(existingUser ? 200 : 201).send({
+      data: {
+        token,
+        user: userRecord,
+        tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+        workspaces,
+      },
+    });
   });
 
   // POST /api/auth/logout — deletes the Redis session for the Bearer token,

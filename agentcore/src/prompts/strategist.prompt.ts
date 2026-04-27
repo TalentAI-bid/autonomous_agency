@@ -135,11 +135,39 @@ Walkthrough — mission *"I sell Hedera consulting to fintechs in the UK"*:
 - \`targetRoles\` (in context, not your output): ["CTO", "VP Engineering", "Head of Blockchain"]
 - Logic: We search LinkedIn Jobs for *companies hiring blockchain devs* (the signal), then email the *CTO* at each (the decision maker).
 
-BD STRATEGY DECISION — Pick ONE based on the mission:
-- "hiring_signal": The mission is about selling to companies that are actively hiring for roles related to the service (e.g. selling DevOps consulting → find companies hiring DevOps engineers). Best when the service directly replaces or augments a role.
-- "industry_target": The mission targets a whole industry segment regardless of hiring activity (e.g. selling compliance software to all banks). Best for broad market campaigns.
-- "hybrid": Both approaches combined (recommended default). Best when you want maximum coverage.
-Set bdStrategy in your JSON output based on the mission analysis.
+BD STRATEGY DECISION — Pick ONE based on the mission text ALONE:
+
+CRITICAL — strategy is decided from the MISSION, not from regional data quality.
+\`needsChromeExtension\` is a separate decision based on \`primaryRegion\`. Do NOT
+pick \`hiring_signal\` because the region has limited public sources — pick the
+strategy from what the mission says, then set \`needsChromeExtension\` from the region.
+
+Decision rules (apply in order, first match wins):
+
+1. If the mission mentions hiring/recruiting/jobs/roles/team-growth verbs (e.g.
+   "actively hiring", "growing their team", "open roles", "hiring DevOps engineers")
+   AND ALSO names an industry/vertical/ICP → bdStrategy = "hybrid".
+
+2. If the mission mentions hiring/recruiting/jobs/roles/team-growth verbs but NO
+   specific industry/vertical → bdStrategy = "hiring_signal".
+
+3. If the mission names industries/verticals/ICPs (e.g. "SaaS firms", "fintech
+   companies", "mid-market e-commerce", "compliance software for banks") and contains
+   NO hiring verbs → bdStrategy = "industry_target". You MUST pick industry_target
+   here even if regional coverage is limited; the user wants industry-wide outreach,
+   not a hiring-signal proxy.
+
+4. If neither hiring verbs nor industry markers are clearly present → bdStrategy =
+   "hybrid" as a safe default for maximum coverage.
+
+Worked examples:
+
+- Mission: "Identify English-speaking mid-market SaaS, FinTech, HealthTech, and
+  e-commerce firms in Gulf countries..." → industry_target (industries named, no
+  hiring verbs). NEVER hiring_signal.
+- Mission: "Find European companies actively hiring senior DevOps engineers" →
+  hiring_signal (hiring verb, no industry).
+- Mission: "EU fintechs that are hiring blockchain developers" → hybrid (both).
 
 DATA SOURCE QUALITY BY REGION — use this to populate dataSourceStrategy:
 - FR / BE / CH (francophone): EXCELLENT. Strong public job boards (Welcome to the Jungle, Free-Work, APEC) + SIRENE registry (societe_com). needsChromeExtension = false. availableSources examples: ["welcometothejungle","welcometothejungle_company","freework","societe_com"].

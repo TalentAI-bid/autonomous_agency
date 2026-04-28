@@ -24,11 +24,12 @@ import Link from 'next/link';
 import type { ContactDeepData } from '@/types';
 
 export default function ContactDetailPage() {
-  const { agentId, id } = useParams<{ agentId: string; id: string }>();
-  const { data: contact, isLoading } = useContact(id);
+  // Route is /agents/[id]/contacts/[contactId] — `id` is the agent, `contactId` is the contact.
+  const { id: agentId, contactId } = useParams<{ id: string; contactId: string }>();
+  const { data: contact, isLoading } = useContact(contactId);
   const { data: agent } = useMasterAgent(agentId);
-  const { data: timeline } = useContactTimeline(id);
-  const { data: deals } = useDeals({ contactId: id });
+  const { data: timeline } = useContactTimeline(contactId);
+  const { data: deals } = useDeals({ contactId });
   const { data: stages } = useCrmStages();
   const [emailModalOpen, setEmailModalOpen] = useState(false);
 
@@ -427,7 +428,7 @@ export default function ContactDetailPage() {
               <span className="flex items-center gap-2">
                 <Activity className="w-4 h-4" /> Activity Timeline
               </span>
-              <AddActivityDialog contactId={id} />
+              <AddActivityDialog contactId={contactId} />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -437,7 +438,7 @@ export default function ContactDetailPage() {
       </div>
 
       <EmailComposeModal
-        contactId={id}
+        contactId={contactId}
         contactName={fullName}
         contactEmail={contact.email}
         open={emailModalOpen}

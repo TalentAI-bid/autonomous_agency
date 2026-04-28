@@ -20,11 +20,12 @@ import {
 import Link from 'next/link';
 import type { CompanyDeepData, PainPoint } from '@/types';
 
-export default function CompanyDetailPage({ params }: { params: Promise<{ agentId: string; id: string }> }) {
-  const { agentId, id } = use(params);
-  const { data: company, isLoading } = useCompany(id);
+export default function CompanyDetailPage({ params }: { params: Promise<{ id: string; companyId: string }> }) {
+  // Route is /agents/[id]/companies/[companyId] — `id` is the agent, `companyId` is the company.
+  const { id: agentId, companyId } = use(params);
+  const { data: company, isLoading } = useCompany(companyId);
   const { data: agent } = useMasterAgent(agentId);
-  const { data: contactsRes } = useContacts({ companyId: id });
+  const { data: contactsRes } = useContacts({ companyId });
   const companyContacts = contactsRes?.data ?? [];
   const findEmail = useFindContactEmail();
   const { toast } = useToast();

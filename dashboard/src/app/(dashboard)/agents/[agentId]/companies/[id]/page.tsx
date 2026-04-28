@@ -3,6 +3,7 @@
 import { use } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useCompany } from '@/hooks/use-companies';
+import { useMasterAgent } from '@/hooks/use-agents';
 import { useContacts, useFindContactEmail } from '@/hooks/use-contacts';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,9 +20,10 @@ import {
 import Link from 'next/link';
 import type { CompanyDeepData, PainPoint } from '@/types';
 
-export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function CompanyDetailPage({ params }: { params: Promise<{ agentId: string; id: string }> }) {
+  const { agentId, id } = use(params);
   const { data: company, isLoading } = useCompany(id);
+  const { data: agent } = useMasterAgent(agentId);
   const { data: contactsRes } = useContacts({ companyId: id });
   const companyContacts = contactsRes?.data ?? [];
   const findEmail = useFindContactEmail();
@@ -94,7 +96,6 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     if (!val) return '';
     if (typeof val === 'string') return val;
     if (typeof val === 'object') {
-      // Join non-empty values: {city: "London", state: "", country: "UK"} → "London, UK"
       return Object.values(val as Record<string, unknown>)
         .filter((v) => v && typeof v === 'string' && v.trim())
         .join(', ');
@@ -107,9 +108,11 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       {/* Breadcrumb + smart back */}
       <Breadcrumb
         showBack
-        backFallback="/companies"
+        backFallback={`/agents/${agentId}`}
         items={[
-          { href: '/companies', label: 'Companies' },
+          { href: '/agents', label: 'Agents' },
+          { href: `/agents/${agentId}`, label: agent?.name ?? 'Agent' },
+          { href: `/agents/${agentId}?tab=companies`, label: 'Companies' },
           { label: company.name ?? 'Company' },
         ]}
       />
@@ -246,7 +249,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   <div key={contact.id} className="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="min-w-0">
-                        <Link href={`/contacts/${contact.id}`} className="font-medium text-sm hover:underline">
+                        <Link href={`/agents/${agentId}/contacts/${contact.id}`} className="font-medium text-sm hover:underline">
                           {[contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown'}
                         </Link>
                         {contact.title && (
@@ -288,7 +291,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                           <Linkedin className="w-3.5 h-3.5" />
                         </a>
                       )}
-                      <Link href={`/contacts/${contact.id}`}>
+                      <Link href={`/agents/${agentId}/contacts/${contact.id}`}>
                         <Button variant="ghost" size="icon" className="h-7 w-7">
                           <ExternalLink className="w-3.5 h-3.5" />
                         </Button>

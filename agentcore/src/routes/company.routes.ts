@@ -15,6 +15,9 @@ const createCompanySchema = z.object({
   funding: z.string().max(255).optional(),
   linkedinUrl: z.string().url().max(500).optional(),
   description: z.string().optional(),
+  // Required: companies are always owned by an agent. UI is now scoped under
+  // /agents/[agentId]/companies/* — orphans would be unreachable from the dashboard.
+  masterAgentId: z.string().uuid(),
 });
 
 const updateCompanySchema = createCompanySchema.partial();

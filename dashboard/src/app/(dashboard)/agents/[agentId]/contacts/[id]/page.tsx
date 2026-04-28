@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useContact } from '@/hooks/use-contacts';
+import { useMasterAgent } from '@/hooks/use-agents';
 import { useContactTimeline, useDeals, useCrmStages } from '@/hooks/use-crm';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageBadge } from '@/components/crm/stage-badge';
@@ -23,8 +24,9 @@ import Link from 'next/link';
 import type { ContactDeepData } from '@/types';
 
 export default function ContactDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { agentId, id } = useParams<{ agentId: string; id: string }>();
   const { data: contact, isLoading } = useContact(id);
+  const { data: agent } = useMasterAgent(agentId);
   const { data: timeline } = useContactTimeline(id);
   const { data: deals } = useDeals({ contactId: id });
   const { data: stages } = useCrmStages();
@@ -58,9 +60,11 @@ export default function ContactDetailPage() {
       {/* Breadcrumb + smart back */}
       <Breadcrumb
         showBack
-        backFallback="/contacts"
+        backFallback={`/agents/${agentId}`}
         items={[
-          { href: '/contacts', label: 'Leads' },
+          { href: '/agents', label: 'Agents' },
+          { href: `/agents/${agentId}`, label: agent?.name ?? 'Agent' },
+          { href: `/agents/${agentId}?tab=contacts`, label: 'Contacts' },
           { label: fullName },
         ]}
       />

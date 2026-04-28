@@ -291,7 +291,7 @@ export default function DashboardPage() {
               return (
                 <Link
                   key={c.id}
-                  href={`/contacts/${c.id}`}
+                  href={c.masterAgentId ? `/agents/${c.masterAgentId}/contacts/${c.id}` : '/agents'}
                   style={{
                     padding: '10px 14px',
                     borderBottom: '1px solid var(--line)',

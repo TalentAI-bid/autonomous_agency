@@ -9,8 +9,6 @@ import { useAuthStore } from '@/stores/auth.store';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Dot } from '@/components/ui/dot';
 import { useAgents } from '@/hooks/use-agents';
-import { useContacts } from '@/hooks/use-contacts';
-import { useCompanies } from '@/hooks/use-companies';
 import { apiPost } from '@/lib/api';
 
 type NavItem = { href: string; label: string; icon: IconName; count?: number };
@@ -34,8 +32,6 @@ export function Sidebar() {
   const { user, tenant } = useAuthStore();
   const logout = useAuthStore((s) => s.logout);
   const { data: agents } = useAgents();
-  const { data: contacts } = useContacts();
-  const { data: companies } = useCompanies();
 
   async function handleLogout() {
     try {
@@ -58,8 +54,6 @@ export function Sidebar() {
     { href: '/agents/new', label: 'New Agent', icon: 'plus' },
   ];
   const data: NavItem[] = [
-    { href: '/contacts', label: 'Leads', icon: 'users', count: contacts?.pagination.total },
-    { href: '/companies', label: 'Companies', icon: 'build', count: companies?.pagination.total },
     { href: '/crm', label: 'Pipeline', icon: 'deal' },
     { href: '/analytics', label: 'Analytics', icon: 'chart' },
   ];

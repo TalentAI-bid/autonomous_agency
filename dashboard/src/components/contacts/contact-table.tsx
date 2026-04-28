@@ -128,11 +128,13 @@ export function ContactTable({ filters }: ContactTableProps) {
                         <Send className="w-3.5 h-3.5" />
                       </Button>
                     )}
-                    <Link href={`/contacts/${contact.id}`}>
-                      <Button variant="ghost" size="icon" className="h-7 w-7">
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </Button>
-                    </Link>
+                    {contact.masterAgentId && (
+                      <Link href={`/agents/${contact.masterAgentId}/contacts/${contact.id}`}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Button>
+                      </Link>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

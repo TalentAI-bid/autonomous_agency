@@ -49,7 +49,9 @@ const createContactSchema = z.object({
   skills: z.array(z.string()).optional(),
   source: z.enum(['linkedin_search', 'linkedin_profile', 'cv_upload', 'manual', 'web_search']).optional(),
   status: z.enum(['discovered', 'enriched', 'scored', 'contacted', 'replied', 'qualified', 'interview_scheduled', 'rejected', 'archived']).optional(),
-  masterAgentId: z.string().uuid().optional(),
+  // Required: contacts are always owned by an agent. UI is now scoped under
+  // /agents/[agentId]/contacts/* — orphans would be unreachable from the dashboard.
+  masterAgentId: z.string().uuid(),
 });
 
 const updateContactSchema = createContactSchema.partial();

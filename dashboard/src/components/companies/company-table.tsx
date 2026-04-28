@@ -98,11 +98,13 @@ export function CompanyTable({ filters }: CompanyTableProps) {
                   {formatDate(company.createdAt)}
                 </TableCell>
                 <TableCell>
-                  <Link href={`/companies/${company.id}`}>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Button>
-                  </Link>
+                  {company.masterAgentId && (
+                    <Link href={`/agents/${company.masterAgentId}/companies/${company.id}`}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Button>
+                    </Link>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

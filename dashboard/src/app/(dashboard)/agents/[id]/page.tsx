@@ -347,7 +347,7 @@ export default function AgentDetailPage() {
               </p>
             ) : (
               contacts.map((contact) => (
-                <Link key={contact.id} href={`/contacts/${contact.id}`} className="block cursor-pointer">
+                <Link key={contact.id} href={`/agents/${id}/contacts/${contact.id}`} className="block cursor-pointer">
                   <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{[contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || 'Unknown'}</p>
@@ -400,7 +400,7 @@ export default function AgentDetailPage() {
                   const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
 
                   return (
-                    <Link key={company.id} href={`/companies/${company.id}`} className="block">
+                    <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">
                       <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors space-y-3">
                         {/* Header: name + domain + badges */}
                         <div className="flex items-start justify-between gap-2">

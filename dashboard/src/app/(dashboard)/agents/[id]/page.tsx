@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments } from '@/hooks/use-agents';
@@ -24,10 +24,36 @@ import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
 
 type Tab = 'overview' | 'contacts' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room';
+const VALID_TABS: readonly Tab[] = [
+  'overview', 'contacts', 'opportunities', 'companies', 'documents', 'emails', 'activity', 'strategy', 'room',
+];
+
+function tabFromQuery(value: string | null): Tab {
+  return value && (VALID_TABS as readonly string[]).includes(value) ? (value as Tab) : 'overview';
+}
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Initialize from ?tab= so deep-linking (and breadcrumb back-from-detail-page)
+  // lands on the right tab. Keep URL in sync when the user clicks tabs.
+  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromQuery(searchParams.get('tab')));
+
+  useEffect(() => {
+    const t = tabFromQuery(searchParams.get('tab'));
+    setActiveTab((prev) => (prev === t ? prev : t));
+  }, [searchParams]);
+
+  function selectTab(t: Tab) {
+    setActiveTab(t);
+    const q = new URLSearchParams(searchParams.toString());
+    if (t === 'overview') q.delete('tab'); else q.set('tab', t);
+    const qs = q.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
   const { data: agentRes, isLoading } = useMasterAgent(id);
   const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 100 });
   const { data: stats } = useAgentStats(id);
@@ -177,7 +203,7 @@ export default function AgentDetailPage() {
           return (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => selectTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.key
                   ? 'border-primary text-foreground'

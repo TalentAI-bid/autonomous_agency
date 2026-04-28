@@ -383,6 +383,10 @@ export default function AgentDetailPage() {
                   const raw = (company.rawData ?? {}) as Record<string, unknown>;
                   const keyPeople = (raw.keyPeople as Array<{ name: string; title: string }>) ?? [];
                   const completeness = company.dataCompleteness ?? 0;
+                  const hiringSignal = raw.hiringSignal === true;
+                  const openJob = typeof raw.openJob === 'string' ? raw.openJob : '';
+                  const jobUrl = typeof raw.jobUrl === 'string' ? raw.jobUrl : '';
+                  const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
 
                   return (
                     <Link key={company.id} href={`/companies/${company.id}`} className="block">
@@ -407,6 +411,33 @@ export default function AgentDetailPage() {
                             </Badge>
                           </div>
                         </div>
+
+                        {/* Hiring signal chip — shows what role this company is hiring for */}
+                        {hiringSignal && openJob && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            {jobUrl ? (
+                              <a
+                                href={jobUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-xs bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 px-2 py-0.5 rounded-full transition-colors"
+                              >
+                                <span className="font-medium">Hiring:</span>
+                                <span>{openJob}</span>
+                                <span className="text-emerald-500/70">↗</span>
+                              </a>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full">
+                                <span className="font-medium">Hiring:</span>
+                                <span>{openJob}</span>
+                              </span>
+                            )}
+                            {jobPostedAt && (
+                              <span className="text-[10px] text-muted-foreground">Posted {jobPostedAt}</span>
+                            )}
+                          </div>
+                        )}
 
                         {/* Description */}
                         {company.description && (

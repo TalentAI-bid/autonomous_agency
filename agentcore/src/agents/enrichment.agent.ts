@@ -618,12 +618,12 @@ export class EnrichmentAgent extends BaseAgent {
                       emailAttempts = 0;
                       logger.info({ contactId, personName: person.name, personEmail }, 'Key person email from cached pattern (no SMTP)');
                     } else {
-                      // FALLBACK: Generect/emailIntelligence — only when no pattern is cached for this domain
+                      // FALLBACK: emailIntelligence (domain-pattern probe) — only when no pattern is cached for this domain
                       const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, companyDomain, this.tenantId, companyId ?? undefined);
                       if (emailResult.email) {
                         personEmail = emailResult.email;
-                        emailMethod = 'generect_fallback';
-                        logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found via Generect fallback');
+                        emailMethod = 'pattern_fallback';
+                        logger.info({ contactId, personName: person.name, personEmail }, 'Key person email found via pattern fallback');
                       }
                     }
                   }
@@ -776,13 +776,13 @@ export class EnrichmentAgent extends BaseAgent {
             raw.emailAttempts = patternResult.attempts;
             logger.info({ contactId, email: emailFound, method: patternResult.method, attempts: patternResult.attempts }, 'Email found via pattern + Reacher');
           }
-          // FALLBACK: Old Generect/emailIntelligence method
+          // FALLBACK: emailIntelligence (domain-pattern probe)
           if (!emailFound) {
             const result = await emailIntelligenceEngine.findEmail(contact.firstName!, contact.lastName!, domain, this.tenantId, companyId ?? undefined);
             if (result.email && result.confidence >= 50) {
               emailFound = result.email;
               emailVerified = result.confidence >= 80;
-              raw.emailMethod = 'generect_fallback';
+              raw.emailMethod = 'pattern_fallback';
             }
           }
         }
@@ -1425,7 +1425,7 @@ export class EnrichmentAgent extends BaseAgent {
 
             // Now fan out: every member's email is built from the cached pattern
             // (zero SMTP cost). Members with no cached pattern get null and fall
-            // through to the per-member Generect fallback below.
+            // through to the per-member pattern-probe fallback below.
             const memberRefs = priorityPeople
               .map((p) => {
                 const parts = (p.name ?? '').trim().split(/\s+/);
@@ -1479,7 +1479,7 @@ export class EnrichmentAgent extends BaseAgent {
           }
 
           // 2. Find email — first try the prebuilt cached-pattern map (zero SMTP),
-          //    then fall back to per-member Generect lookup if no pattern is cached.
+          //    then fall back to per-member domain-pattern probe if no pattern is cached.
           let personEmail = '';
           let emailMethod: string | undefined;
           let emailAttempts: number | undefined;
@@ -1497,8 +1497,8 @@ export class EnrichmentAgent extends BaseAgent {
                   const emailResult = await emailIntelligenceEngine.findEmail(firstName, lastName, emailDomain, this.tenantId, companyId);
                   if (emailResult.email) {
                     personEmail = emailResult.email;
-                    emailMethod = emailResult.method || 'generect_fallback';
-                    logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member via Generect fallback');
+                    emailMethod = emailResult.method || 'pattern_fallback';
+                    logger.info({ personName: person.name, email: personEmail, confidence: emailResult.confidence, method: emailResult.method }, 'Email found for team member via pattern fallback');
                   }
                 }
               } catch (err) {

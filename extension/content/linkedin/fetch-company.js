@@ -203,7 +203,11 @@
     if (/^View\s+.*profile/i.test(t)) return false;
     // Reject anything still containing the screen-reader "View ... profile"
     // suffix anywhere in the string (catches concatenated "NameView Name's profile").
-    if (/View\s+.+?(?:'s\s+profile|\s+profile)/i.test(t)) return false;
+    // Accepts straight + curly apostrophes — LinkedIn renders U+2019.
+    if (/View\s+.+?(?:[’'‘`]s\s+profile|\s+profile)/i.test(t)) return false;
+    // Reject any residual "View" — `\b` after View matches both standalone
+    // " View …" and concatenated "SeveroView" (boundary at end of word).
+    if (/View\b/i.test(t)) return false;
     if (/\bprofile\b/i.test(t)) return false;
     if (/%[0-9A-Fa-f]{2}/.test(t)) return false; // URL-encoded residue
     return true;
@@ -218,13 +222,17 @@
     if (!text) return text;
     let t = text.trim();
     // Pattern A: "View NAME('s) profile" embedded → return NAME (it's the full name).
-    const m = t.match(/View\s+(.+?)(?:'s\s+profile|\s+profile)/i);
+    // Accept straight, curly, and backtick apostrophes — LinkedIn renders U+2019.
+    const m = t.match(/View\s+(.+?)(?:[’'‘`]s\s+profile|\s+profile)/i);
     if (m && m[1]) {
-      const inner = m[1].trim();
+      const inner = m[1].trim().replace(/[‘’'"`]+\s*$/, '').trim();
       if (inner.length >= 2 && inner.length <= 100) return inner;
     }
     // Pattern B: trailing "...View NAME profile" with no clean inner match → strip.
-    t = t.replace(/\s*View\s+\S.*?(?:'s\s+profile|\s+profile)\s*$/i, '').trim();
+    t = t.replace(/\s*View\s+\S.*?(?:[’'‘`]s\s+profile|\s+profile)\s*$/i, '').trim();
+    // Pattern C: bare concatenation residue (e.g. "SeveroView") with no
+    // trailing " profile" — strip "View" onwards when it follows a letter.
+    t = t.replace(/(?<=[A-Za-zÀ-ÿ])View\b.*$/i, '').trim();
     return t;
   }
 

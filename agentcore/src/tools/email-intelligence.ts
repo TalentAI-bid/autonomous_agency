@@ -1,11 +1,10 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { db, withTenant } from '../config/database.js';
-import { env } from '../config/env.js';
 import { createRedisConnection } from '../queues/setup.js';
 import { emailIntelligence, domainPatterns, deliverySignals, companies } from '../db/schema/index.js';
 import { search } from './searxng.tool.js';
-import { generectEmailTool } from './generect-email.js';
+import { findEmailByPattern } from './email-finder.tool.js';
 import logger from '../utils/logger.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -57,10 +56,6 @@ class EmailIntelligenceEngine {
 
   constructor() {
     this.redis = createRedisConnection();
-
-    if (!env.GENERECT_API_KEY) {
-      logger.warn('GENERECT_API_KEY is not set — email discovery will return null for all lookups');
-    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -72,10 +67,6 @@ class EmailIntelligenceEngine {
     tenantId?: string,
     companyId?: string,
   ): Promise<EmailResult> {
-    if (!env.GENERECT_API_KEY) {
-      return { email: null, confidence: 0, method: null, source: null };
-    }
-
     const first = firstName.trim();
     const last = lastName.trim();
     if (!first || !last || !companyNameOrDomain.trim()) {
@@ -90,7 +81,7 @@ class EmailIntelligenceEngine {
 
     const cacheKey = `email:intel:${domain}:${first.toLowerCase()}:${last.toLowerCase()}`;
 
-    // Check Redis cache for previous Generect result
+    // Check Redis cache for previously discovered email
     try {
       const cached = await this.redis.get(cacheKey);
       if (cached) {
@@ -101,25 +92,36 @@ class EmailIntelligenceEngine {
       logger.debug({ err }, 'Redis cache read failed');
     }
 
-    // Call Generect API (sole source of truth)
+    // Domain-pattern lookup (no external API). Uses learned + verified
+    // patterns from `domain_patterns`, then SMTP-probes via Reacher.
     try {
-      const generectResult = await generectEmailTool.findEmail(first, last, domain);
-      if (generectResult.email && generectResult.confidence >= 70) {
-        const result: EmailResult = {
-          email: generectResult.email,
-          confidence: generectResult.confidence,
-          method: 'generect',
-          source: `generect api (format: ${generectResult.emailFormat ?? 'unknown'})`,
-        };
-        await this.persistDiscovery(first, last, domain, result);
-        await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
-        return result;
+      const r = await findEmailByPattern(first, last, domain);
+      if (!r.email) {
+        return { email: null, confidence: 0, method: null, source: null };
       }
+      // Map probe outcome → confidence: SMTP-verified is high-confidence;
+      // catch-all guess is medium; everything else falls through above.
+      const confidence =
+        r.method === 'smtp_verified' ? 95 :
+        r.method === 'cached_pattern' ? 90 :
+        r.method === 'catch_all_guess' ? 70 :
+        0;
+      if (confidence < 70) {
+        return { email: null, confidence: 0, method: null, source: null };
+      }
+      const result: EmailResult = {
+        email: r.email,
+        confidence,
+        method: 'domain_pattern',
+        source: `domain pattern (${r.method}, ${r.attempts} probe${r.attempts === 1 ? '' : 's'})`,
+      };
+      await this.persistDiscovery(first, last, domain, result);
+      await this.cacheResult(cacheKey, result, CACHE_TTL_30D);
+      return result;
     } catch (err) {
-      logger.debug({ err, first, last, domain }, 'Generect discovery failed');
+      logger.debug({ err, first, last, domain }, 'Domain-pattern discovery failed');
     }
 
-    // No fallback — return null
     return { email: null, confidence: 0, method: null, source: null };
   }
 
@@ -309,7 +311,7 @@ class EmailIntelligenceEngine {
             .set({
               email: result.email,
               confidence: result.confidence,
-              method: result.method as 'generect' | 'searxng' | 'github' | 'manual' | 'crawl' | null,
+              method: result.method as 'searxng' | 'github' | 'domain_pattern' | 'mx_guess' | 'manual' | 'crawl' | null,
               source: result.source,
               invalidated: false,
               updatedAt: new Date(),
@@ -323,7 +325,7 @@ class EmailIntelligenceEngine {
           lastName: last.toLowerCase(),
           domain,
           confidence: result.confidence,
-          method: result.method as 'generect' | 'searxng' | 'github' | 'manual' | 'crawl' | null,
+          method: result.method as 'searxng' | 'github' | 'domain_pattern' | 'mx_guess' | 'manual' | 'crawl' | null,
           source: result.source,
         });
       }

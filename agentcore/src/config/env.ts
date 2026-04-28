@@ -28,7 +28,6 @@ const envSchema = z.object({
   COMPANIES_HOUSE_API_KEY: z.string().optional(),
   OPENCORPORATES_API_TOKEN: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
-  GENERECT_API_KEY: z.string().optional(),
   REACHER_URL: z.string().default('http://173.212.232.243:8070'),
   LINKEDIN_VOYAGER_URL: z.string().default('http://173.212.232.243:8072'),
   LINKEDIN_VOYAGER_DELAY_MS: z.coerce.number().default(4000),

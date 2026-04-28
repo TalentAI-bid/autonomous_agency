@@ -316,7 +316,7 @@ export interface TeamMemberWithEmail<T extends TeamMember> {
  * pattern (or that one was previously persisted to `domain_patterns`).
  *
  * If no cached pattern exists, every member's email returns `null` with
- * method `no_pattern` so the caller can fall back to Generect/etc.
+ * method `no_pattern` so the caller can fall back to per-member probing.
  */
 export async function applyCachedPatternToTeam<T extends TeamMember>(
   members: T[],

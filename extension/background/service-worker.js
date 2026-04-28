@@ -23,6 +23,14 @@ let currentTask = null;
 let currentMasterAgentName = null;
 let currentStatus = 'idle';
 
+// Single-flight task queue. WebSocket delivers task messages concurrently
+// (e.g. 58 fetch_company tasks fire from the server in rapid succession);
+// without this chain, 58 processTask calls would race and open 58 tabs at
+// once, tripping LinkedIn 429s. Each new task tail-chains onto the
+// previous, so processTask runs sequentially and the rate-limiter's
+// per-task delays + batch cooldown are actually honored.
+let taskQueueTail = Promise.resolve();
+
 // ─── LinkedIn geo-code map ─────────────────────────────────────────────────
 // LinkedIn's `companyHqGeo` URL parameter expects numeric geo IDs, not free
 // text. If we don't map, LinkedIn silently ignores the filter and returns
@@ -96,8 +104,12 @@ async function handleMessage(msg) {
     return;
   }
   if (msg.type === 'task') {
-    console.log('[TalentAI sw] routing', { taskId: msg.taskId, site: msg.site, taskType: msg.taskType });
-    await processTask(msg);
+    console.log('[TalentAI sw] queueing', { taskId: msg.taskId, site: msg.site, taskType: msg.taskType });
+    // Tail-chain onto the single-flight queue. Don't await — the WS client
+    // must remain free to receive subsequent messages while this task runs.
+    taskQueueTail = taskQueueTail.then(() => processTask(msg).catch((err) => {
+      console.error('[TalentAI sw] task processing error', { taskId: msg.taskId, err: err?.message ?? String(err) });
+    }));
     return;
   }
   if (msg.type === 'cancel') {

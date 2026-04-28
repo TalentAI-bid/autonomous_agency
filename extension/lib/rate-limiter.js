@@ -5,8 +5,12 @@
 
 const DEFAULT_LIMITS = {
   linkedin: {
-    search_companies:  { dailyCap: 30, minDelayMs: 4000 },
-    fetch_company:     { dailyCap: 100, minDelayMs: 4000 },
+    // batchSize / batchCooldownMs: after every `batchSize` tasks of this
+    // type within the daily window, add a `batchCooldownMs` pause before
+    // the next one. Without this, long runs (50+ companies) tripped
+    // LinkedIn's 429 rate limit even with the per-task minDelay enforced.
+    search_companies:  { dailyCap: 30, minDelayMs: 4000, batchSize: 5, batchCooldownMs: 60000 },
+    fetch_company:     { dailyCap: 100, minDelayMs: 8000, batchSize: 10, batchCooldownMs: 60000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },
@@ -23,8 +27,9 @@ const STORAGE_KEY = 'rateLimiterState';
 export class RateLimiter {
   constructor() {
     this.limits = DEFAULT_LIMITS;
-    this.lastAction = {};        // { "site:type": timestampMs }
-    this.dailyCounts = {};       // { "site:type": n }
+    this.lastAction = {};        // { "site:type": timestampMs of next reserved slot }
+    this.dailyCounts = {};       // { "site:type": n successful tasks today }
+    this.reservedCounts = {};    // { "site:type": n reservations issued (for batch cadence) }
     this.dailyResetAt = Date.now();
     this._loaded = this._load();
   }
@@ -62,6 +67,7 @@ export class RateLimiter {
     const now = Date.now();
     if (now - this.dailyResetAt > 24 * 60 * 60 * 1000) {
       this.dailyCounts = {};
+      this.reservedCounts = {};
       this.dailyResetAt = now;
     }
   }
@@ -84,19 +90,41 @@ export class RateLimiter {
       throw err;
     }
 
+    // Reserve the next slot atomically. Concurrent waitForSlot calls each
+    // bump lastAction to the next available slot, so the 58 fetch_company
+    // tasks that arrive together over WebSocket actually serialize instead
+    // of racing to open 58 tabs at once. Previously lastAction was only
+    // written by record() AFTER task success — so all concurrent reservations
+    // saw last=0 and proceeded immediately, tripping LinkedIn 429s.
+    const now = Date.now();
     const last = this.lastAction[key] ?? 0;
-    const elapsed = Date.now() - last;
     const jitterPct = 0.3;
-    const jitter = (Math.random() * 2 - 1) * jitterPct * limit.minDelayMs; // ±30%
+    const jitter = (Math.random() * 2 - 1) * jitterPct * limit.minDelayMs;
     const required = limit.minDelayMs + jitter;
-    if (elapsed < required) {
-      await new Promise((r) => setTimeout(r, Math.ceil(required - elapsed)));
+
+    // Batch cadence: after every `batchSize` reservations, add a longer
+    // cooldown so LinkedIn gets breathing room on long runs.
+    const reservedIdx = this.reservedCounts[key] ?? 0;
+    this.reservedCounts[key] = reservedIdx + 1;
+    const batchSize = limit.batchSize ?? 0;
+    const batchCooldownMs = limit.batchCooldownMs ?? 0;
+    const inBatchEnd = batchSize > 0 && reservedIdx > 0 && reservedIdx % batchSize === 0;
+    const extraCooldown = inBatchEnd ? batchCooldownMs : 0;
+
+    const nextSlot = Math.max(now, last + required) + extraCooldown;
+    this.lastAction[key] = nextSlot;
+
+    const waitMs = nextSlot - now;
+    if (waitMs > 0) {
+      await new Promise((r) => setTimeout(r, Math.ceil(waitMs)));
     }
   }
 
   async record(site, type) {
     const key = `${site}:${type}`;
-    this.lastAction[key] = Date.now();
+    // lastAction is owned by waitForSlot's slot reservation — do not regress
+    // it here, otherwise long-running tasks (which finish AFTER the next
+    // reservation) would let later concurrent calls advance ahead.
     this.dailyCounts[key] = (this.dailyCounts[key] ?? 0) + 1;
     this._persist();
   }

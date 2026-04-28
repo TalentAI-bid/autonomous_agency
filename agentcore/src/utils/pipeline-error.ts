@@ -13,6 +13,7 @@ export const ERROR_MESSAGES: Record<string, { message: string; retryable: boolea
   scrape_failed:       { message: 'Could not scrape the company website.',                                   retryable: true },
   empty_response:      { message: 'The page returned no content.',                                           retryable: true },
   no_job_posts_found:  { message: 'No matching job posts found for these keywords.',                         retryable: false },
+  opportunity_insert_failed: { message: 'A discovered hiring signal could not be saved as an opportunity. The company is still saved; the opportunities tab is missing this row.', retryable: false },
   wrong_tool:          { message: 'Discovery gate set bdStrategy=hiring_signal but the LinkedIn Jobs dispatch did not run in the same pass. This indicates a strategist/dispatch inconsistency — please retry the run.', retryable: true },
 };
 

@@ -15,8 +15,12 @@ export type ExtensionTaskType = 'search_companies' | 'fetch_company' | 'search_b
 
 export const EXTENSION_SITE_LIMITS = {
   linkedin: {
+    // Mirrors extension/lib/rate-limiter.js. minDelayMs is enforced
+    // client-side (server only enforces dailyCap); kept in sync here as
+    // documentation. fetch_company bumped 4s → 8s + per-batch cooldown
+    // after long runs hit LinkedIn 429s on 58-company chains.
     search_companies: { dailyCap: 10, minDelayMs: 4000 },
-    fetch_company: { dailyCap: 100, minDelayMs: 4000 },
+    fetch_company: { dailyCap: 100, minDelayMs: 8000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },
@@ -482,9 +486,16 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       source: 'linkedin_extension',
     });
 
-    // Save people from LinkedIn company /people/ tab as contacts (best-effort, max 10)
+    // Save people from LinkedIn company /people/ tab as contacts (best-effort, max 10).
+    // Rank by title before slicing: for a hiring-signal / outreach flow the
+    // useful contacts are decision-makers and recruiters (CEO, CTO, Founder,
+    // VP, Head of, HR/Talent/Recruiter, Director). Without ranking we keep
+    // whatever LinkedIn returned first in the DOM — usually a sea of
+    // engineers when the company is hiring engineering roles, none of whom
+    // can route the candidate. Cap at 10 saved per run.
     const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
-    for (const person of rawPeople.slice(0, 10)) {
+    const rankedPeople = rankPeopleByTitle(rawPeople);
+    for (const person of rankedPeople.slice(0, 10)) {
       const cleanName = sanitizePersonName(person.name);
       if (!cleanName) {
         logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');
@@ -643,22 +654,82 @@ function sanitizePersonName(raw: string | undefined | null): string | null {
   if (name.length < 2) return null;
 
   // Pattern A: "View NAME('s) profile" embedded → use NAME (the full name).
-  const inner = name.match(/View\s+(.+?)(?:'s\s+profile|\s+profile)/i);
+  // Accept straight, curly, and back-tick apostrophes — LinkedIn's HTML uses
+  // U+2019 (right single quotation mark) by default, which the previous
+  // ASCII-only `'` class missed entirely.
+  const inner = name.match(/View\s+(.+?)(?:[’'‘`]s\s+profile|\s+profile)/i);
   if (inner && inner[1]) {
     const candidate = inner[1].trim();
     if (candidate.length >= 2 && candidate.length <= 100) name = candidate;
   } else {
     // Pattern B: trailing "View ... profile" → strip.
-    name = name.replace(/\s*View\s+\S.*?(?:'s\s+profile|\s+profile)\s*$/i, '').trim();
+    name = name.replace(/\s*View\s+\S.*?(?:[’'‘`]s\s+profile|\s+profile)\s*$/i, '').trim();
   }
+
+  // Pattern C: bare concatenation residue with no trailing " profile" — strip
+  // anything from `View` onward when `View` follows a letter (LinkedIn's
+  // visible-name + screen-reader-suffix concat always lower→upper-case
+  // boundary like "SeveroView"). Prevents leftover "SeveroView" from passing
+  // the `\bView\b` reject below, since `\b` doesn't fire between two
+  // word-characters.
+  name = name.replace(/(?<=[A-Za-zÀ-ÿ])View\b.*$/i, '').trim();
 
   // Strip trailing punctuation residue.
   name = name.replace(/[‘’'"`]+\s*$/, '').trim();
 
   if (name.length < 2 || name.length > 100) return null;
-  if (/\b(profile|view)\b/i.test(name)) return null;
+  // Reject any residual screen-reader artefact. `View\b` covers both
+  // "SeveroView" (boundary at end of string) and standalone " View …".
+  if (/View\b/i.test(name)) return null;
+  if (/\bprofile\b/i.test(name)) return null;
   if (/%[0-9A-Fa-f]{2}/.test(name)) return null;
   return name;
+}
+
+// Score a job title by how useful the person is for outreach / hiring-signal
+// follow-up. Higher = more useful (decision-maker or recruiter). Uses
+// substring matching on the lowercased title — LinkedIn titles vary widely
+// in punctuation/casing, so word-boundary regex is too brittle.
+function scorePersonTitle(title: string | undefined | null): number {
+  if (!title) return 0;
+  const t = title.toLowerCase();
+
+  // Tier 1 — C-suite / founders / owners (top decision-makers).
+  if (/\b(ceo|cto|cfo|coo|cmo|chro|cio|ciso)\b/.test(t)) return 100;
+  if (/chief\s+\w+(?:\s+\w+)?\s+officer/.test(t)) return 100;
+  if (/\b(founder|co[\s-]?founder|owner|president|managing\s+director|managing\s+partner)\b/.test(t)) return 100;
+
+  // Tier 2 — Talent acquisition / HR / recruiting (literally posting the job).
+  if (/\b(talent\s+(acquisition|partner|manager|lead|director))\b/.test(t)) return 90;
+  if (/\b(recruit(er|ing|ment)?|sourcer|head\s+of\s+(talent|people|hr))\b/.test(t)) return 90;
+  if (/\b(hr\s+(director|manager|partner|lead)|chief\s+people|people\s+(ops|operations|partner))\b/.test(t)) return 85;
+  if (/\b(hiring\s+manager)\b/.test(t)) return 85;
+
+  // Tier 3 — VPs and Heads of (functional leadership).
+  if (/\bvp\b|vice\s+president/.test(t)) return 75;
+  if (/\bhead\s+of\b/.test(t)) return 70;
+
+  // Tier 4 — Directors and Principal-level.
+  if (/\b(director|principal)\b/.test(t)) return 55;
+
+  // Tier 5 — Functional managers / leads (engineering manager, team lead).
+  if (/\b(engineering|product|design|sales|marketing|operations)\s+(manager|lead|director)\b/.test(t)) return 40;
+  if (/\b(tech\s+lead|team\s+lead|staff\s+engineer)\b/.test(t)) return 35;
+
+  // Tier 6 — Generic manager / lead.
+  if (/\b(manager|lead)\b/.test(t)) return 25;
+
+  // Tier 7 — Individual contributors (engineers, developers, analysts, etc.)
+  return 5;
+}
+
+// Rank people by title relevance — pure prioritisation, no filtering. Every
+// person LinkedIn returned is preserved; the top 10 by score get saved.
+// Decision-makers (CEO/CTO/Founder, recruiters, VPs, directors) bubble to
+// the top; engineers and analysts sink to the bottom but still land in the
+// list when there's room.
+function rankPeopleByTitle<T extends { title: string }>(people: readonly T[]): T[] {
+  return [...people].sort((a, b) => scorePersonTitle(b.title) - scorePersonTitle(a.title));
 }
 
 function extractDomain(url: string): string | undefined {

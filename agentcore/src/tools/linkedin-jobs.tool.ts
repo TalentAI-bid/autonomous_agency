@@ -29,8 +29,26 @@ export interface LinkedInJobCompany {
   companyName: string;
   linkedinUrl?: string;
   jobTitle: string;
+  jobUrl?: string;
   location?: string;
   postedAt?: string;
+}
+
+// Section headers LinkedIn renders for sidebar/non-result content. If the
+// look-forward (or look-back) context hits one of these before the company
+// link, the row is almost certainly a recommendation, not the job's actual
+// hiring company — skip rather than misattribute.
+const SIDEBAR_SECTION_MARKERS = [
+  'Recommended',
+  'People also viewed',
+  'More jobs',
+  'Suggested',
+  'Promoted',
+];
+
+function hasSidebarMarkerBefore(context: string, untilIdx: number): boolean {
+  const head = context.slice(0, untilIdx);
+  return SIDEBAR_SECTION_MARKERS.some((m) => head.includes(m));
 }
 
 // ─── Retry constants ─────────────────────────────────────────────────────────
@@ -115,7 +133,17 @@ export async function searchLinkedInJobs(
   for (const c of unique) {
     if (!c.companyName || c.companyName.length < 2) continue;
 
-    // Dedup by linkedinUrl in DB
+    // Dedup by linkedinUrl in DB. saveOrUpdateCompanyStatic only dedupes by
+    // id / domain / name, so without this lookup re-scrapes would create
+    // duplicate rows for LinkedIn-only companies that lack a domain. When a
+    // row already exists, pin its id and fall through to the save path: the
+    // helper takes the id-update branch (re-associates the company with this
+    // master agent + merges rawData) and the per-run side effects below
+    // (opportunity row, fetch_company enqueue) still fire. Previously a
+    // `continue` here silently skipped both, which is why re-runs over
+    // already-seen LinkedIn URLs produced 0 saved + 0 extension dispatches
+    // for the new master agent.
+    let existingCompanyId: string | undefined;
     if (c.linkedinUrl) {
       const [existing] = await withTenant(tenantId, async (tx) => {
         return tx
@@ -129,22 +157,21 @@ export async function searchLinkedInJobs(
           )
           .limit(1);
       });
-      if (existing) {
-        logger.debug({ linkedinUrl: c.linkedinUrl, existingId: existing.id }, 'Skipped duplicate company from LinkedIn Jobs (dedup by linkedinUrl)');
-        continue;
-      }
+      if (existing) existingCompanyId = existing.id;
     }
 
     try {
       const savedRow = await saveOrUpdateCompanyStatic(
         tenantId,
         {
+          ...(existingCompanyId ? { id: existingCompanyId } : {}),
           name: c.companyName,
           linkedinUrl: c.linkedinUrl,
           rawData: {
             source: 'linkedin_jobs_crawl4ai',
             hiringSignal: true,
             openJob: c.jobTitle,
+            jobUrl: c.jobUrl,
             jobPostedAt: c.postedAt,
             location: c.location,
           },
@@ -180,7 +207,9 @@ export async function searchLinkedInJobs(
               title: c.jobTitle,
               opportunityType: 'hiring_signal',
               sourcePlatform: 'linkedin_jobs',
-              sourceUrl: c.linkedinUrl ?? undefined,
+              // Prefer the actual job-post URL so the dashboard "Source" link
+              // opens the LinkedIn job (not just the company page).
+              sourceUrl: c.jobUrl ?? c.linkedinUrl ?? undefined,
               companyName: c.companyName,
               companyId: savedRow.id,
               location: c.location ?? undefined,
@@ -190,10 +219,27 @@ export async function searchLinkedInJobs(
             });
           });
         } catch (err) {
-          logger.debug(
+          logger.warn(
             { err, companyId: savedRow.id, jobTitle: c.jobTitle },
             'Failed to insert hiring_signal opportunity (non-fatal)',
           );
+          // Surface in the dashboard errors panel so missing Opportunities-tab
+          // rows aren't a silent failure: the user (and we) can see exactly
+          // which (companyId, jobTitle) pair failed and why.
+          await logPipelineError({
+            tenantId,
+            masterAgentId,
+            step: 'opportunity_insert',
+            tool: 'linkedin_jobs_search',
+            errorType: 'opportunity_insert_failed',
+            severity: 'warning',
+            context: {
+              companyId: savedRow.id,
+              jobTitle: c.jobTitle,
+              companyName: c.companyName,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          });
         }
       }
 
@@ -472,10 +518,19 @@ function parseViaHeadingPattern(markdown: string): LinkedInJobCompany[] {
     const dateMatch = contextBlock.match(/(\d+\s+(?:hour|day|week|month)s?\s+ago|just\s+now|today|yesterday)/i);
     if (dateMatch) postedAt = dateMatch[1]!.trim();
 
+    // Look for the underlying /jobs/view/{id} URL so the dashboard "Source"
+    // link can open the actual job post instead of just the company page.
+    let jobUrl: string | undefined;
+    const jobIdMatch = contextBlock.match(/linkedin\.com\/jobs\/view\/(\d+)/i);
+    if (jobIdMatch) {
+      jobUrl = `https://www.linkedin.com/jobs/view/${jobIdMatch[1]}/`;
+    }
+
     results.push({
       companyName,
       linkedinUrl,
       jobTitle,
+      jobUrl,
       location: jobLocation || undefined,
       postedAt: postedAt || undefined,
     });
@@ -491,25 +546,42 @@ function parseViaHeadingPattern(markdown: string): LinkedInJobCompany[] {
 function parseViaJobViewLinks(markdown: string): LinkedInJobCompany[] {
   const results: LinkedInJobCompany[] = [];
   // Allow any subdomain (`gr.`, `uk.`, `www.`, none) and whitespace-padded brackets.
-  const jobViewRegex = /\[\s*([^\]]+?)\s*\]\(https?:\/\/[^/]*linkedin\.com\/jobs\/view\/[^)]+\)/g;
+  // Capture the underlying job-view URL so we can persist it on the opportunity.
+  const jobViewRegex = /\[\s*([^\]]+?)\s*\]\((https?:\/\/[^/]*linkedin\.com\/jobs\/view\/[^)]+)\)/g;
   let match: RegExpExecArray | null;
 
   while ((match = jobViewRegex.exec(markdown)) !== null) {
     const jobTitleRaw = match[1]!.trim();
     if (jobTitleRaw.length < 3) continue;
 
-    const afterJob = markdown.slice(match.index + match[0].length, match.index + match[0].length + 600);
+    const jobUrlRaw = match[2]!;
+    let jobUrl: string | undefined;
+    const jobIdMatch = jobUrlRaw.match(/jobs\/view\/(\d+)/i);
+    if (jobIdMatch) jobUrl = `https://www.linkedin.com/jobs/view/${jobIdMatch[1]}/`;
+
+    // Look-forward window tightened from 600 → 200 chars: LinkedIn renders
+    // the hiring company link immediately after the job link; anything past
+    // 200 chars is overwhelmingly a sidebar/recommendation block which we
+    // were misattributing the job to.
+    const afterJob = markdown.slice(match.index + match[0].length, match.index + match[0].length + 200);
 
     // Look for the nearest /company/ link after this job link (any subdomain).
     const companyMatch = afterJob.match(/\[\s*([^\]]+?)\s*\]\((https?:\/\/[^/]*linkedin\.com\/company\/[a-zA-Z0-9_-]+[^)]*)\)/);
     if (!companyMatch) continue;
+
+    // If a recommendation/sidebar section heading (e.g. "Recommended", "People
+    // also viewed") appears before the company link, treat the link as a
+    // sidebar item, not the actual hiring company. Skip rather than misattribute.
+    if (companyMatch.index !== undefined && hasSidebarMarkerBefore(afterJob, companyMatch.index)) {
+      continue;
+    }
 
     const companyName = companyMatch[1]!.trim();
     const linkedinUrl = normaliseLinkedInCompanyUrl(companyMatch[2]!);
     if (companyName.length < 2 || linkedinUrl.length < 30) continue;
 
     // Extract location: look in the text between job link and company link, or after company
-    const contextBlock = afterJob.slice(0, 500);
+    const contextBlock = afterJob;
     let jobLocation = '';
     const locMatch = contextBlock.match(/(?:📍|Location:|·)\s*([A-Za-z][^\n|·]{2,80})/);
     if (locMatch) {
@@ -529,6 +601,7 @@ function parseViaJobViewLinks(markdown: string): LinkedInJobCompany[] {
       companyName,
       linkedinUrl,
       jobTitle: jobTitleRaw,
+      jobUrl,
       location: jobLocation || undefined,
       postedAt: postedAt || undefined,
     });
@@ -555,11 +628,22 @@ function parseViaCompanyLinks(markdown: string): LinkedInJobCompany[] {
     const contextBefore = markdown.slice(Math.max(0, match.index - 500), match.index);
     const contextAfter = markdown.slice(match.index, match.index + 300);
 
-    // Job title: prefer /jobs/view/ link in context, then heading/bold, then last line
+    // If a recommendation/sidebar section header appears in the immediately
+    // preceding 200 chars, treat this as a sidebar link, not a hiring-signal
+    // result. Skip rather than misattribute.
+    const tailBefore = contextBefore.slice(-200);
+    if (SIDEBAR_SECTION_MARKERS.some((m) => tailBefore.includes(m))) {
+      continue;
+    }
+
+    // Job title + jobUrl: prefer /jobs/view/ link in context, then heading/bold, then last line
     let jt = '';
-    const jobLinkMatch = contextBefore.match(/\[\s*([^\]]+?)\s*\]\(https?:\/\/[^/]*linkedin\.com\/jobs\/view\//);
+    let jobUrl: string | undefined;
+    const jobLinkMatch = contextBefore.match(/\[\s*([^\]]+?)\s*\]\((https?:\/\/[^/]*linkedin\.com\/jobs\/view\/[^)]+)\)/);
     if (jobLinkMatch) {
       jt = jobLinkMatch[1]!.trim();
+      const idMatch = jobLinkMatch[2]!.match(/jobs\/view\/(\d+)/i);
+      if (idMatch) jobUrl = `https://www.linkedin.com/jobs/view/${idMatch[1]}/`;
     }
     if (!jt) {
       const headingMatch = contextBefore.match(/(?:#{1,4}\s+(.+)|^\*\*(.+?)\*\*)/m);
@@ -570,6 +654,12 @@ function parseViaCompanyLinks(markdown: string): LinkedInJobCompany[] {
       const lastLine = lines[lines.length - 1] || '';
       jt = lastLine.replace(/^[#*\->\s]+/, '').replace(/\[([^\]]+)\]\([^)]+\)/, '$1').trim();
     }
+
+    // Skip rows we couldn't pull a real job title from — these are almost
+    // always navigation/sidebar links the parser stumbled into. Better to
+    // surface zero results than to write "Unknown role" rows the user can't
+    // verify.
+    if (!jt || jt.length < 3) continue;
 
     // Location
     let location = '';
@@ -588,7 +678,8 @@ function parseViaCompanyLinks(markdown: string): LinkedInJobCompany[] {
     results.push({
       companyName: name,
       linkedinUrl,
-      jobTitle: jt || 'Unknown role',
+      jobTitle: jt,
+      jobUrl,
       location: location || undefined,
       postedAt: postedAt || undefined,
     });
@@ -658,17 +749,17 @@ function filterByKeyword(results: LinkedInJobCompany[], searchJobTitle: string):
   const matches = results.filter(r => r.jobTitle.toLowerCase().includes(primary));
 
   if (matches.length === 0 && results.length > 0) {
-    // LinkedIn's URL-level filter (`?keywords=…`) already filtered server-side,
-    // so anything we got is plausibly relevant even when our post-parse anchor
-    // misses (e.g. "Site Reliability Engineer" → primary "site" → 0 matches
-    // because LinkedIn returned "DevOps Engineer (Remote)" pages). Returning
-    // unfiltered is a softer behaviour than rejecting the whole batch and is
-    // bounded by the location filter that runs next.
+    // Reject rather than return unfiltered: LinkedIn's URL-level filter is
+    // unreliable (the page often returns generic recommendations when no
+    // exact matches exist), and falling back to "everything" was producing
+    // hiring-signal companies that aren't actually hiring for the keyword
+    // — the symptom that brought us here. The master-agent's
+    // search_quality_low alert covers the user-facing 0-result case.
     logger.warn(
       { searchJobTitle, primary, resultCount: results.length },
-      'LinkedIn Jobs keyword filter matched zero — returning unfiltered (LinkedIn URL filter already applied)',
+      'LinkedIn Jobs keyword filter matched zero — rejecting batch to avoid wrong-company pollution',
     );
-    return results;
+    return [];
   }
 
   return matches;

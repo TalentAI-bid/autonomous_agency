@@ -1,7 +1,7 @@
 import { eq, and, inArray, sql, count, lt, isNotNull } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks, products as productsTable } from '../db/schema/index.js';
+import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks, products as productsTable, extensionTasks } from '../db/schema/index.js';
 import { getTenantById } from '../services/tenant.service.js';
 import { AGENT_TYPES } from '../queues/queues.js';
 import { getQueueStatus } from '../services/queue.service.js';
@@ -69,6 +69,10 @@ export class MasterAgent extends BaseAgent {
     const dispatchedJobIds: string[] = [];
     let pipelineContext: PipelineContext | undefined;
     let hiringSignalDispatched = false;
+    // Tracks whether the inline strategist actually completed for this dispatch
+    // — read by the late dispatch decision block to distinguish a genuine
+    // extension-only run from a stale-pipelineContext stall.
+    let strategistRanInline = false;
 
     if (hasDiscovery) {
       // 3. Parse requirements using Together AI
@@ -292,6 +296,7 @@ export class MasterAgent extends BaseAgent {
           await strategist.close();
 
           if (strategyResult && strategyResult.strategy) {
+            strategistRanInline = true;
             const strategy = strategyResult.strategy as SalesStrategy;
             if (!pipelineContext.sales) pipelineContext.sales = {};
             pipelineContext.sales.salesStrategy = strategy;
@@ -433,7 +438,19 @@ export class MasterAgent extends BaseAgent {
               const targetIndustries = strategy.targetIndustries ?? [];
               const services = (agentConfig.services as string[]) ?? [];
               const industries = pipelineContext.sales?.industries ?? [];
-              const locs = pipelineContext.locations ?? [];
+              let locs = pipelineContext.locations ?? [];
+              // Backfill: if no parsed mission locations but the strategist tagged
+              // a primaryRegion, dispatch against that ISO code so the loops below
+              // don't silently run zero iterations. Without this, region-flagged
+              // missions with empty pipelineContext.locations stall both the
+              // hiring-signal scrape and the search_companies enqueue.
+              if (locs.length === 0 && strategy.dataSourceStrategy?.primaryRegion) {
+                locs = [strategy.dataSourceStrategy.primaryRegion];
+                logger.info(
+                  { masterAgentId, primaryRegion: strategy.dataSourceStrategy.primaryRegion },
+                  'Backfilled empty locations from dataSourceStrategy.primaryRegion',
+                );
+              }
 
               let extensionTasksDispatched = 0;
 
@@ -495,6 +512,25 @@ export class MasterAgent extends BaseAgent {
                 // parser/filter issues vs. genuinely thin keyword choices.
                 const perKeyword: Array<{ keyword: string; count: number }> =
                   cappedJobTitles.map(k => ({ keyword: k, count: 0 }));
+
+                if (locs.length === 0 || cappedJobTitles.length === 0) {
+                  logger.warn(
+                    { masterAgentId, bdStrategy, locsCount: locs.length, jobTitlesCount: cappedJobTitles.length },
+                    'Hiring-signal dispatch skipped — empty locations or jobTitles',
+                  );
+                  this.sendMessage(null, 'system_alert', {
+                    action: 'discovery_inputs_missing',
+                    severity: 'warning',
+                    path: 'hiring_signal',
+                    locsCount: locs.length,
+                    jobTitlesCount: cappedJobTitles.length,
+                    primaryRegion: strategy.dataSourceStrategy?.primaryRegion ?? null,
+                    message:
+                      locs.length === 0
+                        ? 'I could not run the LinkedIn Jobs scrape — no target locations were resolved for this mission. Please specify a country or city in the mission.'
+                        : 'I could not run the LinkedIn Jobs scrape — no hiring keywords resolved (jobTitles, hiringKeywords, and pipelineSteps were all empty).',
+                  });
+                }
 
                 for (const loc of locs) {
                   let locCount = 0;
@@ -608,6 +644,23 @@ export class MasterAgent extends BaseAgent {
                   searchTerms = services.slice(0, 5);
                 } else {
                   searchTerms = ['technology consulting'];
+                }
+
+                if (locs.length === 0 || searchTerms.length === 0) {
+                  logger.warn(
+                    { masterAgentId, bdStrategy, locsCount: locs.length, searchTermsCount: searchTerms.length },
+                    'Industry-target dispatch skipped — empty locations or searchTerms',
+                  );
+                  this.sendMessage(null, 'system_alert', {
+                    action: 'discovery_inputs_missing',
+                    severity: 'warning',
+                    path: 'industry_target',
+                    locsCount: locs.length,
+                    searchTermsCount: searchTerms.length,
+                    primaryRegion: strategy.dataSourceStrategy?.primaryRegion ?? null,
+                    message:
+                      'I could not enqueue LinkedIn company searches via the Chrome extension — no target locations resolved for this mission. Please specify a country or city.',
+                  });
                 }
 
                 for (const term of searchTerms) {
@@ -905,16 +958,81 @@ export class MasterAgent extends BaseAgent {
       const skipCrawlerDiscovery = needsExtension && extensionOnline;
 
       if (skipCrawlerDiscovery) {
-        logger.info(
-          { masterAgentId, tenantId: this.tenantId },
-          'Extension-primary region with live extension — skipping crawler discovery/company-finder dispatch',
-        );
-        this.sendMessage(null, 'system_alert', {
-          action: 'crawler_discovery_skipped',
-          severity: 'info',
-          message:
-            'Region is extension-primary and the Chrome extension is live. Discovery will run through the extension only.',
+        // Honest-skip check: only emit the reassuring "running through the
+        // extension" alert if work was actually queued for this run. If the
+        // strategist failed inline OR the local dispatch loops ran zero
+        // iterations, pipelineContext can still flag needsExtension=true while
+        // nothing has been enqueued — the previous unconditional alert masked
+        // exactly that silent stall. Replace it with a count-driven check.
+        const pendingForRun = await withTenant(this.tenantId, async (tx) => {
+          return tx
+            .select({ id: extensionTasks.id })
+            .from(extensionTasks)
+            .where(and(
+              eq(extensionTasks.tenantId, this.tenantId),
+              eq(extensionTasks.masterAgentId, masterAgentId),
+              eq(extensionTasks.status, 'pending'),
+            ));
         });
+        const pendingExtensionTasks = pendingForRun.length;
+        const dataSourceStrategy = pipelineContext?.sales?.salesStrategy?.dataSourceStrategy ?? null;
+        const locsCount = pipelineContext?.locations?.length ?? 0;
+
+        if (pendingExtensionTasks > 0) {
+          logger.info(
+            { masterAgentId, tenantId: this.tenantId, pendingExtensionTasks },
+            'Extension-primary region with live extension — skipping crawler discovery/company-finder dispatch',
+          );
+          this.sendMessage(null, 'system_alert', {
+            action: 'crawler_discovery_skipped',
+            severity: 'info',
+            pendingExtensionTasks,
+            message:
+              'Region is extension-primary and the Chrome extension is live. Discovery will run through the extension only.',
+          });
+        } else {
+          // Diagnose the most likely cause so the user (and we) can act on the
+          // failure instead of re-reading logs. Prioritise the most informative
+          // signal: did the strategist run at all? if not, it's S1. If it did,
+          // it's S2 (empty inputs / partial strategy).
+          const likelyCause = !strategistRanInline
+            ? 'strategist_did_not_run_inline'
+            : locsCount === 0 && !dataSourceStrategy?.primaryRegion
+              ? 'no_locations_resolved'
+              : 'dispatch_loops_produced_no_tasks';
+          const userMessage =
+            likelyCause === 'strategist_did_not_run_inline'
+              ? 'Discovery did not run on this dispatch — the strategist did not finish inline and the extension dispatch path was never reached. Re-run the master agent or check strategist logs.'
+              : likelyCause === 'no_locations_resolved'
+                ? 'Discovery did not run — no target locations were resolved for this mission. Please specify a country or city in the mission text.'
+                : 'Discovery did not run — the dispatch loops produced zero tasks (empty hiring keywords or industry list). Please review the mission inputs.';
+          logger.warn(
+            {
+              masterAgentId,
+              tenantId: this.tenantId,
+              strategistRanInline,
+              bdStrategy: dispatchBdStrategy,
+              dataSourceStrategy,
+              locsCount,
+              extensionConnected: extensionOnline,
+              pendingExtensionTasks,
+              likelyCause,
+            },
+            'Extension-primary region with live extension but NO pending tasks for this run — emitting discovery_stalled instead of crawler_discovery_skipped',
+          );
+          this.sendMessage(null, 'system_alert', {
+            action: 'discovery_stalled',
+            severity: 'warning',
+            strategistRanInline,
+            bdStrategy: dispatchBdStrategy,
+            dataSourceStrategy,
+            locsCount,
+            extensionConnected: extensionOnline,
+            pendingExtensionTasks,
+            likelyCause,
+            message: userMessage,
+          });
+        }
       } else if (env.USE_COMPANY_FINDER) {
         // New path: LLM-based agent selector picks company-finder and/or candidate-finder.
         // Keyword hints pulled from requirements + any opportunity-focused strategy queries.

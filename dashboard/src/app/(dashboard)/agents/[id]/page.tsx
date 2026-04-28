@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
 import { useRealtimeStore } from '@/stores/realtime.store';
@@ -111,6 +112,16 @@ export default function AgentDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb */}
+      <Breadcrumb
+        showBack
+        backFallback="/agents"
+        items={[
+          { href: '/agents', label: 'Agents' },
+          { label: agent.name ?? 'Agent' },
+        ]}
+      />
+
       {/* Agent Header */}
       <Card>
         <CardContent className="p-6">

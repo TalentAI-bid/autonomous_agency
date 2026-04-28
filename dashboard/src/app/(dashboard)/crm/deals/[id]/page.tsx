@@ -1,6 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useDeal, useDealActivities, useMoveDealStage, useCrmStages } from '@/hooks/use-crm';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageBadge } from '@/components/crm/stage-badge';
@@ -10,8 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, formatRelative } from '@/lib/utils';
-import { ArrowLeft, DollarSign, User, Building, Clock, FileText } from 'lucide-react';
-import Link from 'next/link';
+import { DollarSign, User, Building, Clock, FileText } from 'lucide-react';
 
 export default function DealDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,13 +51,18 @@ export default function DealDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb + smart back */}
+      <Breadcrumb
+        showBack
+        backFallback="/crm"
+        items={[
+          { href: '/crm', label: 'Pipeline' },
+          { label: deal.title ?? 'Deal' },
+        ]}
+      />
+
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href="/crm">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-        </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold">{deal.title}</h1>

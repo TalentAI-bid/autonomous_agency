@@ -17,6 +17,27 @@ import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity } from '../services/crm-activity.service.js';
 import logger from '../utils/logger.js';
 
+// Defensive: convert any HTML the LLM might still emit back to plain text
+// with sane line breaks. Used on /draft-email response so the dashboard
+// textarea always shows clean prose.
+function stripHtmlToPlainText(input: string): string {
+  if (!input) return '';
+  return input
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6])>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const createContactSchema = z.object({
   firstName: z.string().max(255).optional(),
   lastName: z.string().max(255).optional(),
@@ -363,6 +384,14 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         throw rawErr;
       }
     }
+
+    // Defensive: even though the prompt asks for plain text, DeepSeek
+    // sometimes still emits <p>/<br>/<strong> tags. The dashboard textarea
+    // displays whatever we return verbatim, so we strip HTML server-side
+    // to guarantee a clean draft. The conversion to HTML happens later
+    // at send time (routes/contact.routes.ts /send-email).
+    if (draft.body) draft.body = stripHtmlToPlainText(draft.body);
+    if (draft.subject) draft.subject = draft.subject.replace(/<[^>]+>/g, '').trim();
 
     return { data: draft };
   });

@@ -1,6 +1,7 @@
 'use client';
 
 import { use } from 'react';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useCompany } from '@/hooks/use-companies';
 import { useContacts, useFindContactEmail } from '@/hooks/use-contacts';
 import { useToast } from '@/hooks/use-toast';
@@ -9,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import {
-  ArrowLeft, Globe, Building2, Users, Cpu, DollarSign,
+  Globe, Building2, Users, Cpu, DollarSign,
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
   Mail, ExternalLink, Search, Linkedin, CheckCircle2,
   AlertTriangle, TrendingDown, FileText, Brain, ShieldAlert,
@@ -103,13 +104,18 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb + smart back */}
+      <Breadcrumb
+        showBack
+        backFallback="/companies"
+        items={[
+          { href: '/companies', label: 'Companies' },
+          { label: company.name ?? 'Company' },
+        ]}
+      />
+
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href="/companies">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-        </Link>
         <div>
           <h1 className="text-2xl font-bold">{company.name}</h1>
           <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">

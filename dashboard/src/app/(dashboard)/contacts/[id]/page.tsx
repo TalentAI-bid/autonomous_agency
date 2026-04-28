@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useContact } from '@/hooks/use-contacts';
 import { useContactTimeline, useDeals, useCrmStages } from '@/hooks/use-crm';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
@@ -14,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { formatDate, formatRelative } from '@/lib/utils';
 import {
-  ArrowLeft, User, Mail, Building, MapPin, Linkedin, Star, ExternalLink,
+  User, Mail, Building, MapPin, Linkedin, Star, ExternalLink,
   Github, Globe, GraduationCap, Briefcase, Code, CheckCircle, AlertCircle,
   Activity, DollarSign, Send,
 } from 'lucide-react';
@@ -54,13 +55,18 @@ export default function ContactDetailPage() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb + smart back */}
+      <Breadcrumb
+        showBack
+        backFallback="/contacts"
+        items={[
+          { href: '/contacts', label: 'Leads' },
+          { label: fullName },
+        ]}
+      />
+
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href="/contacts">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-        </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold">{fullName}</h1>

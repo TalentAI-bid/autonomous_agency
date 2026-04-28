@@ -1,7 +1,11 @@
 export type ActivityType =
   | 'email_sent' | 'email_opened' | 'email_replied' | 'email_received' | 'email_bounced'
   | 'stage_change' | 'note_added' | 'call_logged' | 'meeting_scheduled'
-  | 'status_change' | 'score_updated' | 'agent_action';
+  | 'status_change' | 'score_updated' | 'agent_action'
+  | 'linkedin_connection_sent' | 'linkedin_connection_accepted'
+  | 'linkedin_message_sent' | 'linkedin_message_received'
+  | 'linkedin_followup_sent'
+  | 'manual_email_sent' | 'manual_email_received';
 
 export interface CrmStage {
   id: string;

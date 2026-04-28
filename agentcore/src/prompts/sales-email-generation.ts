@@ -91,7 +91,7 @@ RULES:
 - MUST reference a specific detail about the prospect's company (tech stack, funding, news, industry challenge, or product)
 - MUST propose a specific service/solution from the sender's offerings that directly addresses the prospect's situation
 - No generic openers ("I hope this finds you well", "I came across your company")
-- No markdown formatting in the email body — use plain text with basic HTML (<p>, <br>, <strong>) only
+- Output the body as PLAIN TEXT only. Use \n for line breaks and \n\n between paragraphs. Do NOT include any HTML tags, markdown, or special formatting characters. The system will convert paragraphs to HTML at send time.
 - Do NOT include a signature or sign-off in the body — the email template adds it automatically
 - Do NOT add "Best regards", "Cheers", sender name, or any closing at the end of the body
 - Subject line: no clickbait, no ALL CAPS, no exclamation marks
@@ -185,7 +185,7 @@ ${followUpStrategy}
 Return JSON:
 {
   "subject": "Short compelling subject line (6-8 words)",
-  "body": "Email body (max 120 words, basic HTML)"
+  "body": "Email body — plain text, max 120 words, use \\n\\n for paragraph breaks. NO HTML."
 }`;
 
   return { system, user };

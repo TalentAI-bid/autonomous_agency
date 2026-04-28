@@ -13,6 +13,8 @@ import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../promp
 import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
 import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-generation.js';
 import { findEmailByPattern } from '../tools/email-finder.tool.js';
+import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
+import { logActivity } from '../services/crm-activity.service.js';
 import logger from '../utils/logger.js';
 
 const createContactSchema = z.object({
@@ -390,8 +392,21 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     // Server-wide SMTP throttle (Contabo cap = 25/min)
     await acquireSmtpSlot();
 
-    // Send via SMTP
-    const htmlBody = body.replace(/\n/g, '<br>');
+    // Build a minimal Gmail-style HTML body from the LLM's plain text.
+    // The LLM is instructed to return PLAIN TEXT only (no HTML), so we
+    // convert paragraphs to <p>/<br> here and pass the original text as
+    // the multipart text/plain part. No trackingId / unsubscribeUrl on
+    // 1:1 manual sends — those look more personal without the marketing
+    // unsubscribe footer, and the recipient can just reply to opt out.
+    const accountConfig = (account.config as Record<string, unknown> | undefined) ?? {};
+    const htmlBody = wrapEmailBody({
+      body: plainTextToHtml(body),
+      senderName: account.fromName ?? (accountConfig.senderFirstName as string | undefined),
+      senderTitle: accountConfig.senderTitle as string | undefined,
+      senderCompany: accountConfig.senderCompany as string | undefined,
+      senderWebsite: accountConfig.senderWebsite as string | undefined,
+    });
+
     const result = await sendEmail({
       tenantId: request.tenantId,
       from: account.fromEmail,
@@ -427,6 +442,29 @@ export default async function contactRoutes(fastify: FastifyInstance) {
           .set({ status: 'contacted', updatedAt: new Date() })
           .where(eq(contacts.id, id));
       });
+    }
+
+    // Mirror the send to the CRM activity timeline so the contact's
+    // history shows the outbound email. The auto-outreach path logs the
+    // same event via outreach.agent.ts; this closes the gap for manual
+    // sends from the Compose Email modal.
+    try {
+      await logActivity({
+        tenantId: request.tenantId,
+        contactId: id,
+        masterAgentId: contact.masterAgentId ?? undefined,
+        type: 'email_sent',
+        title: `Email sent: ${subject}`,
+        metadata: {
+          toEmail: contact.email,
+          fromEmail: account.fromEmail,
+          messageId: result.messageId,
+          manual: true,
+          outreachEmailId: saved!.id,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err, contactId: id }, 'Failed to log manual email_sent activity');
     }
 
     logger.info({ tenantId: request.tenantId, contactId: id, messageId: result.messageId }, 'Outreach email sent');

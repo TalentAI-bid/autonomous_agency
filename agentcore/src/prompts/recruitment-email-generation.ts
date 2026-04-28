@@ -16,7 +16,7 @@ RULES:
 - Explain WHY their background fits — mention specific technologies, not "your experience is impressive"
 - Low-pressure CTA: "Would you be open to a quick chat?" or similar
 - No generic openers ("I hope this finds you well", "I came across your profile")
-- No markdown formatting — use plain text with basic HTML (<p>, <br>, <strong>) only
+- Output the body as PLAIN TEXT only. Use \n for line breaks and \n\n between paragraphs. Do NOT include any HTML tags, markdown, or special formatting characters. The system will convert paragraphs to HTML at send time.
 - Do NOT include a signature or sign-off in the body — the email template adds it automatically
 - Do NOT add "Best regards", "Cheers", sender name, or any closing at the end of the body
 - Subject line: specific and role-relevant, no clickbait
@@ -80,7 +80,7 @@ ${followUpStrategy}
 Return JSON:
 {
   "subject": "Short role-specific subject line (6-8 words)",
-  "body": "Email body (max 120 words, basic HTML)"
+  "body": "Email body — plain text, max 120 words, use \\n\\n for paragraph breaks. NO HTML."
 }`;
 
   return { system, user };

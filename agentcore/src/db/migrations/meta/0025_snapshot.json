@@ -1,6 +1,6 @@
 {
-  "id": "1c54d1b8-ebaa-449d-8010-836a2452b094",
-  "prevId": "39ad9683-51be-497a-b0cc-b730d353b614",
+  "id": "2de29e75-d5f2-4d29-9d8c-7f24ee8138bf",
+  "prevId": "1c54d1b8-ebaa-449d-8010-836a2452b094",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7153,7 +7153,14 @@
         "meeting_scheduled",
         "status_change",
         "score_updated",
-        "agent_action"
+        "agent_action",
+        "linkedin_connection_sent",
+        "linkedin_connection_accepted",
+        "linkedin_message_sent",
+        "linkedin_message_received",
+        "linkedin_followup_sent",
+        "manual_email_sent",
+        "manual_email_received"
       ]
     },
     "public.doc_status": {

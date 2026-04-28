@@ -74,6 +74,17 @@ export async function sendEmail(opts: SendEmailOpts): Promise<{ messageId: strin
     ? getTransporterFromAccount(emailAccount)
     : getTransporterFromEnv();
 
+  // Build deliverability headers. List-Unsubscribe + List-Unsubscribe-Post
+  // is required by Gmail's bulk-sender rules (Feb 2024) and materially
+  // improves inbox placement at any volume.
+  const senderDomain = from.includes('@') ? from.split('@')[1]!.replace(/[>\s].*$/, '') : undefined;
+  const headers: Record<string, string> = {};
+  if (trackingId) {
+    headers['List-Unsubscribe'] = `<${env.PUBLIC_API_URL}/track/unsubscribe/${trackingId}>${senderDomain ? `, <mailto:unsubscribe@${senderDomain}>` : ''}`;
+    headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+  }
+  const replyTo = emailAccount?.replyTo ?? emailAccount?.fromEmail;
+
   const streamTx = nodemailer.createTransport({ streamTransport: true, buffer: true });
   const composed = await streamTx.sendMail({
     from,
@@ -81,6 +92,8 @@ export async function sendEmail(opts: SendEmailOpts): Promise<{ messageId: strin
     subject,
     html: htmlWithTracking,
     text: text ?? html.replace(/<[^>]+>/g, ''),
+    headers: Object.keys(headers).length ? headers : undefined,
+    replyTo: replyTo ?? undefined,
   });
   const rawMessage = composed.message as Buffer;
 

@@ -17,23 +17,65 @@ import { useCreateActivity } from '@/hooks/use-crm';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
-type ManualActivityType = 'note_added' | 'call_logged';
+type ManualActivityType =
+  | 'note_added'
+  | 'call_logged'
+  | 'meeting_scheduled'
+  | 'linkedin_connection_sent'
+  | 'linkedin_connection_accepted'
+  | 'linkedin_message_sent'
+  | 'linkedin_message_received'
+  | 'linkedin_followup_sent'
+  | 'manual_email_sent'
+  | 'manual_email_received';
 
-const ACTIVITY_TYPE_LABELS: Record<ManualActivityType, string> = {
-  note_added:  'Note',
-  call_logged: 'Call Log',
-};
+const ACTIVITY_GROUPS: Array<{
+  label: string;
+  options: Array<{ value: ManualActivityType; label: string; placeholder: string }>;
+}> = [
+  {
+    label: 'Notes',
+    options: [
+      { value: 'note_added',        label: 'Note',          placeholder: 'e.g. Follow-up note' },
+      { value: 'call_logged',       label: 'Call',          placeholder: 'e.g. Intro call with prospect' },
+      { value: 'meeting_scheduled', label: 'Meeting',       placeholder: 'e.g. Discovery meeting booked' },
+    ],
+  },
+  {
+    label: 'LinkedIn',
+    options: [
+      { value: 'linkedin_connection_sent',     label: 'Connect sent',      placeholder: 'Sent connection request on LinkedIn' },
+      { value: 'linkedin_connection_accepted', label: 'Connect accepted',  placeholder: 'Connection request accepted' },
+      { value: 'linkedin_message_sent',        label: 'Message sent',      placeholder: 'Sent a DM on LinkedIn' },
+      { value: 'linkedin_message_received',    label: 'Message received',  placeholder: 'They replied on LinkedIn' },
+      { value: 'linkedin_followup_sent',       label: 'Follow-up sent',    placeholder: 'Sent a LinkedIn follow-up' },
+    ],
+  },
+  {
+    label: 'Email',
+    options: [
+      { value: 'manual_email_sent',     label: 'Email sent (out of app)',     placeholder: 'e.g. Sent intro email from Gmail' },
+      { value: 'manual_email_received', label: 'Email received (out of app)', placeholder: 'e.g. They replied to my Gmail' },
+    ],
+  },
+];
+
+const TYPE_PLACEHOLDER: Record<ManualActivityType, string> = Object.fromEntries(
+  ACTIVITY_GROUPS.flatMap((g) => g.options.map((o) => [o.value, o.placeholder] as const)),
+) as Record<ManualActivityType, string>;
 
 interface AddActivityDialogProps {
   contactId?: string;
   dealId?: string;
   /** Trigger element. Defaults to a "Add Activity" button if not provided. */
   trigger?: React.ReactNode;
+  /** Pre-select an activity type when the dialog opens. */
+  defaultType?: ManualActivityType;
 }
 
-export function AddActivityDialog({ contactId, dealId, trigger }: AddActivityDialogProps) {
+export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: AddActivityDialogProps) {
   const [open, setOpen] = React.useState(false);
-  const [type, setType] = React.useState<ManualActivityType>('note_added');
+  const [type, setType] = React.useState<ManualActivityType>(defaultType ?? 'note_added');
   const [title, setTitle] = React.useState('');
   const [description, setDescription] = React.useState('');
 
@@ -41,7 +83,7 @@ export function AddActivityDialog({ contactId, dealId, trigger }: AddActivityDia
   const { toast } = useToast();
 
   function reset() {
-    setType('note_added');
+    setType(defaultType ?? 'note_added');
     setTitle('');
     setDescription('');
   }
@@ -91,26 +133,33 @@ export function AddActivityDialog({ contactId, dealId, trigger }: AddActivityDia
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Type selector */}
-          <div className="space-y-1.5">
-            <Label htmlFor="activity-type">Type</Label>
-            <div className="flex gap-2" role="group" aria-label="Activity type">
-              {(Object.keys(ACTIVITY_TYPE_LABELS) as ManualActivityType[]).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setType(t)}
-                  className={cn(
-                    'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                    type === t
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-input bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                  )}
-                >
-                  {ACTIVITY_TYPE_LABELS[t]}
-                </button>
-              ))}
-            </div>
+          {/* Type selector — grouped by channel */}
+          <div className="space-y-2">
+            <Label>Type</Label>
+            {ACTIVITY_GROUPS.map((group) => (
+              <div key={group.label} className="space-y-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {group.label}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.options.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => setType(o.value)}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                        type === o.value
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-input bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Title */}
@@ -120,7 +169,7 @@ export function AddActivityDialog({ contactId, dealId, trigger }: AddActivityDia
             </Label>
             <Input
               id="activity-title"
-              placeholder={type === 'note_added' ? 'e.g. Follow-up note' : 'e.g. Intro call with prospect'}
+              placeholder={TYPE_PLACEHOLDER[type]}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -134,7 +183,7 @@ export function AddActivityDialog({ contactId, dealId, trigger }: AddActivityDia
             <textarea
               id="activity-description"
               rows={4}
-              placeholder={type === 'note_added' ? 'Add your note here…' : 'Call summary, outcomes, next steps…'}
+              placeholder="Optional context, outcome, next steps…"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className={cn(

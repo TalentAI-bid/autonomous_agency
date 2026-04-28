@@ -4,7 +4,7 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents, emailAccounts, opportunities } from '../db/schema/index.js';
 import { enqueueEmail } from '../tools/email-queue.tool.js';
-import { wrapEmailBody } from '../templates/email-template.js';
+import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
 import { buildSystemPrompt, buildUserPrompt, type OutreachEmail } from '../prompts/outreach.prompt.js';
 import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
@@ -275,16 +275,18 @@ export class OutreachAgent extends BaseAgent {
       });
     }
 
-    // 5. Wrap email body in professional HTML template
+    // 5. Wrap email body in minimal HTML. The LLM returns plain text;
+    // plainTextToHtml converts \n\n paragraphs to <p>/<br>. The original
+    // plain text is kept and passed as the text/plain MIME part by sendEmail.
     const trackingId = randomUUID();
     const wrappedBody = wrapEmailBody({
-      body: email.body,
+      body: plainTextToHtml(email.body),
       senderName: (config.senderFirstName as string) ?? undefined,
       senderTitle: (config.senderTitle as string) ?? undefined,
       senderCompany: (config.senderCompanyName as string) ?? agent?.name ?? undefined,
       senderWebsite: (config.senderWebsite as string) ?? undefined,
       calendlyUrl: (config.calendlyUrl as string) ?? undefined,
-      unsubscribeUrl: `${env.PUBLIC_API_URL}/unsubscribe/${trackingId}`,
+      unsubscribeUrl: `${env.PUBLIC_API_URL}/track/unsubscribe/${trackingId}`,
     });
 
     // 6. Enqueue email (or skip in dry-run mode)
@@ -327,6 +329,10 @@ export class OutreachAgent extends BaseAgent {
         toEmail: contact.email!,
         subject: email.subject,
         body: wrappedBody,
+        // The text/plain part keeps the original LLM output verbatim, so the
+        // multipart/alternative message has high text-to-HTML parity (Gmail
+        // weights this when scoring spam).
+        textBody: email.body,
         trackingId,
         masterAgentId,
         campaignId: effectiveCampaignId ?? undefined,

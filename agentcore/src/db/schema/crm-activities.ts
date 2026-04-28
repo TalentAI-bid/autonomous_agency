@@ -9,6 +9,19 @@ export const activityTypeEnum = pgEnum('crm_activity_type', [
   'email_sent', 'email_opened', 'email_replied', 'email_received', 'email_bounced',
   'stage_change', 'note_added', 'call_logged', 'meeting_scheduled',
   'status_change', 'score_updated', 'agent_action',
+  // LinkedIn-channel activities. Logged manually by the user when they
+  // perform the action on linkedin.com (the extension can prefill via the
+  // dashboard later but the data lives in this same enum).
+  'linkedin_connection_sent',
+  'linkedin_connection_accepted',
+  'linkedin_message_sent',
+  'linkedin_message_received',
+  'linkedin_followup_sent',
+  // Email sent / received outside the app — user logs it after the fact.
+  // Distinct from email_sent (which is used by the auto-outreach pipeline)
+  // so timeline filters and reply-rate analytics can tell them apart.
+  'manual_email_sent',
+  'manual_email_received',
 ]);
 
 export const crmActivities = pgTable('crm_activities', {

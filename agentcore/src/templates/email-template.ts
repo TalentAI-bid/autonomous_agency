@@ -1,7 +1,20 @@
 /**
- * Professional HTML email wrapper template.
- * Wraps LLM-generated email body in a responsive, styled layout
- * with signature block, optional CTA, and footer.
+ * Minimal email wrapper. Goal: a 1:1-looking message a real person would
+ * send from Gmail, NOT a marketing template.
+ *
+ * Design choices and why:
+ * - No <table>-based layout. Spam filters down-rank promotional layouts
+ *   from senders without warm-up history.
+ * - No card / border / rounded corners / colored background. The body text
+ *   sits directly on the email client's default chrome.
+ * - The signature is plain text wrapped in <p> tags. No bold names, no
+ *   logo, no decorative dashes — just three lines like a personal sign-off.
+ * - The unsubscribe footer is small grey text on its own line. Not a
+ *   button. Single-click compliant via the List-Unsubscribe header
+ *   (added separately in tools/smtp.tool.ts), this is just a backup link.
+ *
+ * The `body` argument MUST already be HTML (paragraphs / line breaks).
+ * Convert plain-text bodies via plainTextToHtml() below before passing.
  */
 
 export interface EmailTemplateOptions {
@@ -12,6 +25,23 @@ export interface EmailTemplateOptions {
   senderWebsite?: string;
   calendlyUrl?: string;
   unsubscribeUrl?: string;
+}
+
+/**
+ * Convert a plain-text email body (with \n line breaks and \n\n paragraph
+ * breaks) to minimal HTML. Each \n\n group becomes one <p>; single \n
+ * inside a paragraph becomes <br>. HTML-special chars are escaped.
+ */
+export function plainTextToHtml(text: string): string {
+  if (!text) return '';
+  return text
+    .split(/\n{2,}/)
+    .map((para) => {
+      const escaped = esc(para.trim()).replace(/\n/g, '<br>');
+      return escaped ? `<p style="margin:0 0 14px;">${escaped}</p>` : '';
+    })
+    .filter(Boolean)
+    .join('');
 }
 
 export function wrapEmailBody(opts: EmailTemplateOptions): string {
@@ -25,83 +55,46 @@ export function wrapEmailBody(opts: EmailTemplateOptions): string {
     unsubscribeUrl,
   } = opts;
 
-  // Build signature lines
+  // Signature: 1-3 lines, plain like a person typed it
   const sigLines: string[] = [];
-  if (senderName) {
-    sigLines.push(`<p style="margin:4px 0 0; font-weight:600; color:#18181b;">${esc(senderName)}</p>`);
-  }
-  if (senderTitle) {
-    sigLines.push(`<p style="margin:2px 0 0;">${esc(senderTitle)}</p>`);
-  }
+  if (senderName) sigLines.push(esc(senderName));
+  const titleAndCompany: string[] = [];
+  if (senderTitle) titleAndCompany.push(esc(senderTitle));
   if (senderCompany) {
-    const companyText = senderWebsite
-      ? `<a href="${esc(senderWebsite)}" target="_blank" rel="noopener noreferrer" style="color:#3b82f6; text-decoration:none;">${esc(senderCompany)}</a>`
-      : esc(senderCompany);
-    sigLines.push(`<p style="margin:2px 0 0;">${companyText}</p>`);
+    if (senderWebsite) {
+      titleAndCompany.push(`<a href="${esc(senderWebsite)}" style="color:#1a73e8; text-decoration:none;">${esc(senderCompany)}</a>`);
+    } else {
+      titleAndCompany.push(esc(senderCompany));
+    }
+  }
+  if (titleAndCompany.length) sigLines.push(titleAndCompany.join(', '));
+
+  // Optional inline scheduling link in the signature line
+  if (calendlyUrl) {
+    sigLines.push(`<a href="${esc(calendlyUrl)}" style="color:#1a73e8; text-decoration:underline;">Book a quick chat</a>`);
   }
 
-  const signatureBlock = sigLines.length > 0
-    ? `<tr><td style="padding:0 32px 24px; font-size:13px; line-height:1.5; color:#71717a;">
-        <p style="margin:0;">—</p>
-        ${sigLines.join('\n        ')}
-      </td></tr>`
+  const signatureHtml = sigLines.length
+    ? `<p style="margin:14px 0 0; color:#222;">${sigLines.join('<br>')}</p>`
     : '';
 
-  // CTA button (if calendly URL provided)
-  const ctaBlock = calendlyUrl
-    ? `<tr><td style="padding:0 32px 24px;" align="left">
-        <a href="${esc(calendlyUrl)}" target="_blank" rel="noopener noreferrer"
-           style="display:inline-block; padding:10px 24px; background:#3b82f6; color:#ffffff; font-size:13px; font-weight:600; text-decoration:none; border-radius:6px;">
-          Book a Quick Chat
-        </a>
-      </td></tr>`
+  // Unsubscribe footer (small grey text, last line). Backup for the
+  // List-Unsubscribe header which is the primary compliance path.
+  const footerHtml = unsubscribeUrl
+    ? `<p style="margin:24px 0 0; font-size:11px; color:#888;">
+         If you'd rather not hear from us, <a href="${esc(unsubscribeUrl)}" style="color:#888; text-decoration:underline;">unsubscribe here</a>.
+       </p>`
     : '';
 
-  // Footer
-  const footerParts: string[] = [];
-  if (senderCompany) footerParts.push(esc(senderCompany));
-  if (unsubscribeUrl) {
-    footerParts.push(`<a href="${esc(unsubscribeUrl)}" style="color:#a1a1aa; text-decoration:underline;">Unsubscribe</a>`);
-  }
-  const footerContent = footerParts.length > 0 ? footerParts.join(' &middot; ') : '';
-
-  const footerBlock = footerContent
-    ? `<tr><td style="padding:16px 32px; border-top:1px solid #e4e4e7; font-size:11px; line-height:1.4; color:#a1a1aa; text-align:center;">
-        ${footerContent}
-      </td></tr>`
-    : '';
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title></title>
-</head>
-<body style="margin:0; padding:0; background-color:#f4f4f5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f5;">
-    <tr>
-      <td align="center" style="padding:32px 16px;">
-        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border-radius:8px; border:1px solid #e4e4e7; max-width:600px; width:100%;">
-          <!-- Body -->
-          <tr>
-            <td style="padding:32px 32px 16px; font-size:14px; line-height:1.7; color:#18181b; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-              ${body}
-            </td>
-          </tr>
-          <!-- Signature -->
-          ${signatureBlock}
-          <!-- CTA -->
-          ${ctaBlock}
-          <!-- Footer -->
-          ${footerBlock}
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title></title></head>
+<body style="margin:0; padding:0; background:#ffffff;">
+<div style="font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size:14px; line-height:1.6; color:#222; max-width:640px; padding:8px;">
+${body}
+${signatureHtml}
+${footerHtml}
+</div>
+</body></html>`;
 }
 
 function esc(s: string): string {

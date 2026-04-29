@@ -105,9 +105,11 @@
           u.waitForSelector('a[href*="/in/"]', { timeout: 10000 }).catch(() => null),
         ]);
 
-        // Scroll to load more
-        for (let i = 0; i < 3; i++) {
-          window.scrollBy(0, 600);
+        // Scroll deep so LinkedIn lazy-loads more team cards before we
+        // extract. We rank-and-cap server-side, so giving the ranker more
+        // raw candidates yields better top-N decision-makers.
+        for (let i = 0; i < 6; i++) {
+          window.scrollBy(0, 900);
           await u.sleep(800);
         }
 

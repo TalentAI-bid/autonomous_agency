@@ -486,16 +486,17 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       source: 'linkedin_extension',
     });
 
-    // Save people from LinkedIn company /people/ tab as contacts (best-effort, max 10).
+    // Save the top 3 KEY persons from LinkedIn company /people/ tab.
     // Rank by title before slicing: for a hiring-signal / outreach flow the
     // useful contacts are decision-makers and recruiters (CEO, CTO, Founder,
     // VP, Head of, HR/Talent/Recruiter, Director). Without ranking we keep
     // whatever LinkedIn returned first in the DOM — usually a sea of
     // engineers when the company is hiring engineering roles, none of whom
-    // can route the candidate. Cap at 10 saved per run.
+    // can route the candidate. Cap at 3 to keep the per-contact email
+    // pattern probe (8 templates × Reacher) within the daily Reacher quota.
     const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
     const rankedPeople = rankPeopleByTitle(rawPeople);
-    for (const person of rankedPeople.slice(0, 10)) {
+    for (const person of rankedPeople.slice(0, 3)) {
       const cleanName = sanitizePersonName(person.name);
       if (!cleanName) {
         logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');

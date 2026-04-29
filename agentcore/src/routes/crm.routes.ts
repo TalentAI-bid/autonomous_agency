@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eq, and, desc, asc, lt, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { crmStages, deals, crmActivities, contacts } from '../db/schema/index.js';
-import { logActivity, ensureDeal, moveDealStage, seedDefaultStages } from '../services/crm-activity.service.js';
+import { logActivity, ensureDeal, moveDealStage, seedDefaultStages, findStageBySlug } from '../services/crm-activity.service.js';
 import { matchContacts } from '../services/contact-match.service.js';
 import { extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
 import {
@@ -48,6 +48,17 @@ const updateDealSchema = z.object({
   notes: z.string().optional(),
   expectedCloseAt: z.string().optional(),
 });
+
+// Activity types that imply a real contact touchpoint and should surface
+// the contact on the kanban via ensureDeal. Notes and pure system events
+// are excluded so the pipeline doesn't get spammed.
+const QUALIFYING_TYPES = new Set<string>([
+  'call_logged', 'meeting_scheduled',
+  'manual_email_sent', 'manual_email_received',
+  'linkedin_connection_sent', 'linkedin_connection_accepted',
+  'linkedin_message_sent', 'linkedin_message_received', 'linkedin_followup_sent',
+  'email_sent', 'email_replied', 'email_received',
+]);
 
 const createActivitySchema = z.object({
   contactId: z.string().uuid().optional(),
@@ -299,6 +310,27 @@ export default async function crmRoutes(fastify: FastifyInstance) {
       userId: request.userId,
       ...parsed.data,
     });
+
+    // For touchpoint-style activities on a contact, surface the contact on
+    // the kanban by ensuring a deal exists. ensureDeal is idempotent.
+    if (parsed.data.contactId && QUALIFYING_TYPES.has(parsed.data.type)) {
+      try {
+        // Honor the copilot's suggested initial stage when present.
+        let initialStageId: string | undefined;
+        const stageSlug = (parsed.data.metadata?.suggestedStageSlug as string | undefined)?.trim();
+        if (stageSlug) {
+          const stage = await findStageBySlug(request.tenantId, stageSlug);
+          initialStageId = stage?.id;
+        }
+        await ensureDeal({
+          tenantId: request.tenantId,
+          contactId: parsed.data.contactId,
+          initialStageId,
+        });
+      } catch (err) {
+        logger.warn({ err, contactId: parsed.data.contactId }, 'Failed to ensure deal for activity');
+      }
+    }
 
     return reply.status(201).send({ data: result });
   });

@@ -181,7 +181,7 @@ function displayName(c: Contact): string {
 
 // ─── Inline "create new contact" mini-form ────────────────────────────────
 
-function CreateContactInline({
+export function CreateContactInline({
   initialName,
   onCreated,
   onCancel,

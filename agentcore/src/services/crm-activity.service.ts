@@ -107,13 +107,17 @@ export async function getDefaultStage(tenantId: string): Promise<CrmStage> {
 }
 
 /**
- * Ensure a deal exists for a contact. Creates one at the default stage if none exists.
+ * Ensure a deal exists for a contact. Creates one at `initialStageId` if
+ * provided, otherwise the default stage. Idempotent — returns the existing
+ * deal if any without changing its stage.
  */
 export async function ensureDeal(opts: {
   tenantId: string;
   contactId: string;
   masterAgentId?: string;
   campaignId?: string;
+  /** Initial stage for newly-created deals. Ignored if a deal already exists. */
+  initialStageId?: string;
 }): Promise<{ id: string; created: boolean }> {
   // Check for existing deal
   const existing = await withTenant(opts.tenantId, async (tx) => {
@@ -135,7 +139,7 @@ export async function ensureDeal(opts: {
   });
 
   const contactName = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || 'Unknown';
-  const defaultStage = await getDefaultStage(opts.tenantId);
+  const stageId = opts.initialStageId ?? (await getDefaultStage(opts.tenantId)).id;
 
   const [deal] = await withTenant(opts.tenantId, async (tx) => {
     return tx.insert(deals).values({
@@ -143,7 +147,7 @@ export async function ensureDeal(opts: {
       contactId: opts.contactId,
       masterAgentId: opts.masterAgentId,
       campaignId: opts.campaignId,
-      stageId: defaultStage.id,
+      stageId,
       title: `Deal: ${contactName}`,
     }).returning({ id: deals.id });
   });

@@ -14,7 +14,7 @@ import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/s
 import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-generation.js';
 import { findEmailByPattern } from '../tools/email-finder.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
-import { logActivity } from '../services/crm-activity.service.js';
+import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
 import logger from '../utils/logger.js';
 
 // Defensive: convert any HTML the LLM might still emit back to plain text
@@ -147,6 +147,17 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         ...parsed.data,
       }).returning();
     });
+
+    // Adding a lead = adding a card on the kanban. Idempotent.
+    try {
+      await ensureDeal({
+        tenantId: request.tenantId,
+        contactId: contact!.id,
+        masterAgentId: parsed.data.masterAgentId,
+      });
+    } catch (err) {
+      logger.warn({ err, contactId: contact!.id }, 'Failed to ensure deal for new contact');
+    }
 
     return reply.status(201).send({ data: contact });
   });
@@ -496,6 +507,18 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       });
     } catch (err) {
       logger.warn({ err, contactId: id }, 'Failed to log manual email_sent activity');
+    }
+
+    // Surface the contact on the kanban: ensure a deal exists. Idempotent;
+    // returns the existing deal if any so we don't create duplicates.
+    try {
+      await ensureDeal({
+        tenantId: request.tenantId,
+        contactId: id,
+        masterAgentId: contact.masterAgentId ?? undefined,
+      });
+    } catch (err) {
+      logger.warn({ err, contactId: id }, 'Failed to ensure deal after manual email send');
     }
 
     logger.info({ tenantId: request.tenantId, contactId: id, messageId: result.messageId }, 'Outreach email sent');

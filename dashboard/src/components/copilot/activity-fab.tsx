@@ -10,7 +10,9 @@ import { useParseActivity, type CopilotParseResult, type CopilotContactCandidate
 import { useCreateActivity } from '@/hooks/use-crm';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { Sparkles, X, Send, ImageIcon, Loader2, ArrowRight, Check } from 'lucide-react';
+import { CreateContactInline } from '@/components/crm/contact-picker';
+import { Sparkles, X, Send, ImageIcon, Loader2, ArrowRight, Check, UserPlus } from 'lucide-react';
+import type { Contact } from '@/types';
 
 // Pages where the FAB is hidden — auth/login flows should stay clean.
 const HIDDEN_PATH_PATTERNS = [/^\/login/, /^\/signup/, /^\/forgot-password/];
@@ -127,6 +129,11 @@ function FabPanel({ onClose }: { onClose: () => void }) {
         type: result.draft.type,
         title: result.draft.title,
         description: result.draft.description || undefined,
+        // Carry the LLM's stage hint to the backend so ensureDeal can put
+        // the new card on the right column from the start.
+        metadata: result.draft.suggestedStageSlug
+          ? { suggestedStageSlug: result.draft.suggestedStageSlug }
+          : undefined,
       });
       qc.invalidateQueries({ queryKey: ['crm'] });
       toast({ title: 'Activity logged', description: result.draft.title });
@@ -313,6 +320,19 @@ interface DraftPreviewProps {
   onBack: () => void;
 }
 
+function contactToCandidate(c: Contact): CopilotContactCandidate {
+  return {
+    id: c.id,
+    firstName: c.firstName ?? null,
+    lastName: c.lastName ?? null,
+    email: c.email ?? null,
+    companyName: c.companyName ?? null,
+    masterAgentId: c.masterAgentId ?? null,
+    matchType: 'name',
+    score: 100,
+  };
+}
+
 const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   note_added: 'Note',
   call_logged: 'Call',
@@ -329,6 +349,7 @@ const ACTIVITY_TYPE_LABELS: Record<string, string> = {
 function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewProps) {
   const draft = result.draft;
   const candidates = result.candidates;
+  const [creating, setCreating] = React.useState(false);
 
   return (
     <div className="space-y-4">
@@ -375,11 +396,32 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
               );
             })}
           </div>
+        ) : creating && draft.contactName ? (
+          <CreateContactInline
+            initialName={draft.contactName}
+            onCreated={(c) => {
+              onPick(contactToCandidate(c));
+              setCreating(false);
+            }}
+            onCancel={() => setCreating(false)}
+          />
+        ) : draft.contactName ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              No existing contact matches <strong>{draft.contactName}</strong>.
+            </p>
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-xs font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              <UserPlus className="h-3 w-3" />
+              Create contact &ldquo;{draft.contactName}&rdquo;
+            </button>
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            {draft.contactName
-              ? `No matches for "${draft.contactName}". This activity will be logged without a contact.`
-              : 'No contact mentioned. This activity will be logged as a free-floating note.'}
+            No contact mentioned. This activity will be logged as a free-floating note.
           </p>
         )}
       </div>

@@ -4,7 +4,16 @@ import { eq, and, desc, asc, lt, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { crmStages, deals, crmActivities, contacts } from '../db/schema/index.js';
 import { logActivity, ensureDeal, moveDealStage, seedDefaultStages } from '../services/crm-activity.service.js';
+import { matchContacts } from '../services/contact-match.service.js';
+import { extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
+import {
+  buildCopilotActivitySystem,
+  buildCopilotActivityUser,
+  ACTIVITY_TYPES,
+  type CopilotActivityDraft,
+} from '../prompts/copilot-activity.prompt.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import logger from '../utils/logger.js';
 
 // --- Schemas ---
 const createStageSchema = z.object({
@@ -44,9 +53,12 @@ const createActivitySchema = z.object({
   contactId: z.string().uuid().optional(),
   dealId: z.string().uuid().optional(),
   type: z.enum([
-    'email_sent', 'email_opened', 'email_replied', 'email_bounced',
+    'email_sent', 'email_opened', 'email_replied', 'email_received', 'email_bounced',
     'stage_change', 'note_added', 'call_logged', 'meeting_scheduled',
     'status_change', 'score_updated', 'agent_action',
+    'linkedin_connection_sent', 'linkedin_connection_accepted',
+    'linkedin_message_sent', 'linkedin_message_received', 'linkedin_followup_sent',
+    'manual_email_sent', 'manual_email_received',
   ]),
   title: z.string().min(1).max(500),
   description: z.string().optional(),
@@ -348,5 +360,59 @@ export default async function crmRoutes(fastify: FastifyInstance) {
     }));
 
     return { data: board };
+  });
+
+  // ── Copilot: parse free text + OCR'd image into a structured activity draft ──
+  // POST /api/crm/copilot/parse-activity
+  fastify.post('/copilot/parse-activity', async (request) => {
+    const parsed = z.object({
+      text: z.string().max(4000).optional(),
+      ocrText: z.string().max(8000).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+    const { text = '', ocrText } = parsed.data;
+    if (!text.trim() && !ocrText?.trim()) {
+      throw new ValidationError('Provide either `text` or `ocrText`');
+    }
+
+    const system = buildCopilotActivitySystem();
+    const user = buildCopilotActivityUser({ text, ocrText });
+
+    let draft: CopilotActivityDraft;
+    try {
+      draft = await extractJSON<CopilotActivityDraft>(
+        request.tenantId,
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        2,
+        { model: SMART_MODEL, temperature: 0.2 },
+      );
+    } catch (err) {
+      logger.warn({ err }, 'copilot parse-activity: LLM extract failed');
+      throw new ValidationError('Could not parse the input. Try rephrasing.');
+    }
+
+    // Defensive: clamp the type to the allowed enum.
+    if (!ACTIVITY_TYPES.includes(draft.type)) draft.type = 'note_added';
+    if (!draft.title) draft.title = 'Activity';
+    if (typeof draft.description !== 'string') draft.description = '';
+
+    // Fuzzy-match candidate contacts.
+    const candidates = await matchContacts({
+      tenantId: request.tenantId,
+      name: draft.contactName,
+      email: draft.contactEmail,
+      limit: 5,
+    });
+
+    return {
+      data: {
+        draft,
+        candidates,
+      },
+    };
   });
 }

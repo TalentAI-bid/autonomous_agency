@@ -27,6 +27,25 @@ export function useContact(id: string) {
   });
 }
 
+export function useCreateContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      linkedinUrl?: string;
+      title?: string;
+      companyName?: string;
+      location?: string;
+      masterAgentId: string;  // required: contacts cannot be orphan (post-refactor)
+    }) => apiPost<Contact>('/contacts', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+    },
+  });
+}
+
 export function useUpdateContact() {
   const qc = useQueryClient();
   return useMutation({

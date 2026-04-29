@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { useCreateActivity } from '@/hooks/use-crm';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { ContactPicker } from './contact-picker';
 
 type ManualActivityType =
   | 'note_added'
@@ -73,29 +74,56 @@ interface AddActivityDialogProps {
   defaultType?: ManualActivityType;
 }
 
+// Activity types that don't make sense without a contact (they imply a recipient).
+const REQUIRES_CONTACT: ReadonlySet<ManualActivityType> = new Set([
+  'manual_email_sent',
+  'manual_email_received',
+  'linkedin_connection_sent',
+  'linkedin_connection_accepted',
+  'linkedin_message_sent',
+  'linkedin_message_received',
+  'linkedin_followup_sent',
+]);
+
 export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: AddActivityDialogProps) {
   const [open, setOpen] = React.useState(false);
   const [type, setType] = React.useState<ManualActivityType>(defaultType ?? 'note_added');
   const [title, setTitle] = React.useState('');
   const [description, setDescription] = React.useState('');
+  // Local contact id used when the parent didn't pass `contactId` (i.e. when
+  // the dialog is opened from /crm — global "Log Activity").
+  const [pickedContactId, setPickedContactId] = React.useState<string | null>(null);
 
   const createActivity = useCreateActivity();
   const { toast } = useToast();
+
+  // Whether the parent supplied a context (contactId or dealId). If yes, no picker.
+  const hasParentContext = !!contactId || !!dealId;
+  const effectiveContactId = contactId ?? pickedContactId ?? undefined;
 
   function reset() {
     setType(defaultType ?? 'note_added');
     setTitle('');
     setDescription('');
+    setPickedContactId(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
     if (!title.trim()) return;
+    if (REQUIRES_CONTACT.has(type) && !effectiveContactId && !dealId) {
+      toast({
+        title: 'Pick a contact',
+        description: 'This activity type needs a contact (it implies a recipient).',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     try {
       await createActivity.mutateAsync({
-        contactId,
+        contactId: effectiveContactId,
         dealId,
         type,
         title: title.trim(),
@@ -119,7 +147,9 @@ export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: A
     if (!next) reset();
   }
 
-  const isValid = title.trim().length > 0;
+  const isValid =
+    title.trim().length > 0 &&
+    (!REQUIRES_CONTACT.has(type) || !!effectiveContactId || !!dealId);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -133,6 +163,16 @@ export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: A
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Contact picker — shown only when the dialog is opened without a parent context */}
+          {!hasParentContext && (
+            <ContactPicker
+              value={pickedContactId}
+              onChange={(id) => setPickedContactId(id)}
+              allowNoContact
+              label="Contact (optional for notes & calls)"
+            />
+          )}
+
           {/* Type selector — grouped by channel */}
           <div className="space-y-2">
             <Label>Type</Label>

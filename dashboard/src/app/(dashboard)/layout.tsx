@@ -8,6 +8,7 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { StatusBar } from '@/components/layout/status-bar';
 import { OnboardingBanner } from '@/components/layout/onboarding-banner';
+import { ActivityFab } from '@/components/copilot/activity-fab';
 import { useWebSocket } from '@/hooks/use-websocket';
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
@@ -21,6 +22,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
         <main style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>{children}</main>
         <StatusBar />
       </div>
+      <ActivityFab />
     </div>
   );
 }

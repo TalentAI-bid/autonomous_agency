@@ -649,7 +649,7 @@ function sanitizeTitle(raw: string | undefined | null): string | undefined {
 //   2. Otherwise strip a trailing "View ... profile" suffix.
 //   3. Reject anything that still contains "view"/"profile" as a word, or that
 //      lacks a sensible first-last shape.
-function sanitizePersonName(raw: string | undefined | null): string | null {
+export function sanitizePersonName(raw: string | undefined | null): string | null {
   if (!raw) return null;
   let name = raw.trim().replace(/\s+/g, ' ');
   if (name.length < 2) return null;

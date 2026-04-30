@@ -10,6 +10,7 @@ import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageBadge } from '@/components/crm/stage-badge';
 import { AddActivityDialog } from '@/components/crm/add-activity-dialog';
 import { EmailComposeModal } from '@/components/contacts/email-compose-modal';
+import { EmailEditor } from '@/components/contacts/email-editor';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { formatDate, formatRelative } from '@/lib/utils';
 import {
   User, Mail, Building, MapPin, Linkedin, Star, ExternalLink,
-  Github, Globe, GraduationCap, Briefcase, Code, CheckCircle, AlertCircle,
+  Github, Globe, GraduationCap, Briefcase, Code,
   Activity, DollarSign, Send,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -300,20 +301,12 @@ export default function ContactDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            {contact.email ? (
-              <div className="flex items-center gap-2">
-                <a href={`mailto:${contact.email}`} className="text-blue-400 hover:underline">
-                  {contact.email}
-                </a>
-                {contact.emailVerified && (
-                  <CheckCircle className="w-3.5 h-3.5 text-green-400" />
-                )}
-              </div>
-            ) : (
-              <p className="text-muted-foreground flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5" /> No email found
-              </p>
-            )}
+            <EmailEditor
+              contactId={contact.id}
+              currentEmail={contact.email ?? null}
+              emailVerified={!!contact.emailVerified}
+              size="inline"
+            />
             {contact.linkedinUrl && (
               <a href={contact.linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-blue-400 hover:underline">
                 <Linkedin className="w-3.5 h-3.5" /> LinkedIn <ExternalLink className="w-3 h-3" />

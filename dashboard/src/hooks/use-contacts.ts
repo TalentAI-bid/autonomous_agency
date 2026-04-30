@@ -68,3 +68,22 @@ export function useFindContactEmail() {
     },
   });
 }
+
+export type ManualEmailStatus = 'safe' | 'risky' | 'invalid' | 'catch_all' | 'unknown' | 'error' | 'daily_limit';
+
+export interface SetContactEmailResult {
+  contact: Contact;
+  status: ManualEmailStatus;
+}
+
+export function useSetContactEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, email }: { id: string; email: string }) =>
+      apiPost<SetContactEmailResult>(`/contacts/${id}/email/manual`, { email }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      qc.invalidateQueries({ queryKey: ['contacts', vars.id] });
+    },
+  });
+}

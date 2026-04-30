@@ -3,17 +3,21 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db, withTenant } from '../config/database.js';
-import { extensionSessions, extensionTasks, users, tenants } from '../db/schema/index.js';
+import { extensionSessions, extensionTasks, users, tenants, contacts, masterAgents } from '../db/schema/index.js';
 import {
   verifyPassword,
   generateAccessToken,
   generateRefreshToken,
   rotateRefreshToken,
 } from '../services/auth.service.js';
-import { ValidationError, UnauthorizedError } from '../utils/errors.js';
+import { ValidationError, UnauthorizedError, NotFoundError } from '../utils/errors.js';
 import { pubRedis } from '../queues/setup.js';
 import { env } from '../config/env.js';
 import { readLatest } from './extension-distribution.routes.js';
+import { sanitizePersonName } from '../services/extension-dispatcher.js';
+import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
+import { dispatchJob } from '../services/queue.service.js';
+import { ensureDeal } from '../services/crm-activity.service.js';
 import logger from '../utils/logger.js';
 
 function generateApiKey(): { key: string; hash: string } {
@@ -303,6 +307,123 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
       });
 
       return { data: { tasks, count: tasks.length } };
+    });
+
+    // POST /api/extension/contacts/manual
+    // Snov.io-style manual add from a LinkedIn /in/ profile.
+    // Creates contact + (optional) company, dispatches per-contact email-finder
+    // enrichment, and always creates a Lead-stage CRM deal.
+    const manualContactSchema = z.object({
+      name: z.string().min(1).max(200),
+      title: z.string().max(255).optional(),
+      companyName: z.string().max(255).optional(),
+      linkedinUrl: z.string().url().max(500),
+      masterAgentId: z.string().uuid(),
+    });
+
+    authScope.post('/contacts/manual', async (request, reply) => {
+      const parsed = manualContactSchema.safeParse(request.body);
+      if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+      const { name, title, companyName, linkedinUrl, masterAgentId } = parsed.data;
+
+      // Verify the master agent belongs to this tenant
+      const [agent] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      if (!agent) throw new NotFoundError('Master agent', masterAgentId);
+
+      // Sanitize the LinkedIn-extracted name (handle "View NAME's profile" residue)
+      const cleanName = sanitizePersonName(name);
+      if (!cleanName) {
+        throw new ValidationError('Could not parse a valid person name from input');
+      }
+      const parts = cleanName.split(/\s+/);
+      const firstName = parts[0] || '';
+      const lastName = parts.slice(1).join(' ') || '';
+      if (!firstName) {
+        throw new ValidationError('Person name is missing a first name');
+      }
+
+      // Optional company creation
+      let companyId: string | undefined;
+      if (companyName?.trim()) {
+        try {
+          const savedCompany = await saveOrUpdateCompanyStatic(
+            request.tenantId,
+            { name: companyName.trim(), rawData: { source: 'linkedin_manual_extension' } },
+            masterAgentId,
+          );
+          companyId = savedCompany.id;
+        } catch (err) {
+          logger.debug({ err, companyName }, 'manual_add_profile: company create skipped (non-fatal)');
+        }
+      }
+
+      // Dedup by linkedinUrl within this tenant
+      const [existing] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select({ id: contacts.id }).from(contacts)
+          .where(and(eq(contacts.tenantId, request.tenantId), eq(contacts.linkedinUrl, linkedinUrl)))
+          .limit(1);
+      });
+
+      let contactId: string;
+      if (existing) {
+        contactId = existing.id;
+        logger.info({ contactId, linkedinUrl, masterAgentId }, 'manual_add_profile: dedup, reusing contact');
+      } else {
+        const [inserted] = await withTenant(request.tenantId, async (tx) => {
+          return tx.insert(contacts).values({
+            tenantId: request.tenantId,
+            firstName,
+            lastName: lastName || undefined,
+            title: title?.trim() || undefined,
+            linkedinUrl,
+            companyId,
+            companyName: companyName?.trim() || undefined,
+            masterAgentId,
+            source: 'linkedin_profile',
+            rawData: {
+              discoverySource: 'linkedin_manual_extension',
+              addedByUser: true,
+              addedAt: new Date().toISOString(),
+            },
+          }).returning({ id: contacts.id });
+        });
+        if (!inserted) throw new Error('Contact insert failed');
+        contactId = inserted.id;
+        logger.info({ contactId, linkedinUrl, masterAgentId, userId: request.userId }, 'manual_add_profile: contact created');
+      }
+
+      // Always create the Lead-stage deal so the contact appears on the pipeline
+      const deal = await ensureDeal({
+        tenantId: request.tenantId,
+        contactId,
+        masterAgentId,
+      });
+
+      // Dispatch per-contact enrichment so the 9-pattern Reacher probe runs
+      // in the background. We don't await it — manual-add must be snappy.
+      try {
+        await dispatchJob(request.tenantId, 'enrichment', {
+          contactId,
+          masterAgentId,
+          source: 'linkedin_manual_extension',
+        });
+      } catch (err) {
+        logger.debug({ err, contactId }, 'manual_add_profile: enrichment dispatch failed (non-fatal)');
+      }
+
+      return reply.send({
+        data: {
+          contactId,
+          dealId: deal.id,
+          dealCreated: deal.created,
+          dealStage: 'lead',
+          dedup: !!existing,
+        },
+      });
     });
   });
 }

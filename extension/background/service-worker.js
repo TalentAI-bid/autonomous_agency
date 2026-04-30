@@ -11,6 +11,7 @@ import {
   signOut,
   refreshSession,
   toWsOrigin,
+  authedFetch,
 } from '../lib/auth-client.js';
 import { BACKEND_URL } from '../config.js';
 
@@ -488,9 +489,64 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: true, paused });
       return;
     }
+
+    // ─── Snov.io-style profile widget ────────────────────────────────────
+    if (msg?.kind === 'list_master_agents') {
+      try {
+        const cached = await getCachedMasterAgents();
+        if (cached) { sendResponse({ ok: true, agents: cached }); return; }
+        const res = await authedFetch('/api/master-agents');
+        if (!res.ok) throw new Error(`http_${res.status}`);
+        const body = await res.json();
+        const agents = (body?.data ?? []).map((a) => ({ id: a.id, name: a.name, useCase: a.useCase }));
+        await setCachedMasterAgents(agents);
+        sendResponse({ ok: true, agents });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+      return;
+    }
+
+    if (msg?.kind === 'manual_add_profile') {
+      try {
+        const payload = msg.payload || {};
+        const res = await authedFetch('/api/extension/contacts/manual', {
+          method: 'POST',
+          body: payload,
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          sendResponse({ ok: false, error: body?.error || `http_${res.status}` });
+          return;
+        }
+        sendResponse({ ok: true, ...(body?.data ?? {}) });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+      return;
+    }
   })();
   return true; // async sendResponse
 });
+
+// ─── Master-agent cache (5 min) ────────────────────────────────────────────
+async function getCachedMasterAgents() {
+  try {
+    const { masterAgentsCache } = await chrome.storage.session.get('masterAgentsCache');
+    if (masterAgentsCache && Date.now() - masterAgentsCache.fetchedAt < 5 * 60_000) {
+      return masterAgentsCache.agents;
+    }
+  } catch (_) { /* session storage unavailable in some contexts */ }
+  return null;
+}
+
+async function setCachedMasterAgents(agents) {
+  try {
+    await chrome.storage.session.set({
+      masterAgentsCache: { agents, fetchedAt: Date.now() },
+    });
+  } catch (_) { /* ignore */ }
+}
 
 // ─── Update check ──────────────────────────────────────────────────────────
 // Self-hosted CRX auto-update is blocked on consumer Chrome since 2018, so

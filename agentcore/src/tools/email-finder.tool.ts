@@ -26,12 +26,15 @@ const PATTERN_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h in-memory cache
 
 // In-memory pattern cache: avoids a DB hit when the same worker process
 // enriches multiple companies on the same domain.
-const domainPatternCache = new Map<string, { patternIndex: number; verifiedAt: number }>();
+const domainPatternCache = new Map<string, { templateId: string; verifiedAt: number }>();
 
-// ── Pattern templates (index-aligned) ────────────────────────────────────────
-// Templates are addressed by index. The same array is used everywhere a
-// pattern is selected, persisted, or rebuilt. NEVER reorder this array
-// without a migration of `domain_patterns.pattern` strings.
+// ── Pattern templates ────────────────────────────────────────────────────────
+// Templates are identified by string id (persisted in `domain_patterns.pattern`).
+// Adding new templates is safe — never rename existing ones.
+//
+// `_firsttoken` suffix denotes a variant for hyphenated/multi-word first names
+// where only the first token of the first name is used (e.g. "Vlad-George
+// Iacob" → "vlad.iacob"). These variants are emitted only when applicable.
 
 const PATTERN_TEMPLATES: ReadonlyArray<{ id: string; build: (f: string, l: string, d: string) => string }> = [
   { id: 'first.last',  build: (f, l, d) => `${f}.${l}@${d}` },
@@ -42,7 +45,12 @@ const PATTERN_TEMPLATES: ReadonlyArray<{ id: string; build: (f: string, l: strin
   { id: 'last.first',  build: (f, l, d) => `${l}.${f}@${d}` },
   { id: 'first_last',  build: (f, l, d) => `${f}_${l}@${d}` },
   { id: 'last',        build: (_f, l, d) => `${l}@${d}` },
+  { id: 'f1l1',        build: (f, l, d) => `${f[0]}${l[0]}@${d}` },
 ];
+
+// Subset re-emitted with first-token-only when the original first name has
+// hyphen/space (e.g. "Vlad-George" → "vlad").
+const FIRST_TOKEN_TEMPLATE_IDS = ['first.last', 'flast', 'f.last'] as const;
 
 function normalizeForEmail(str: string): string {
   return str
@@ -52,19 +60,68 @@ function normalizeForEmail(str: string): string {
     .replace(/[^a-z]/g, '');
 }
 
-function generatePatterns(first: string, last: string, domain: string): string[] {
+/**
+ * If the original first name contains "-" or whitespace, return the first
+ * normalized token. Otherwise null.
+ *   "Vlad-George" → "vlad"
+ *   "Mary Jane"   → "mary"
+ *   "Maria"       → null
+ */
+function firstTokenOnly(first: string): string | null {
+  const tokens = first
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .split(/[-\s]+/)
+    .map((t) => t.replace(/[^a-z]/g, ''))
+    .filter(Boolean);
+  if (tokens.length > 1 && tokens[0] && tokens[0] !== normalizeForEmail(first)) {
+    return tokens[0];
+  }
+  return null;
+}
+
+interface PatternCandidate { templateId: string; email: string; isFirstToken: boolean }
+
+function generatePatterns(first: string, last: string, domain: string): PatternCandidate[] {
   const f = normalizeForEmail(first);
   const l = normalizeForEmail(last);
   if (!f || !l || !domain) return [];
-  return PATTERN_TEMPLATES.map((t) => t.build(f, l, domain));
+  const out: PatternCandidate[] = PATTERN_TEMPLATES.map((t) => ({
+    templateId: t.id,
+    email: t.build(f, l, domain),
+    isFirstToken: false,
+  }));
+  const fAlt = firstTokenOnly(first);
+  if (fAlt) {
+    for (const id of FIRST_TOKEN_TEMPLATE_IDS) {
+      const tpl = PATTERN_TEMPLATES.find((t) => t.id === id);
+      if (!tpl) continue;
+      out.push({
+        templateId: `${id}_firsttoken`,
+        email: tpl.build(fAlt, l, domain),
+        isFirstToken: true,
+      });
+    }
+  }
+  return out;
 }
 
 function buildFromTemplate(templateId: string, first: string, last: string, domain: string): string | null {
-  const f = normalizeForEmail(first);
+  const isFirstToken = templateId.endsWith('_firsttoken');
+  const baseId = isFirstToken ? templateId.slice(0, -'_firsttoken'.length) : templateId;
+  const template = PATTERN_TEMPLATES.find((t) => t.id === baseId);
+  if (!template) return null;
+  let f: string;
+  if (isFirstToken) {
+    const fAlt = firstTokenOnly(first);
+    if (!fAlt) return null;
+    f = fAlt;
+  } else {
+    f = normalizeForEmail(first);
+  }
   const l = normalizeForEmail(last);
   if (!f || !l || !domain) return null;
-  const template = PATTERN_TEMPLATES.find((t) => t.id === templateId);
-  if (!template) return null;
   return template.build(f, l, domain);
 }
 
@@ -110,32 +167,41 @@ export function hasCachedPattern(domain: string): boolean {
   return !!cached && Date.now() - cached.verifiedAt < PATTERN_CACHE_TTL;
 }
 
-interface CachedPattern { patternIndex: number; templateId: string }
+interface CachedPattern { templateId: string }
+
+function isKnownTemplateId(id: string): boolean {
+  if (id.endsWith('_firsttoken')) {
+    const base = id.slice(0, -'_firsttoken'.length);
+    return PATTERN_TEMPLATES.some((t) => t.id === base);
+  }
+  return PATTERN_TEMPLATES.some((t) => t.id === id);
+}
 
 async function loadCachedPattern(domain: string): Promise<CachedPattern | null> {
   const mem = domainPatternCache.get(domain);
   if (mem && Date.now() - mem.verifiedAt < PATTERN_CACHE_TTL) {
-    const tpl = PATTERN_TEMPLATES[mem.patternIndex];
-    if (tpl) return { patternIndex: mem.patternIndex, templateId: tpl.id };
+    if (isKnownTemplateId(mem.templateId)) return { templateId: mem.templateId };
   }
-  // Fall back to durable cache so workers don't re-burn 8 SMTP checks per
+  // Fall back to durable cache so workers don't re-burn SMTP checks per
   // known domain after a restart.
   try {
     const rows = await db.select().from(domainPatterns)
       .where(eq(domainPatterns.domain, domain))
       .limit(10);
-    // Pick the highest-confidence row whose pattern id matches a known template.
-    let best: { row: typeof rows[number]; index: number } | null = null;
+    // Pick the highest-confidence row whose pattern id is recognised.
+    let best: typeof rows[number] | null = null;
     for (const row of rows) {
-      const idx = PATTERN_TEMPLATES.findIndex((t) => t.id === row.pattern);
-      if (idx === -1) continue;
-      if (!best || row.confidence > best.row.confidence) {
-        best = { row, index: idx };
+      if (!isKnownTemplateId(row.pattern)) continue;
+      // Skip _firsttoken patterns when caching across the team — they only
+      // apply to the contact whose first name is hyphenated.
+      if (row.pattern.endsWith('_firsttoken')) continue;
+      if (!best || row.confidence > best.confidence) {
+        best = row;
       }
     }
-    if (best && best.row.confidence >= 50) {
-      domainPatternCache.set(domain, { patternIndex: best.index, verifiedAt: Date.now() });
-      return { patternIndex: best.index, templateId: best.row.pattern };
+    if (best && best.confidence >= 50) {
+      domainPatternCache.set(domain, { templateId: best.pattern, verifiedAt: Date.now() });
+      return { templateId: best.pattern };
     }
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err), domain }, 'loadCachedPattern: DB lookup failed');
@@ -143,13 +209,18 @@ async function loadCachedPattern(domain: string): Promise<CachedPattern | null> 
   return null;
 }
 
-async function persistDomainPattern(domain: string, patternIndex: number, opts: { isCatchAll?: boolean; mxProvider?: string } = {}): Promise<void> {
-  const template = PATTERN_TEMPLATES[patternIndex];
-  if (!template) return;
-  domainPatternCache.set(domain, { patternIndex, verifiedAt: Date.now() });
+async function persistDomainPattern(domain: string, templateId: string, opts: { isCatchAll?: boolean; mxProvider?: string } = {}): Promise<void> {
+  if (!isKnownTemplateId(templateId)) return;
+  // _firsttoken patterns only fit the specific hyphenated contact; don't
+  // promote them to the team-wide cache. Persist with low confidence so a
+  // future team member triggers a fresh probe.
+  const isFirstToken = templateId.endsWith('_firsttoken');
+  if (!isFirstToken) {
+    domainPatternCache.set(domain, { templateId, verifiedAt: Date.now() });
+  }
   try {
     const [existing] = await db.select().from(domainPatterns)
-      .where(and(eq(domainPatterns.domain, domain), eq(domainPatterns.pattern, template.id)))
+      .where(and(eq(domainPatterns.domain, domain), eq(domainPatterns.pattern, templateId)))
       .limit(1);
     if (existing) {
       await db.update(domainPatterns)
@@ -164,8 +235,8 @@ async function persistDomainPattern(domain: string, patternIndex: number, opts: 
     } else {
       await db.insert(domainPatterns).values({
         domain,
-        pattern: template.id,
-        confidence: 75,
+        pattern: templateId,
+        confidence: isFirstToken ? 40 : 75,
         confirmedCount: 1,
         bouncedCount: 0,
         isCatchAll: opts.isCatchAll ?? false,
@@ -226,15 +297,15 @@ export interface ProbeResult {
   email: string | null;
   method: 'cached_pattern' | 'smtp_verified' | 'catch_all_guess' | 'catch_all_none' | 'exhausted' | 'no_patterns' | 'daily_limit';
   attempts: number;
-  patternIndex?: number;
+  templateId?: string;
 }
 
 /**
- * Sequentially probe up to 8 patterns against Reacher to discover the working
- * email pattern for a domain we don't yet know. Each probe consumes one slot
- * from the server-wide 300/day cap. On success, the winning pattern is
- * persisted to `domain_patterns` so future team members at this domain skip
- * SMTP entirely (see `applyCachedPatternToTeam`).
+ * Sequentially probe up to ~12 patterns against Reacher to discover the
+ * working email pattern for a domain we don't yet know. Each probe consumes
+ * one slot from the server-wide 300/day cap. On success, the winning pattern
+ * is persisted to `domain_patterns` so future team members at this domain
+ * skip SMTP entirely (see `applyCachedPatternToTeam`).
  *
  * If a pattern is already cached (memory or DB) for this domain, returns it
  * immediately with zero SMTP cost.
@@ -244,8 +315,8 @@ export async function probePatternForDomain(
   lastName: string,
   domain: string,
 ): Promise<ProbeResult> {
-  const patterns = generatePatterns(firstName, lastName, domain);
-  if (patterns.length === 0) {
+  const candidates = generatePatterns(firstName, lastName, domain);
+  if (candidates.length === 0) {
     logger.warn({ firstName, lastName, domain }, 'probePatternForDomain: no patterns generated');
     return { email: null, method: 'no_patterns', attempts: 0 };
   }
@@ -253,18 +324,18 @@ export async function probePatternForDomain(
   // 1. Cache hit (memory or DB) — skip Reacher entirely
   const cached = await loadCachedPattern(domain);
   if (cached) {
-    const email = patterns[cached.patternIndex];
+    const email = buildFromTemplate(cached.templateId, firstName, lastName, domain);
     if (email) {
       logger.info({ email, domain, templateId: cached.templateId }, 'probe: cache hit, no SMTP');
-      return { email, method: 'cached_pattern', attempts: 0, patternIndex: cached.patternIndex };
+      return { email, method: 'cached_pattern', attempts: 0, templateId: cached.templateId };
     }
   }
 
   // 2. Sequential probe — 1s gap between attempts to respect Reacher rate limits
   let attempts = 0;
   let catchAllDetected = false;
-  for (let i = 0; i < patterns.length; i++) {
-    const candidate = patterns[i]!;
+  for (let i = 0; i < candidates.length; i++) {
+    const { templateId, email: candidate } = candidates[i]!;
     const slotOk = await tryConsumeReacherSlot();
     if (!slotOk) {
       logger.info({ domain, attempts }, 'probe: server-wide Reacher daily cap reached');
@@ -277,20 +348,22 @@ export async function probePatternForDomain(
     if (result.status === 'catch_all') {
       catchAllDetected = true;
       const mxProvider = result.raw?.mx?.records?.[0];
-      await persistDomainPattern(domain, 0, { isCatchAll: true, mxProvider });
-      logger.info({ domain, candidate }, 'probe: catch-all domain, returning first pattern (cached)');
-      return { email: patterns[0]!, method: 'catch_all_guess', attempts, patternIndex: 0 };
+      // Use first.last as the canonical guess for catch-all domains.
+      await persistDomainPattern(domain, 'first.last', { isCatchAll: true, mxProvider });
+      const guess = buildFromTemplate('first.last', firstName, lastName, domain) ?? candidate;
+      logger.info({ domain, candidate: guess }, 'probe: catch-all domain, returning first.last (cached)');
+      return { email: guess, method: 'catch_all_guess', attempts, templateId: 'first.last' };
     }
 
     if (result.status === 'safe') {
       const mxProvider = result.raw?.mx?.records?.[0];
-      await persistDomainPattern(domain, i, { mxProvider });
-      logger.info({ candidate, attempts, domain, patternIndex: i }, 'probe: pattern verified safe (persisted)');
-      return { email: candidate, method: 'smtp_verified', attempts, patternIndex: i };
+      await persistDomainPattern(domain, templateId, { mxProvider });
+      logger.info({ candidate, attempts, domain, templateId }, 'probe: pattern verified safe (persisted)');
+      return { email: candidate, method: 'smtp_verified', attempts, templateId };
     }
 
     // 1-second gap between attempts to respect SMTP server soft limits
-    if (i < patterns.length - 1) {
+    if (i < candidates.length - 1) {
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
@@ -350,4 +423,51 @@ export async function findEmailByPattern(
 ): Promise<{ email: string | null; method: string; attempts: number }> {
   const r = await probePatternForDomain(firstName, lastName, domain);
   return { email: r.email, method: r.method, attempts: r.attempts };
+}
+
+// ── Manual single-email verification ─────────────────────────────────────────
+
+export type ManualVerifyStatus =
+  | 'safe'
+  | 'risky'
+  | 'invalid'
+  | 'catch_all'
+  | 'unknown'
+  | 'error'
+  | 'daily_limit';
+
+export interface ManualVerifyResult {
+  status: ManualVerifyStatus;
+  /** True when the user-entered email should be saved on the contact. */
+  shouldSave: boolean;
+  /** True when the saved email can be marked emailVerified=true. */
+  verified: boolean;
+}
+
+/**
+ * Verify a single user-typed email against Reacher. Burns one slot from the
+ * server-wide daily cap. Used by the dashboard's manual email entry path.
+ * Maps Reacher's verdict to a save/verify decision so the caller doesn't need
+ * to reimplement the policy.
+ */
+export async function verifyEmailManual(email: string): Promise<ManualVerifyResult> {
+  const slotOk = await tryConsumeReacherSlot();
+  if (!slotOk) {
+    return { status: 'daily_limit', shouldSave: true, verified: false };
+  }
+  const result = await reacherCheck(email);
+  switch (result.status) {
+    case 'safe':
+      return { status: 'safe', shouldSave: true, verified: true };
+    case 'catch_all':
+      return { status: 'catch_all', shouldSave: true, verified: false };
+    case 'risky':
+      return { status: 'risky', shouldSave: true, verified: false };
+    case 'invalid':
+      return { status: 'invalid', shouldSave: false, verified: false };
+    case 'unknown':
+      return { status: 'unknown', shouldSave: true, verified: false };
+    default:
+      return { status: 'error', shouldSave: true, verified: false };
+  }
 }

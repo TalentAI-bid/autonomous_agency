@@ -5,6 +5,7 @@ import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useCompany } from '@/hooks/use-companies';
 import { useMasterAgent } from '@/hooks/use-agents';
 import { useContacts, useFindContactEmail } from '@/hooks/use-contacts';
+import { EmailEditor } from '@/components/contacts/email-editor';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import {
   Globe, Building2, Users, Cpu, DollarSign,
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
-  Mail, ExternalLink, Search, Linkedin, CheckCircle2,
+  Mail, ExternalLink, Search, Linkedin,
   AlertTriangle, TrendingDown, FileText, Brain, ShieldAlert,
   Loader2,
 } from 'lucide-react';
@@ -256,31 +257,31 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                         {contact.title && (
                           <p className="text-xs text-muted-foreground truncate">{contact.title}</p>
                         )}
-                        {contact.email ? (
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <a href={`mailto:${contact.email}`} className="text-xs text-blue-400 hover:underline truncate">
-                              {contact.email}
-                            </a>
-                            {contact.emailVerified && (
-                              <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />
-                            )}
-                          </div>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="mt-1 h-6 text-xs gap-1"
-                            disabled={findEmail.isPending && findEmail.variables === contact.id}
-                            onClick={() => handleFindEmail(contact.id)}
-                          >
-                            {findEmail.isPending && findEmail.variables === contact.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Mail className="w-3 h-3" />
-                            )}
-                            Find email
-                          </Button>
-                        )}
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <EmailEditor
+                            contactId={contact.id}
+                            currentEmail={contact.email ?? null}
+                            emailVerified={!!contact.emailVerified}
+                            size="compact"
+                          />
+                          {!contact.email && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-xs gap-1 text-muted-foreground"
+                              disabled={findEmail.isPending && findEmail.variables === contact.id}
+                              onClick={() => handleFindEmail(contact.id)}
+                              title="Auto-find email via patterns + Reacher"
+                            >
+                              {findEmail.isPending && findEmail.variables === contact.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Mail className="w-3 h-3" />
+                              )}
+                              Auto-find
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">

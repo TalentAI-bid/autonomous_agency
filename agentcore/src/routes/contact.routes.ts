@@ -12,7 +12,7 @@ import { extractJSONFromText } from '../utils/json-extract.js';
 import { buildDraftEmailSystemPrompt, buildDraftEmailUserPrompt } from '../prompts/draft-email.prompt.js';
 import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
 import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-generation.js';
-import { findEmailByPattern } from '../tools/email-finder.tool.js';
+import { findEmailByPattern, verifyEmailManual } from '../tools/email-finder.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
 import logger from '../utils/logger.js';
@@ -176,6 +176,55 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     });
     if (!contact) throw new NotFoundError('Contact', id);
     return { data: contact };
+  });
+
+  // POST /api/contacts/:id/email/manual — User-typed email, Reacher-verified atomically
+  fastify.post<{ Params: { id: string }; Body: { email: string } }>('/:id/email/manual', async (request, reply) => {
+    const { id } = request.params;
+    const parsed = z.object({ email: z.string().email().max(320) }).safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+    const email = parsed.data.email.trim().toLowerCase();
+
+    // 1. Load contact (tenant-scoped)
+    const [existing] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(contacts)
+        .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!existing) throw new NotFoundError('Contact', id);
+
+    // 2. Verify against Reacher (1 daily slot)
+    const verdict = await verifyEmailManual(email);
+    if (!verdict.shouldSave) {
+      // Reacher said the address is not deliverable — refuse to save it.
+      return reply.status(400).send({
+        error: 'Email rejected by verification',
+        status: verdict.status,
+      });
+    }
+
+    // 3. Persist with audit fields in rawData
+    const prevRaw = (existing.rawData ?? {}) as Record<string, unknown>;
+    const nextRaw = {
+      ...prevRaw,
+      emailSource: 'manual_entry',
+      emailVerifyStatus: verdict.status,
+      emailVerifiedAt: new Date().toISOString(),
+    };
+
+    const [updated] = await withTenant(request.tenantId, async (tx) => {
+      return tx.update(contacts)
+        .set({
+          email,
+          emailVerified: verdict.verified,
+          rawData: nextRaw,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+        .returning();
+    });
+
+    return { data: { contact: updated, status: verdict.status } };
   });
 
   // DELETE /api/contacts/:id

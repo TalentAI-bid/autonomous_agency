@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { db, withTenant } from '../config/database.js';
-import { extensionSessions, extensionTasks, users, tenants, contacts, masterAgents } from '../db/schema/index.js';
+import { extensionSessions, extensionTasks, users, tenants, contacts, companies, masterAgents } from '../db/schema/index.js';
 import {
   verifyPassword,
   generateAccessToken,
@@ -311,28 +311,28 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
 
     // POST /api/extension/contacts/manual
     // Snov.io-style manual add from a LinkedIn /in/ profile.
-    // Creates contact + (optional) company, dispatches per-contact email-finder
-    // enrichment, and always creates a Lead-stage CRM deal.
+    //
+    // Auto-routes the contact to the right master agent:
+    //   1. If the company already exists in this tenant → use the company's
+    //      owning agent (so the contact lands on the right team list).
+    //   2. Else → pick the most-recently-active master agent
+    //      (most recent contact created), tiebreak on oldest createdAt.
+    //
+    // Always creates a Lead-stage CRM deal and dispatches the email-finder
+    // enrichment job so the 9-pattern probe runs in the background.
     const manualContactSchema = z.object({
       name: z.string().min(1).max(200),
       title: z.string().max(255).optional(),
       companyName: z.string().max(255).optional(),
       linkedinUrl: z.string().url().max(500),
-      masterAgentId: z.string().uuid(),
+      // Optional override — when omitted the server picks the best agent.
+      masterAgentId: z.string().uuid().optional(),
     });
 
     authScope.post('/contacts/manual', async (request, reply) => {
       const parsed = manualContactSchema.safeParse(request.body);
       if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
-      const { name, title, companyName, linkedinUrl, masterAgentId } = parsed.data;
-
-      // Verify the master agent belongs to this tenant
-      const [agent] = await withTenant(request.tenantId, async (tx) => {
-        return tx.select().from(masterAgents)
-          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, request.tenantId)))
-          .limit(1);
-      });
-      if (!agent) throw new NotFoundError('Master agent', masterAgentId);
+      const { name, title, companyName, linkedinUrl, masterAgentId: overrideAgentId } = parsed.data;
 
       // Sanitize the LinkedIn-extracted name (handle "View NAME's profile" residue)
       const cleanName = sanitizePersonName(name);
@@ -346,9 +346,74 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
         throw new ValidationError('Person name is missing a first name');
       }
 
-      // Optional company creation
-      let companyId: string | undefined;
-      if (companyName?.trim()) {
+      // ─── Step 1: resolve master agent ───────────────────────────────
+      let masterAgentId = overrideAgentId ?? null;
+      let routeReason: 'override' | 'company_match' | 'most_active' | 'oldest' = 'override';
+      let matchedCompanyId: string | undefined;
+
+      // 1a. Look up an existing company by name in this tenant. If found,
+      //     reuse its master agent so the contact sits on the right team.
+      if (!masterAgentId && companyName?.trim()) {
+        const [matched] = await withTenant(request.tenantId, async (tx) => {
+          return tx.select({ id: companies.id, masterAgentId: companies.masterAgentId })
+            .from(companies)
+            .where(and(
+              eq(companies.tenantId, request.tenantId),
+              sql`LOWER(${companies.name}) = LOWER(${companyName.trim()})`,
+            ))
+            .limit(1);
+        });
+        if (matched && matched.masterAgentId) {
+          masterAgentId = matched.masterAgentId;
+          matchedCompanyId = matched.id;
+          routeReason = 'company_match';
+          logger.info({ companyName, matchedCompanyId, masterAgentId }, 'manual_add_profile: routed via company match');
+        }
+      }
+
+      // 1b. No company match → pick the most-recently-active master agent
+      //     for this tenant. Activity = max(contact.createdAt). Falls back
+      //     to the oldest agent so the user always lands somewhere sensible.
+      if (!masterAgentId) {
+        const candidates = await withTenant(request.tenantId, async (tx) => {
+          return tx.select({
+            id: masterAgents.id,
+            createdAt: masterAgents.createdAt,
+            lastContactAt: sql<Date | null>`(
+              SELECT MAX(${contacts.createdAt}) FROM ${contacts}
+              WHERE ${contacts.masterAgentId} = ${masterAgents.id}
+            )`,
+          })
+          .from(masterAgents)
+          .where(eq(masterAgents.tenantId, request.tenantId))
+          .orderBy(
+            sql`(SELECT MAX(${contacts.createdAt}) FROM ${contacts} WHERE ${contacts.masterAgentId} = ${masterAgents.id}) DESC NULLS LAST`,
+            masterAgents.createdAt,
+          )
+          .limit(1);
+        });
+        const best = candidates[0];
+        if (!best) {
+          throw new ValidationError('No master agent exists in this workspace — create one first.');
+        }
+        masterAgentId = best.id;
+        routeReason = best.lastContactAt ? 'most_active' : 'oldest';
+        logger.info({ masterAgentId, routeReason }, 'manual_add_profile: routed via auto-pick');
+      }
+
+      // Verify the resolved agent really belongs to this tenant (defence
+      // in depth — the auto-pick query already filters but the override path
+      // could in theory pass any uuid).
+      const [agent] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId!), eq(masterAgents.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      if (!agent) throw new NotFoundError('Master agent', masterAgentId!);
+
+      // ─── Step 2: company create-or-update ───────────────────────────
+      let companyId: string | undefined = matchedCompanyId;
+      if (!companyId && companyName?.trim()) {
         try {
           const savedCompany = await saveOrUpdateCompanyStatic(
             request.tenantId,
@@ -357,11 +422,11 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           );
           companyId = savedCompany.id;
         } catch (err) {
-          logger.debug({ err, companyName }, 'manual_add_profile: company create skipped (non-fatal)');
+          logger.warn({ err: err instanceof Error ? err.message : String(err), companyName }, 'manual_add_profile: company create failed');
         }
       }
 
-      // Dedup by linkedinUrl within this tenant
+      // ─── Step 3: dedup by linkedinUrl ───────────────────────────────
       const [existing] = await withTenant(request.tenantId, async (tx) => {
         return tx.select({ id: contacts.id }).from(contacts)
           .where(and(eq(contacts.tenantId, request.tenantId), eq(contacts.linkedinUrl, linkedinUrl)))
@@ -388,15 +453,16 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
               discoverySource: 'linkedin_manual_extension',
               addedByUser: true,
               addedAt: new Date().toISOString(),
+              routeReason,
             },
           }).returning({ id: contacts.id });
         });
         if (!inserted) throw new Error('Contact insert failed');
         contactId = inserted.id;
-        logger.info({ contactId, linkedinUrl, masterAgentId, userId: request.userId }, 'manual_add_profile: contact created');
+        logger.info({ contactId, linkedinUrl, masterAgentId, routeReason, userId: request.userId }, 'manual_add_profile: contact created');
       }
 
-      // Always create the Lead-stage deal so the contact appears on the pipeline
+      // ─── Step 4: Lead-stage deal so it shows on the CRM pipeline ───
       const deal = await ensureDeal({
         tenantId: request.tenantId,
         contactId,
@@ -422,6 +488,10 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           dealCreated: deal.created,
           dealStage: 'lead',
           dedup: !!existing,
+          masterAgentId,
+          masterAgentName: agent.name,
+          routeReason,
+          companyId,
         },
       });
     });

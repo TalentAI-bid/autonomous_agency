@@ -581,6 +581,26 @@
         border: 1px solid #f5e8a2;
         line-height: 1.45;
       }
+      #${WIDGET_ID} .tai-route-note {
+        font-size: 10.5px;
+        color: #57606a;
+        margin-bottom: 8px;
+        line-height: 1.35;
+      }
+      #${WIDGET_ID} .tai-route-tag {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-weight: 600;
+        background: #ddf4ff;
+        color: #0969da;
+        border-radius: 4px;
+      }
+      @media (prefers-color-scheme: dark) {
+        #${WIDGET_ID} .tai-route-note { color: #8d96a0; }
+        #${WIDGET_ID} .tai-route-tag { background: #15202c; color: #79c0ff; }
+      }
       #${WIDGET_ID} .tai-banner {
         margin-bottom: 10px;
         padding: 6px 8px;
@@ -640,19 +660,13 @@
   // ─── Widget render ───────────────────────────────────────────────────────
 
   function buildWidget(state) {
-    const { profile, agents, signedIn, dashboardUrl, loadError } = state;
+    const { profile, signedIn, dashboardUrl } = state;
     const wrap = document.createElement('div');
     wrap.id = WIDGET_ID;
 
-    const agentOpts = agents.length
-      ? agents.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')
-      : '<option value="">No agents — create one in dashboard</option>';
-
     const banner = !signedIn
       ? `<div class="tai-banner">Sign in via the extension popup to enable saving.</div>`
-      : loadError
-        ? `<div class="tai-banner">Couldn't load agents: ${escapeHtml(loadError)}</div>`
-        : '';
+      : '';
 
     const nameDisplay = profile.name
       ? escapeHtml(profile.name)
@@ -665,12 +679,12 @@
     // Surface what's missing so the user knows BEFORE saving.
     const hints = [];
     if (!profile.title) hints.push('No role detected — will save without a title.');
-    if (!profile.companyName) hints.push('No company detected — won\'t be linked to a company.');
+    if (!profile.companyName) hints.push('No company detected — will auto-route to your most active agent.');
     const hintsHtml = hints.length
       ? `<div class="tai-hint">${hints.map(escapeHtml).join('<br/>')}</div>`
       : '';
 
-    const canSubmit = signedIn && agents.length > 0;
+    const canSubmit = signedIn;
 
     wrap.innerHTML = `
       <div class="tai-header">
@@ -687,15 +701,13 @@
           </div>
         </div>
         ${hintsHtml}
-        <div class="tai-label">Save to agent</div>
-        <select class="tai-agent">${agentOpts}</select>
+        <div class="tai-route-note">Auto-routed via company match (or your most active agent).</div>
         <button type="button" class="tai-primary" ${canSubmit ? '' : 'disabled'}>+ Add to CRM</button>
         <div class="tai-result"></div>
       </div>
     `;
 
     const closeBtn = wrap.querySelector('.tai-close');
-    const select = wrap.querySelector('select.tai-agent');
     const submit = wrap.querySelector('button.tai-primary');
     const resultBox = wrap.querySelector('.tai-result');
 
@@ -707,8 +719,6 @@
     });
 
     submit.addEventListener('click', async () => {
-      const masterAgentId = select.value;
-      if (!masterAgentId) return;
       submit.disabled = true;
       submit.textContent = 'Saving…';
       resultBox.className = 'tai-result';
@@ -716,7 +726,9 @@
 
       try {
         const fresh = scrapeProfile();
-        const payload = { ...fresh, masterAgentId };
+        // No masterAgentId — backend auto-picks based on company match
+        // (priority 1) or most-active agent (priority 2).
+        const payload = { ...fresh };
         if (!payload.name) throw new Error('Could not read name from profile');
         console.log(LOG, 'saving', payload);
         const res = await chrome.runtime.sendMessage({ kind: 'manual_add_profile', payload });
@@ -728,8 +740,17 @@
         const dedupNote = res.dedup ? ' (already existed — reused)' : '';
         const roleLine = `Role: ${escapeHtml(payload.title || '—')}`;
         const companyLine = `Company: ${escapeHtml(payload.companyName || 'not detected')}`;
+        const reasonLabel = {
+          company_match: 'matched existing company',
+          most_active: 'auto-picked your most active agent',
+          oldest: 'first agent (no activity yet)',
+          override: 'requested',
+        }[res.routeReason] || 'auto-routed';
+        const agentLine = res.masterAgentName
+          ? `Agent: ${escapeHtml(res.masterAgentName)} <span class="tai-route-tag">${escapeHtml(reasonLabel)}</span>`
+          : '';
         resultBox.className = 'tai-result tai-ok';
-        resultBox.innerHTML = `✓ Saved to CRM${dedupNote} as <strong>${escapeHtml(payload.name)}</strong>.<br/>${roleLine}<br/>${companyLine}<br/>${dashboardLink}`;
+        resultBox.innerHTML = `✓ Saved to CRM${dedupNote} as <strong>${escapeHtml(payload.name)}</strong>.<br/>${roleLine}<br/>${companyLine}<br/>${agentLine}<br/>${dashboardLink}`;
         submit.textContent = '✓ Saved';
         console.log(LOG, 'saved', res);
       } catch (err) {
@@ -820,34 +841,20 @@
     // Always render the widget — even if scrape returned nothing.
     // The submit handler re-scrapes on click, so late hydration still works.
 
-    let agents = [];
     let signedIn = false;
     let dashboardUrl = '';
-    let loadError = '';
 
     const stateResp = await safeSendMessage({ kind: 'popup_get_state' });
     console.log(LOG, 'mount: popup_get_state', stateResp);
     signedIn = !!(stateResp && stateResp.signedIn);
     if (stateResp?.serverUrl) dashboardUrl = deriveDashboardUrl(stateResp.serverUrl);
 
-    if (signedIn) {
-      const agentsResp = await safeSendMessage({ kind: 'list_master_agents' });
-      console.log(LOG, 'mount: list_master_agents', agentsResp);
-      if (agentsResp?.ok) {
-        agents = Array.isArray(agentsResp.agents) ? agentsResp.agents : [];
-      } else if (agentsResp && !agentsResp.ok) {
-        loadError = agentsResp.error || 'Unknown error';
-      } else {
-        loadError = 'No response from background';
-      }
-    }
-
     injectStyles();
-    const widget = buildWidget({ profile, agents, signedIn, dashboardUrl, loadError });
+    const widget = buildWidget({ profile, signedIn, dashboardUrl });
     (document.body || document.documentElement).appendChild(widget);
     mounted = true;
     mounting = false;
-    console.log(LOG, 'widget mounted', { signedIn, agentCount: agents.length, hasName: !!profile.name });
+    console.log(LOG, 'widget mounted', { signedIn, hasName: !!profile.name });
   }
 
   function unmount() {

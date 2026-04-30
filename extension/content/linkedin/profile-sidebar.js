@@ -32,13 +32,17 @@
   function cleanLinkedInA11yText(text) {
     if (!text) return text;
     let t = String(text).trim();
-    const m = t.match(/View\s+(.+?)(?:[’'‘`]s\s+profile|\s+profile)/i);
+    const m = t.match(/View\s+(.+?)(?:[’'‘`]s\s+(?:verifications|profile)|\s+(?:verifications|profile))/i);
     if (m && m[1]) {
       const inner = m[1].trim().replace(/[‘’'"`]+\s*$/, '').trim();
       if (inner.length >= 2 && inner.length <= 100) return inner;
     }
     t = t.replace(/\s*View\s+\S.*?(?:[’'‘`]s\s+profile|\s+profile)\s*$/i, '').trim();
     t = t.replace(/(?<=[A-Za-zÀ-ÿ])View\b.*$/i, '').trim();
+    // Strip standalone "Verified" badge label LinkedIn injects into the
+    // verified-account H2's textContent (positions vary: leading, trailing,
+    // or inline between names like "Olivia Verified Shepherd").
+    t = t.replace(/(^|\s)Verified(\s|$)/g, ' ').replace(/\s+/g, ' ').trim();
     return t;
   }
 
@@ -53,6 +57,11 @@
     if (/View\b/i.test(t)) return false;
     if (/\bprofile\b/i.test(t)) return false;
     if (/%[0-9A-Fa-f]{2}/.test(t)) return false;
+    // Reject candidates that still contain the "Verified" badge label.
+    // The cleaner above strips it, but if anything slips through this
+    // catches it before we save the wrong name to the CRM.
+    if (/\bVerified\b/i.test(t)) return false;
+    if (/\bverifications?\b/i.test(t)) return false;
     return true;
   }
 
@@ -72,6 +81,24 @@
   // (H1 with name) and the 2026 layout (H2 with name, hashed CSS classes).
   function extractProfileName() {
     const main = document.querySelector('main') || document.body;
+
+    // 0. <title> tag — the most stable source. LinkedIn sets the page
+    //    title to "Olivia Shepherd | LinkedIn" or
+    //    "Olivia Shepherd - Recruitment Consultant... | LinkedIn".
+    //    DOM scrapers can fail when LinkedIn injects "Verified" / popovers
+    //    that move H2 elements around, but document.title is set once and
+    //    represents the canonical profile name.
+    const titleStr = (document.title || '').trim();
+    // Match the first segment before " | ", " · " or " - " (each surrounded
+    // by spaces). Drops any leading "(N) " unread-count prefix.
+    const tmFirst = titleStr.match(/^(?:\(\d+\)\s+)?(.+?)\s+(?:[|·]|[-–—])\s+/);
+    if (tmFirst && tmFirst[1]) {
+      const cleaned = cleanLinkedInA11yText(tmFirst[1].trim());
+      if (isValidName(cleaned)) {
+        console.log(LOG, 'extractProfileName: matched <title> first segment', cleaned);
+        return cleaned;
+      }
+    }
 
     // 1. H1 / H2 aria-label or textContent. LinkedIn's new layout uses H2
     //    for the profile name — old layout used H1. Try both.
@@ -151,17 +178,6 @@
       if (isValidName(decoded)) {
         console.log(LOG, 'extractProfileName: matched URL slug', decoded);
         return decoded;
-      }
-    }
-
-    // 5. <title> fallback
-    const titleStr = (document.title || '').trim();
-    const tm = titleStr.match(/^(?:\(\d+\)\s+)?(.+?)\s*[|·-]\s*LinkedIn/i);
-    if (tm && tm[1]) {
-      const cleaned = cleanLinkedInA11yText(tm[1].trim());
-      if (isValidName(cleaned)) {
-        console.log(LOG, 'extractProfileName: matched <title>', cleaned);
-        return cleaned;
       }
     }
 

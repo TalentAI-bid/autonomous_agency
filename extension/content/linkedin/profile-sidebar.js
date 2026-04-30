@@ -24,9 +24,11 @@
 
   // ─── DOM helpers ─────────────────────────────────────────────────────────
 
-  // Inlined copy of the cleaner used by fetch-company.js. Content scripts
-  // injected via manifest can't share globals across files, so duplicating
-  // the ~10 lines is cheaper than wiring scraper-utils into the manifest.
+  // ─── Reused helpers from fetch-company.js ────────────────────────────
+  // Content scripts injected via manifest can't share globals across files,
+  // so we inline the helpers verbatim. Keep these in sync if fetch-company
+  // gets fixed. Source: extension/content/linkedin/fetch-company.js.
+
   function cleanLinkedInA11yText(text) {
     if (!text) return text;
     let t = String(text).trim();
@@ -40,13 +42,122 @@
     return t;
   }
 
-  function scrapeProfile() {
-    const h1 = document.querySelector('h1');
-    const rawName = h1 ? (h1.innerText || h1.textContent || '').trim() : '';
-    const name = cleanLinkedInA11yText(rawName);
+  function isValidName(text) {
+    if (!text) return false;
+    const t = text.trim();
+    if (t.length < 2 || t.length > 150) return false;
+    if (/^Status\s+is/i.test(t)) return false;
+    if (t === 'LinkedIn Member') return false;
+    if (/^View\s+.*profile/i.test(t)) return false;
+    if (/View\s+.+?(?:[’'‘`]s\s+profile|\s+profile)/i.test(t)) return false;
+    if (/View\b/i.test(t)) return false;
+    if (/\bprofile\b/i.test(t)) return false;
+    if (/%[0-9A-Fa-f]{2}/.test(t)) return false;
+    return true;
+  }
 
+  function decodeSlugToName(slug) {
+    let cleaned = slug.replace(/-[a-z0-9]{6,}$/i, '');
+    try { cleaned = decodeURIComponent(cleaned); } catch (_) {}
+    const name = cleaned
+      .split('-')
+      .filter((p) => p.length > 0)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+      .join(' ');
+    return name || null;
+  }
+
+  // Adapted from fetch-company.js::extractPersonName, but scoped to a
+  // single /in/ profile page (no "card" element — the whole page is the
+  // profile). Priority chain:
+  //   1. H1 aria-label
+  //   2. H1 textContent, cleaned
+  //   3. visually-hidden span aria-label / textContent inside main
+  //   4. URL slug → "Jithin Joy"
+  //   5. <title> tag → "<Name> | LinkedIn"
+  function extractProfileName() {
+    const main = document.querySelector('main') || document.body;
+
+    // 1. H1 aria-label
+    const h1s = main.querySelectorAll('h1');
+    for (const h1 of h1s) {
+      const aria = h1.getAttribute && h1.getAttribute('aria-label');
+      if (aria) {
+        const cleaned = cleanLinkedInA11yText(aria);
+        if (isValidName(cleaned)) {
+          console.log(LOG, 'extractProfileName: matched H1 aria-label', cleaned);
+          return cleaned;
+        }
+      }
+    }
+
+    // 2. H1 textContent (most common path on a working profile)
+    for (const h1 of h1s) {
+      let raw = (h1.innerText || h1.textContent || '').trim().replace(/\s+/g, ' ');
+      raw = raw.replace(/\s*•\s*(?:1st|2nd|3rd)(?:\+)?\s*/g, ' ').trim();
+      const cleaned = cleanLinkedInA11yText(raw);
+      if (isValidName(cleaned)) {
+        console.log(LOG, 'extractProfileName: matched H1 textContent', cleaned);
+        return cleaned;
+      }
+    }
+
+    // 3. Hidden a11y spans inside main
+    const hiddenSpans = main.querySelectorAll(
+      '.visually-hidden, .a11y-text, [class*="sr-only"], span[aria-label]',
+    );
+    for (const span of hiddenSpans) {
+      const aria = span.getAttribute && span.getAttribute('aria-label');
+      if (aria) {
+        const cleaned = cleanLinkedInA11yText(aria);
+        if (isValidName(cleaned)) {
+          console.log(LOG, 'extractProfileName: matched hidden span aria-label', cleaned);
+          return cleaned;
+        }
+      }
+      const text = (span.textContent || '').trim();
+      const cleaned = cleanLinkedInA11yText(text);
+      if (isValidName(cleaned)) {
+        console.log(LOG, 'extractProfileName: matched hidden span text', cleaned);
+        return cleaned;
+      }
+    }
+
+    // 4. URL slug fallback — works even when LinkedIn hasn't hydrated yet
+    const slugMatch = location.pathname.match(/\/in\/([^/?#]+)/);
+    if (slugMatch && slugMatch[1]) {
+      const decoded = decodeSlugToName(slugMatch[1]);
+      if (isValidName(decoded)) {
+        console.log(LOG, 'extractProfileName: matched URL slug', decoded);
+        return decoded;
+      }
+    }
+
+    // 5. <title> fallback — "<Name> | LinkedIn" or "(NN) <Name> | LinkedIn"
+    const titleStr = (document.title || '').trim();
+    const tm = titleStr.match(/^(?:\(\d+\)\s+)?(.+?)\s*[|·-]\s*LinkedIn/i);
+    if (tm && tm[1]) {
+      const cleaned = cleanLinkedInA11yText(tm[1].trim());
+      if (isValidName(cleaned)) {
+        console.log(LOG, 'extractProfileName: matched <title>', cleaned);
+        return cleaned;
+      }
+    }
+
+    console.warn(LOG, 'extractProfileName: no match via any selector / title / slug');
+    return '';
+  }
+
+  function scrapeProfile() {
+    const name = extractProfileName();
+
+    // Headline: "<Title> at <Company>". Restrict to <main> so we don't
+    // pick up the LinkedIn-wide nav body-medium element.
+    const main = document.querySelector('main') || document;
     let headline = '';
-    const headlineEl = document.querySelector('.text-body-medium.break-words');
+    const headlineEl = main.querySelector('.text-body-medium.break-words')
+      || main.querySelector('.text-body-medium')
+      || document.querySelector('.text-body-medium.break-words');
     if (headlineEl) headline = (headlineEl.innerText || '').trim();
 
     let title = headline;
@@ -58,7 +169,8 @@
     }
 
     if (!companyName) {
-      const aCompany = document.querySelector('section a[href*="/company/"]');
+      const aCompany = main.querySelector('section a[href*="/company/"]')
+        || document.querySelector('section a[href*="/company/"]');
       if (aCompany) companyName = (aCompany.innerText || '').trim();
     }
 
@@ -73,13 +185,19 @@
     return parts.map((p) => p[0] || '').join('').toUpperCase() || '?';
   }
 
-  // Wait for LinkedIn to hydrate the H1 with real text. Uses a
-  // MutationObserver (event-driven, faster) with an upper-bound timeout
-  // so we render even if hydration is unusually slow.
-  async function waitForH1WithText(maxMs = 10000) {
+  // Wait for the profile name to be readable. We accept the H1 having text
+  // (the normal case), OR our extractProfileName fallback chain returning
+  // anything valid (slug / title work even before hydration). Uses a
+  // MutationObserver with a 6s upper-bound — past that, rendering with
+  // the slug-derived name is still better than waiting forever.
+  async function waitForProfileReady(maxMs = 6000) {
     const ok = () => {
-      const h1 = document.querySelector('h1');
-      return !!(h1 && (h1.innerText || h1.textContent || '').trim().length > 0);
+      const h1 = document.querySelector('main h1') || document.querySelector('h1');
+      const h1Text = h1 ? (h1.innerText || h1.textContent || '').trim() : '';
+      if (h1Text.length > 0) return true;
+      // Slug fallback: as long as the URL is a /in/<handle>/, extractProfileName
+      // can derive a name immediately — no need to wait for LinkedIn.
+      return !!extractProfileName();
     };
     if (ok()) return true;
     return new Promise((resolve) => {
@@ -442,10 +560,10 @@
     }
 
     mounting = true;
-    console.log(LOG, 'mount: path matches, waiting for H1 hydration');
+    console.log(LOG, 'mount: path matches, waiting for profile to be readable');
 
-    const h1Ready = await waitForH1WithText(10000);
-    console.log(LOG, 'mount: H1 wait done', { h1Ready });
+    const profileReady = await waitForProfileReady(6000);
+    console.log(LOG, 'mount: profile-ready wait done', { profileReady });
 
     const profile = scrapeProfile();
     console.log(LOG, 'mount: scraped profile', profile);

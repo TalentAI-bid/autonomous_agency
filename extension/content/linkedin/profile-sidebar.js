@@ -148,35 +148,155 @@
     return '';
   }
 
+  // ─── Headline / title / company extraction ───────────────────────────
+  // LinkedIn renames classes constantly, so each helper runs a multi-
+  // selector cascade and logs which selector hit. When the next class
+  // rename breaks something, the user pastes the console output and we
+  // know exactly which step needs a new selector.
+
+  function readHeadline() {
+    const main = document.querySelector('main') || document.body;
+    const selectors = [
+      '.pv-text-details__left-panel .text-body-medium',
+      '.ph5 .text-body-medium.break-words',
+      '.pv-top-card .text-body-medium',
+      '.text-body-medium.break-words',
+      '[data-test-id="profile-headline"]',
+      'main .text-body-medium',
+    ];
+    for (const sel of selectors) {
+      const candidates = main.querySelectorAll(sel);
+      for (const el of candidates) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (!text || text.length < 3) continue;
+        // Reject LinkedIn-wide nav elements that match similar classes.
+        if (/^Status\s+is/i.test(text)) continue;
+        if (/^(Home|My Network|Jobs|Messaging|Notifications|Me)$/i.test(text)) continue;
+        // Reject location strings (typically "City, Region, Country").
+        if (/^[\w\s.-]+,\s*[\w\s.-]+(?:,\s*[\w\s.-]+)?$/.test(text) && text.length < 60) continue;
+        console.log(LOG, 'readHeadline: matched', { selector: sel, text });
+        return text;
+      }
+    }
+    console.warn(LOG, 'readHeadline: no headline found');
+    return '';
+  }
+
+  function extractCurrentCompany() {
+    const main = document.querySelector('main') || document.body;
+
+    // Priority 1: top-card current-employer link/button.
+    const topCardSelectors = [
+      'a[aria-label^="Current company"]',
+      'button[aria-label^="Current company"]',
+      '[data-section="topCard"] a[href*="/company/"]',
+      '.pv-text-details__right-panel a[href*="/company/"]',
+      '.pv-text-details__right-panel-item a[href*="/company/"]',
+      '.ph5 a[href*="/company/"]',
+      '.pv-top-card a[href*="/company/"]',
+      '.pv-top-card--list a[href*="/company/"]',
+    ];
+    for (const sel of topCardSelectors) {
+      const el = main.querySelector(sel);
+      if (!el) continue;
+      const aria = el.getAttribute && (el.getAttribute('aria-label') || '');
+      if (aria) {
+        const ariaMatch = aria.match(/Current company:\s*(.+?)(?:\s+\(.+?\))?$/i);
+        if (ariaMatch && ariaMatch[1]) {
+          const name = ariaMatch[1].trim();
+          console.log(LOG, 'extractCurrentCompany: matched topcard aria', { selector: sel, name });
+          return { name, source: 'topcard-aria' };
+        }
+      }
+      const text = cleanLinkedInA11yText((el.innerText || el.textContent || '').trim());
+      if (text && text.length >= 2 && text.length <= 100) {
+        console.log(LOG, 'extractCurrentCompany: matched topcard text', { selector: sel, text });
+        return { name: text, source: 'topcard-text' };
+      }
+    }
+
+    // Priority 2: experience section's first entry company.
+    const headers = document.querySelectorAll('section h2, section h3');
+    let expSection = document.getElementById('experience');
+    if (!expSection) {
+      expSection = document.querySelector('section[data-section="experience"]');
+    }
+    if (!expSection) {
+      for (const h of headers) {
+        if (/experience/i.test(h.textContent || '')) {
+          expSection = h.closest('section');
+          if (expSection) break;
+        }
+      }
+    }
+    if (expSection) {
+      const firstCompanyLink = expSection.querySelector('a[href*="/company/"]');
+      if (firstCompanyLink) {
+        const text = cleanLinkedInA11yText(
+          (firstCompanyLink.innerText || firstCompanyLink.textContent || '').trim(),
+        );
+        if (text) {
+          const name = text.split('·')[0].trim();
+          if (name.length >= 2 && name.length <= 100) {
+            console.log(LOG, 'extractCurrentCompany: matched experience link', name);
+            return { name, source: 'experience-link' };
+          }
+        }
+      }
+      // Fallback: first <li> spans, looking for "Acme · Full-time" pattern.
+      const firstItem = expSection.querySelector('li');
+      if (firstItem) {
+        const spans = firstItem.querySelectorAll('span[aria-hidden="true"], span.t-14');
+        for (const s of spans) {
+          const t = (s.innerText || s.textContent || '').trim();
+          if (t && /·/.test(t)) {
+            const name = t.split('·')[0].trim();
+            if (name.length >= 2 && name.length <= 100 && !/year|month|present/i.test(name)) {
+              console.log(LOG, 'extractCurrentCompany: matched experience span', name);
+              return { name, source: 'experience-span' };
+            }
+          }
+        }
+      }
+    }
+
+    // Priority 3: headline "Title at Company" parsing.
+    const headline = readHeadline();
+    const m = headline.match(/^(.+?)\s+(?:at|@|chez|bei|en)\s+(.+)$/i);
+    if (m && m[2]) {
+      const name = m[2].trim().split('·')[0].trim();
+      if (name.length >= 2 && name.length <= 100) {
+        console.log(LOG, 'extractCurrentCompany: matched headline parse', name);
+        return { name, source: 'headline' };
+      }
+    }
+
+    console.warn(LOG, 'extractCurrentCompany: no company found');
+    return { name: '', source: 'none' };
+  }
+
+  function extractTitle(headline) {
+    if (!headline) return '';
+    // If headline matches "Title at Company", strip the company off.
+    const m = headline.match(/^(.+?)\s+(?:at|@|chez|bei|en)\s+(.+)$/i);
+    if (m) return m[1].trim();
+    // Otherwise the whole headline is the title (free-text positioning).
+    return headline.trim();
+  }
+
   function scrapeProfile() {
     const name = extractProfileName();
-
-    // Headline: "<Title> at <Company>". Restrict to <main> so we don't
-    // pick up the LinkedIn-wide nav body-medium element.
-    const main = document.querySelector('main') || document;
-    let headline = '';
-    const headlineEl = main.querySelector('.text-body-medium.break-words')
-      || main.querySelector('.text-body-medium')
-      || document.querySelector('.text-body-medium.break-words');
-    if (headlineEl) headline = (headlineEl.innerText || '').trim();
-
-    let title = headline;
-    let companyName = '';
-    const m = headline.match(/^(.+?)\s+(?:at|@)\s+(.+)$/i);
-    if (m) {
-      title = m[1].trim();
-      companyName = m[2].trim();
-    }
-
-    if (!companyName) {
-      const aCompany = main.querySelector('section a[href*="/company/"]')
-        || document.querySelector('section a[href*="/company/"]');
-      if (aCompany) companyName = (aCompany.innerText || '').trim();
-    }
-
+    const headline = readHeadline();
+    const company = extractCurrentCompany();
+    const title = extractTitle(headline);
     const linkedinUrl = location.href.split('?')[0].split('#')[0];
-
-    return { name, title, companyName, linkedinUrl };
+    const result = { name, title, companyName: company.name, linkedinUrl };
+    console.log(LOG, 'scrapeProfile result', {
+      ...result,
+      companySource: company.source,
+      headline,
+    });
+    return result;
   }
 
   function initials(name) {
@@ -343,6 +463,16 @@
         background: #8c959f;
         cursor: not-allowed;
       }
+      #${WIDGET_ID} .tai-hint {
+        margin-bottom: 10px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        background: #fff8c5;
+        color: #7a4c00;
+        border: 1px solid #f5e8a2;
+        line-height: 1.45;
+      }
       #${WIDGET_ID} .tai-banner {
         margin-bottom: 10px;
         padding: 6px 8px;
@@ -424,6 +554,14 @@
       ? escapeHtml(headlineParts.join(' · '))
       : '<span class="tai-skeleton">—</span>';
 
+    // Surface what's missing so the user knows BEFORE saving.
+    const hints = [];
+    if (!profile.title) hints.push('No role detected — will save without a title.');
+    if (!profile.companyName) hints.push('No company detected — won\'t be linked to a company.');
+    const hintsHtml = hints.length
+      ? `<div class="tai-hint">${hints.map(escapeHtml).join('<br/>')}</div>`
+      : '';
+
     const canSubmit = signedIn && agents.length > 0;
 
     wrap.innerHTML = `
@@ -440,6 +578,7 @@
             <div class="tai-headline">${headlineDisplay}</div>
           </div>
         </div>
+        ${hintsHtml}
         <div class="tai-label">Save to agent</div>
         <select class="tai-agent">${agentOpts}</select>
         <button type="button" class="tai-primary" ${canSubmit ? '' : 'disabled'}>+ Add to CRM</button>
@@ -479,8 +618,10 @@
           ? `<a href="${dashboardUrl}/contacts/${res.contactId}" target="_blank">View in dashboard ↗</a>`
           : '';
         const dedupNote = res.dedup ? ' (already existed — reused)' : '';
+        const roleLine = `Role: ${escapeHtml(payload.title || '—')}`;
+        const companyLine = `Company: ${escapeHtml(payload.companyName || 'not detected')}`;
         resultBox.className = 'tai-result tai-ok';
-        resultBox.innerHTML = `✓ Saved to CRM${dedupNote}.<br/>${dashboardLink}`;
+        resultBox.innerHTML = `✓ Saved to CRM${dedupNote} as <strong>${escapeHtml(payload.name)}</strong>.<br/>${roleLine}<br/>${companyLine}<br/>${dashboardLink}`;
         submit.textContent = '✓ Saved';
         console.log(LOG, 'saved', res);
       } catch (err) {

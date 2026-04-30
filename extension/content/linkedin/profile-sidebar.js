@@ -7,6 +7,9 @@
 // LinkedIn is an SPA — pushState navigation does NOT trigger document_idle
 // again. We poll location.pathname every 1s and re-render the widget on
 // route changes, hiding it whenever the URL stops matching /in/<handle>.
+//
+// Every code path logs to the console so the widget never fails silently.
+// Search the page console for "[TalentAI sidebar]" to trace what happened.
 
 (() => {
   'use strict';
@@ -15,6 +18,9 @@
   const WIDGET_ID = 'talentai-profile-sidebar';
   const STYLE_ID = 'talentai-profile-sidebar-style';
   const SESSION_DISMISS_KEY = 'talentai_widget_dismissed';
+  const LOG = '[TalentAI sidebar]';
+
+  console.log(LOG, 'booted', { url: location.href, pathname: location.pathname });
 
   // ─── DOM helpers ─────────────────────────────────────────────────────────
 
@@ -39,12 +45,10 @@
     const rawName = h1 ? (h1.innerText || h1.textContent || '').trim() : '';
     const name = cleanLinkedInA11yText(rawName);
 
-    // Headline often lives in `.text-body-medium.break-words` near the H1.
     let headline = '';
     const headlineEl = document.querySelector('.text-body-medium.break-words');
     if (headlineEl) headline = (headlineEl.innerText || '').trim();
 
-    // Best-effort split "Title at Company" / "Title @ Company"
     let title = headline;
     let companyName = '';
     const m = headline.match(/^(.+?)\s+(?:at|@)\s+(.+)$/i);
@@ -53,7 +57,6 @@
       companyName = m[2].trim();
     }
 
-    // Fallback: first /company/ anchor in the page (usually the current role)
     if (!companyName) {
       const aCompany = document.querySelector('section a[href*="/company/"]');
       if (aCompany) companyName = (aCompany.innerText || '').trim();
@@ -68,6 +71,34 @@
     if (!name) return '?';
     const parts = name.trim().split(/\s+/).slice(0, 2);
     return parts.map((p) => p[0] || '').join('').toUpperCase() || '?';
+  }
+
+  // Wait for LinkedIn to hydrate the H1 with real text. Uses a
+  // MutationObserver (event-driven, faster) with an upper-bound timeout
+  // so we render even if hydration is unusually slow.
+  async function waitForH1WithText(maxMs = 10000) {
+    const ok = () => {
+      const h1 = document.querySelector('h1');
+      return !!(h1 && (h1.innerText || h1.textContent || '').trim().length > 0);
+    };
+    if (ok()) return true;
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        observer.disconnect();
+        clearTimeout(t);
+        resolve(val);
+      };
+      const observer = new MutationObserver(() => { if (ok()) finish(true); });
+      observer.observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      const t = setTimeout(() => finish(ok()), maxMs);
+    });
   }
 
   // ─── Styles ──────────────────────────────────────────────────────────────
@@ -194,6 +225,15 @@
         background: #8c959f;
         cursor: not-allowed;
       }
+      #${WIDGET_ID} .tai-banner {
+        margin-bottom: 10px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        background: #fff8c5;
+        color: #7a4c00;
+        border: 1px solid #f5e8a2;
+      }
       #${WIDGET_ID} .tai-result {
         margin-top: 10px;
         padding: 8px 10px;
@@ -218,6 +258,10 @@
         text-decoration: underline;
         font-weight: 600;
       }
+      #${WIDGET_ID} .tai-skeleton {
+        color: #8d96a0;
+        font-style: italic;
+      }
       @media (prefers-color-scheme: dark) {
         #${WIDGET_ID} {
           background: #1c1f24;
@@ -239,12 +283,30 @@
 
   // ─── Widget render ───────────────────────────────────────────────────────
 
-  function buildWidget(profile, agents, dashboardUrl) {
+  function buildWidget(state) {
+    const { profile, agents, signedIn, dashboardUrl, loadError } = state;
     const wrap = document.createElement('div');
     wrap.id = WIDGET_ID;
+
     const agentOpts = agents.length
       ? agents.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')
       : '<option value="">No agents — create one in dashboard</option>';
+
+    const banner = !signedIn
+      ? `<div class="tai-banner">Sign in via the extension popup to enable saving.</div>`
+      : loadError
+        ? `<div class="tai-banner">Couldn't load agents: ${escapeHtml(loadError)}</div>`
+        : '';
+
+    const nameDisplay = profile.name
+      ? escapeHtml(profile.name)
+      : '<span class="tai-skeleton">Loading profile…</span>';
+    const headlineParts = [profile.title, profile.companyName].filter(Boolean);
+    const headlineDisplay = headlineParts.length
+      ? escapeHtml(headlineParts.join(' · '))
+      : '<span class="tai-skeleton">—</span>';
+
+    const canSubmit = signedIn && agents.length > 0;
 
     wrap.innerHTML = `
       <div class="tai-header">
@@ -252,16 +314,17 @@
         <button type="button" class="tai-close" aria-label="Dismiss">×</button>
       </div>
       <div class="tai-body">
+        ${banner}
         <div class="tai-row">
           <div class="tai-avatar">${escapeHtml(initials(profile.name))}</div>
           <div style="min-width:0;flex:1">
-            <div class="tai-name">${escapeHtml(profile.name || 'Unknown')}</div>
-            <div class="tai-headline">${escapeHtml([profile.title, profile.companyName].filter(Boolean).join(' · '))}</div>
+            <div class="tai-name">${nameDisplay}</div>
+            <div class="tai-headline">${headlineDisplay}</div>
           </div>
         </div>
         <div class="tai-label">Save to agent</div>
         <select class="tai-agent">${agentOpts}</select>
-        <button type="button" class="tai-primary" ${agents.length ? '' : 'disabled'}>+ Add to CRM</button>
+        <button type="button" class="tai-primary" ${canSubmit ? '' : 'disabled'}>+ Add to CRM</button>
         <div class="tai-result"></div>
       </div>
     `;
@@ -274,6 +337,8 @@
     closeBtn.addEventListener('click', () => {
       try { sessionStorage.setItem(SESSION_DISMISS_KEY, '1'); } catch (_) {}
       wrap.remove();
+      mounted = false;
+      console.log(LOG, 'dismissed by user');
     });
 
     submit.addEventListener('click', async () => {
@@ -285,9 +350,10 @@
       resultBox.textContent = '';
 
       try {
-        const fresh = scrapeProfile(); // re-scrape in case the SPA updated
+        const fresh = scrapeProfile();
         const payload = { ...fresh, masterAgentId };
         if (!payload.name) throw new Error('Could not read name from profile');
+        console.log(LOG, 'saving', payload);
         const res = await chrome.runtime.sendMessage({ kind: 'manual_add_profile', payload });
         if (!res || !res.ok) throw new Error(res?.error || 'Save failed');
 
@@ -298,7 +364,9 @@
         resultBox.className = 'tai-result tai-ok';
         resultBox.innerHTML = `✓ Saved to CRM${dedupNote}.<br/>${dashboardLink}`;
         submit.textContent = '✓ Saved';
+        console.log(LOG, 'saved', res);
       } catch (err) {
+        console.warn(LOG, 'save failed', err);
         resultBox.className = 'tai-result tai-err';
         resultBox.textContent = err.message || 'Save failed';
         submit.disabled = false;
@@ -318,59 +386,111 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ─── Background-message helpers (resilient to MV3 quirks) ───────────────
+
+  function safeSendMessage(msg, timeoutMs = 5000) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (val) => { if (settled) return; settled = true; resolve(val); };
+      try {
+        const p = chrome.runtime.sendMessage(msg);
+        // Newer Chromes return a Promise; older ones use a callback.
+        if (p && typeof p.then === 'function') {
+          p.then((res) => settle(res ?? null)).catch((err) => {
+            console.warn(LOG, 'sendMessage rejected', msg.kind, err);
+            settle(null);
+          });
+        }
+      } catch (err) {
+        console.warn(LOG, 'sendMessage threw', msg.kind, err);
+        settle(null);
+        return;
+      }
+      setTimeout(() => {
+        if (!settled) console.warn(LOG, 'sendMessage timed out', msg.kind);
+        settle(null);
+      }, timeoutMs);
+    });
+  }
+
   // ─── Mount / unmount ─────────────────────────────────────────────────────
 
   let mounted = false;
+  let mounting = false;
 
   async function mount() {
-    if (mounted) return;
-    if (!PATH_RE.test(location.pathname)) return;
-
-    let dismissed = '';
-    try { dismissed = sessionStorage.getItem(SESSION_DISMISS_KEY) || ''; } catch (_) {}
-    if (dismissed === '1') return;
-
-    if (document.getElementById(WIDGET_ID)) return;
-
-    // Wait briefly for LinkedIn to populate the H1 (SPA hydration).
-    let attempts = 0;
-    while (attempts < 10 && !document.querySelector('h1')) {
-      await new Promise((r) => setTimeout(r, 300));
-      attempts++;
+    if (mounted || mounting) {
+      console.log(LOG, 'mount: already mounted/mounting, skip');
+      return;
     }
-
-    const profile = scrapeProfile();
-    if (!profile.name) return; // nothing to save
-
-    let agents = [];
-    let dashboardUrl = '';
-    try {
-      const resp = await chrome.runtime.sendMessage({ kind: 'list_master_agents' });
-      if (resp?.ok) agents = resp.agents || [];
-      // Pull the dashboard origin from the API base if exposed in storage.
-      const { session } = await chrome.storage.local.get('session');
-      const apiBase = session?.serverUrl || '';
-      // Convention: dashboard lives at the same origin's UI host.
-      dashboardUrl = apiBase ? deriveDashboardUrl(apiBase) : '';
-    } catch (_) {
-      // Not signed in or background unavailable — don't render.
+    if (!PATH_RE.test(location.pathname)) {
+      console.log(LOG, 'mount: path does not match /in/<handle>/, skip', location.pathname);
       return;
     }
 
+    let dismissed = '';
+    try { dismissed = sessionStorage.getItem(SESSION_DISMISS_KEY) || ''; } catch (_) {}
+    if (dismissed === '1') {
+      console.log(LOG, 'mount: user dismissed for this session, skip');
+      return;
+    }
+
+    if (document.getElementById(WIDGET_ID)) {
+      console.log(LOG, 'mount: widget element already in DOM, skip');
+      mounted = true;
+      return;
+    }
+
+    mounting = true;
+    console.log(LOG, 'mount: path matches, waiting for H1 hydration');
+
+    const h1Ready = await waitForH1WithText(10000);
+    console.log(LOG, 'mount: H1 wait done', { h1Ready });
+
+    const profile = scrapeProfile();
+    console.log(LOG, 'mount: scraped profile', profile);
+
+    // Always render the widget — even if scrape returned nothing.
+    // The submit handler re-scrapes on click, so late hydration still works.
+
+    let agents = [];
+    let signedIn = false;
+    let dashboardUrl = '';
+    let loadError = '';
+
+    const stateResp = await safeSendMessage({ kind: 'popup_get_state' });
+    console.log(LOG, 'mount: popup_get_state', stateResp);
+    signedIn = !!(stateResp && stateResp.signedIn);
+    if (stateResp?.serverUrl) dashboardUrl = deriveDashboardUrl(stateResp.serverUrl);
+
+    if (signedIn) {
+      const agentsResp = await safeSendMessage({ kind: 'list_master_agents' });
+      console.log(LOG, 'mount: list_master_agents', agentsResp);
+      if (agentsResp?.ok) {
+        agents = Array.isArray(agentsResp.agents) ? agentsResp.agents : [];
+      } else if (agentsResp && !agentsResp.ok) {
+        loadError = agentsResp.error || 'Unknown error';
+      } else {
+        loadError = 'No response from background';
+      }
+    }
+
     injectStyles();
-    const widget = buildWidget(profile, agents, dashboardUrl);
-    document.body.appendChild(widget);
+    const widget = buildWidget({ profile, agents, signedIn, dashboardUrl, loadError });
+    (document.body || document.documentElement).appendChild(widget);
     mounted = true;
+    mounting = false;
+    console.log(LOG, 'widget mounted', { signedIn, agentCount: agents.length, hasName: !!profile.name });
   }
 
   function unmount() {
     const w = document.getElementById(WIDGET_ID);
     if (w) w.remove();
     mounted = false;
+    mounting = false;
   }
 
   function deriveDashboardUrl(apiBase) {
-    // api.talentailabs.com → app.talentailabs.com  (best-effort heuristic)
     try {
       const u = new URL(apiBase);
       if (u.hostname.startsWith('api.')) {
@@ -391,8 +511,8 @@
     const here = location.pathname;
     if (here === lastPath) return;
     lastPath = here;
+    console.log(LOG, 'path changed to', here);
     if (PATH_RE.test(here)) {
-      // Re-mount — strip the dismissed flag for a NEW profile URL
       try { sessionStorage.removeItem(SESSION_DISMISS_KEY); } catch (_) {}
       unmount();
       mount();
@@ -401,7 +521,6 @@
     }
   }
 
-  // Initial mount + polling
   mount();
   lastPath = location.pathname;
   setInterval(pollPath, 1000);

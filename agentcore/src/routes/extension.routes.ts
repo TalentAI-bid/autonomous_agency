@@ -312,20 +312,20 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
     // POST /api/extension/contacts/manual
     // Snov.io-style manual add from a LinkedIn /in/ profile.
     //
-    // Auto-routes the contact to the right master agent:
-    //   1. If the company already exists in this tenant → use the company's
-    //      owning agent (so the contact lands on the right team list).
-    //   2. Else → pick the most-recently-active master agent
-    //      (most recent contact created), tiebreak on oldest createdAt.
+    // Fan-out routing:
+    //   - Find every company in this tenant matching the scraped name AND
+    //     owned (via master_agents.created_by) by the current extension user.
+    //   - For each match, ensure (contact, deal) under that master agent.
+    //   - If no company match, fall back to the user's most-active agent
+    //     (one row only).
     //
-    // Always creates a Lead-stage CRM deal and dispatches the email-finder
-    // enrichment job so the 9-pattern probe runs in the background.
+    // Each row gets its own Lead-stage CRM deal so the contact appears on
+    // every pipeline + every company team list it belongs to.
     const manualContactSchema = z.object({
       name: z.string().min(1).max(200),
       title: z.string().max(255).optional(),
       companyName: z.string().max(255).optional(),
       linkedinUrl: z.string().url().max(500),
-      // Optional override — when omitted the server picks the best agent.
       masterAgentId: z.string().uuid().optional(),
     });
 
@@ -334,7 +334,6 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
       if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
       const { name, title, companyName, linkedinUrl, masterAgentId: overrideAgentId } = parsed.data;
 
-      // Sanitize the LinkedIn-extracted name (handle "View NAME's profile" residue)
       const cleanName = sanitizePersonName(name);
       if (!cleanName) {
         throw new ValidationError('Could not parse a valid person name from input');
@@ -346,38 +345,68 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
         throw new ValidationError('Person name is missing a first name');
       }
 
-      // ─── Step 1: resolve master agent ───────────────────────────────
-      let masterAgentId = overrideAgentId ?? null;
-      let routeReason: 'override' | 'company_match' | 'most_active' | 'oldest' = 'override';
-      let matchedCompanyId: string | undefined;
+      // ─── Step 1: collect target (agent, companyId) pairs ───────────
+      type Target = { masterAgentId: string; companyId: string | undefined; agentName: string; reason: 'override' | 'company_match' | 'most_active' | 'oldest' };
+      const targets: Target[] = [];
 
-      // 1a. Look up an existing company by name in this tenant. If found,
-      //     reuse its master agent so the contact sits on the right team.
-      if (!masterAgentId && companyName?.trim()) {
-        const [matched] = await withTenant(request.tenantId, async (tx) => {
-          return tx.select({ id: companies.id, masterAgentId: companies.masterAgentId })
-            .from(companies)
-            .where(and(
-              eq(companies.tenantId, request.tenantId),
-              sql`LOWER(${companies.name}) = LOWER(${companyName.trim()})`,
-            ))
+      if (overrideAgentId) {
+        const [agent] = await withTenant(request.tenantId, async (tx) => {
+          return tx.select().from(masterAgents)
+            .where(and(eq(masterAgents.id, overrideAgentId), eq(masterAgents.tenantId, request.tenantId)))
             .limit(1);
         });
-        if (matched && matched.masterAgentId) {
-          masterAgentId = matched.masterAgentId;
-          matchedCompanyId = matched.id;
-          routeReason = 'company_match';
-          logger.info({ companyName, matchedCompanyId, masterAgentId }, 'manual_add_profile: routed via company match');
+        if (!agent) throw new NotFoundError('Master agent', overrideAgentId);
+        let companyId: string | undefined;
+        if (companyName?.trim()) {
+          try {
+            const savedCompany = await saveOrUpdateCompanyStatic(
+              request.tenantId,
+              { name: companyName.trim(), rawData: { source: 'linkedin_manual_extension' } },
+              overrideAgentId,
+            );
+            companyId = savedCompany.id;
+          } catch (err) {
+            logger.warn({ err: err instanceof Error ? err.message : String(err), companyName }, 'manual_add_profile: company create failed');
+          }
         }
+        targets.push({ masterAgentId: overrideAgentId, companyId, agentName: agent.name, reason: 'override' });
+      } else if (companyName?.trim()) {
+        // Find every company in tenant matching name (case-insensitive),
+        // restricted to master agents created by the current user. Each
+        // match gives us one (agent, companyId) target.
+        const matches = await withTenant(request.tenantId, async (tx) => {
+          return tx.select({
+            companyId: companies.id,
+            masterAgentId: companies.masterAgentId,
+            agentName: masterAgents.name,
+          })
+            .from(companies)
+            .innerJoin(masterAgents, eq(masterAgents.id, companies.masterAgentId))
+            .where(and(
+              eq(companies.tenantId, request.tenantId),
+              eq(masterAgents.tenantId, request.tenantId),
+              eq(masterAgents.createdBy, request.userId),
+              sql`LOWER(${companies.name}) = LOWER(${companyName.trim()})`,
+            ));
+        });
+        for (const m of matches) {
+          if (!m.masterAgentId) continue;
+          targets.push({
+            masterAgentId: m.masterAgentId,
+            companyId: m.companyId,
+            agentName: m.agentName,
+            reason: 'company_match',
+          });
+        }
+        logger.info({ companyName, matches: targets.length }, 'manual_add_profile: company-match fan-out');
       }
 
-      // 1b. No company match → pick the most-recently-active master agent
-      //     for this tenant. Activity = max(contact.createdAt). Falls back
-      //     to the oldest agent so the user always lands somewhere sensible.
-      if (!masterAgentId) {
+      // No company-match results → fall back to the user's most-active agent.
+      if (targets.length === 0) {
         const candidates = await withTenant(request.tenantId, async (tx) => {
           return tx.select({
             id: masterAgents.id,
+            name: masterAgents.name,
             createdAt: masterAgents.createdAt,
             lastContactAt: sql<Date | null>`(
               SELECT MAX(${contacts.createdAt}) FROM ${contacts}
@@ -385,7 +414,10 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
             )`,
           })
           .from(masterAgents)
-          .where(eq(masterAgents.tenantId, request.tenantId))
+          .where(and(
+            eq(masterAgents.tenantId, request.tenantId),
+            eq(masterAgents.createdBy, request.userId),
+          ))
           .orderBy(
             sql`(SELECT MAX(${contacts.createdAt}) FROM ${contacts} WHERE ${contacts.masterAgentId} = ${masterAgents.id}) DESC NULLS LAST`,
             masterAgents.createdAt,
@@ -394,104 +426,134 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
         });
         const best = candidates[0];
         if (!best) {
-          throw new ValidationError('No master agent exists in this workspace — create one first.');
+          throw new ValidationError('No master agent owned by you in this workspace — create one first.');
         }
-        masterAgentId = best.id;
-        routeReason = best.lastContactAt ? 'most_active' : 'oldest';
-        logger.info({ masterAgentId, routeReason }, 'manual_add_profile: routed via auto-pick');
-      }
-
-      // Verify the resolved agent really belongs to this tenant (defence
-      // in depth — the auto-pick query already filters but the override path
-      // could in theory pass any uuid).
-      const [agent] = await withTenant(request.tenantId, async (tx) => {
-        return tx.select().from(masterAgents)
-          .where(and(eq(masterAgents.id, masterAgentId!), eq(masterAgents.tenantId, request.tenantId)))
-          .limit(1);
-      });
-      if (!agent) throw new NotFoundError('Master agent', masterAgentId!);
-
-      // ─── Step 2: company create-or-update ───────────────────────────
-      let companyId: string | undefined = matchedCompanyId;
-      if (!companyId && companyName?.trim()) {
-        try {
-          const savedCompany = await saveOrUpdateCompanyStatic(
-            request.tenantId,
-            { name: companyName.trim(), rawData: { source: 'linkedin_manual_extension' } },
-            masterAgentId,
-          );
-          companyId = savedCompany.id;
-        } catch (err) {
-          logger.warn({ err: err instanceof Error ? err.message : String(err), companyName }, 'manual_add_profile: company create failed');
+        let companyId: string | undefined;
+        if (companyName?.trim()) {
+          try {
+            const savedCompany = await saveOrUpdateCompanyStatic(
+              request.tenantId,
+              { name: companyName.trim(), rawData: { source: 'linkedin_manual_extension' } },
+              best.id,
+            );
+            companyId = savedCompany.id;
+          } catch (err) {
+            logger.warn({ err: err instanceof Error ? err.message : String(err), companyName }, 'manual_add_profile: company create failed (fallback path)');
+          }
         }
-      }
-
-      // ─── Step 3: dedup by linkedinUrl ───────────────────────────────
-      const [existing] = await withTenant(request.tenantId, async (tx) => {
-        return tx.select({ id: contacts.id }).from(contacts)
-          .where(and(eq(contacts.tenantId, request.tenantId), eq(contacts.linkedinUrl, linkedinUrl)))
-          .limit(1);
-      });
-
-      let contactId: string;
-      if (existing) {
-        contactId = existing.id;
-        logger.info({ contactId, linkedinUrl, masterAgentId }, 'manual_add_profile: dedup, reusing contact');
-      } else {
-        const [inserted] = await withTenant(request.tenantId, async (tx) => {
-          return tx.insert(contacts).values({
-            tenantId: request.tenantId,
-            firstName,
-            lastName: lastName || undefined,
-            title: title?.trim() || undefined,
-            linkedinUrl,
-            companyId,
-            companyName: companyName?.trim() || undefined,
-            masterAgentId,
-            source: 'linkedin_profile',
-            rawData: {
-              discoverySource: 'linkedin_manual_extension',
-              addedByUser: true,
-              addedAt: new Date().toISOString(),
-              routeReason,
-            },
-          }).returning({ id: contacts.id });
+        targets.push({
+          masterAgentId: best.id,
+          companyId,
+          agentName: best.name,
+          reason: best.lastContactAt ? 'most_active' : 'oldest',
         });
-        if (!inserted) throw new Error('Contact insert failed');
-        contactId = inserted.id;
-        logger.info({ contactId, linkedinUrl, masterAgentId, routeReason, userId: request.userId }, 'manual_add_profile: contact created');
+        logger.info({ masterAgentId: best.id, reason: best.lastContactAt ? 'most_active' : 'oldest' }, 'manual_add_profile: routed via auto-pick fallback');
       }
 
-      // ─── Step 4: Lead-stage deal so it shows on the CRM pipeline ───
-      const deal = await ensureDeal({
-        tenantId: request.tenantId,
-        contactId,
-        masterAgentId,
-      });
+      // ─── Step 2: insert one (contact, deal) per target ────────────
+      type RowResult = {
+        contactId: string;
+        dealId: string;
+        masterAgentId: string;
+        agentName: string;
+        companyId: string | undefined;
+        reason: Target['reason'];
+        dedup: boolean;
+      };
+      const results: RowResult[] = [];
 
-      // Dispatch per-contact enrichment so the 9-pattern Reacher probe runs
-      // in the background. We don't await it — manual-add must be snappy.
-      try {
-        await dispatchJob(request.tenantId, 'enrichment', {
+      for (const t of targets) {
+        // Dedup by (linkedinUrl + masterAgentId) — same person can exist
+        // under multiple agents, but only once per agent.
+        const [existing] = await withTenant(request.tenantId, async (tx) => {
+          return tx.select({ id: contacts.id }).from(contacts)
+            .where(and(
+              eq(contacts.tenantId, request.tenantId),
+              eq(contacts.linkedinUrl, linkedinUrl),
+              eq(contacts.masterAgentId, t.masterAgentId),
+            ))
+            .limit(1);
+        });
+
+        let contactId: string;
+        let dedup = false;
+        if (existing) {
+          contactId = existing.id;
+          dedup = true;
+        } else {
+          const [inserted] = await withTenant(request.tenantId, async (tx) => {
+            return tx.insert(contacts).values({
+              tenantId: request.tenantId,
+              firstName,
+              lastName: lastName || undefined,
+              title: title?.trim() || undefined,
+              linkedinUrl,
+              companyId: t.companyId,
+              companyName: companyName?.trim() || undefined,
+              masterAgentId: t.masterAgentId,
+              source: 'linkedin_profile',
+              rawData: {
+                discoverySource: 'linkedin_manual_extension',
+                addedByUser: true,
+                addedAt: new Date().toISOString(),
+                routeReason: t.reason,
+              },
+            }).returning({ id: contacts.id });
+          });
+          if (!inserted) {
+            logger.warn({ masterAgentId: t.masterAgentId, linkedinUrl }, 'manual_add_profile: contact insert returned no row, skipping');
+            continue;
+          }
+          contactId = inserted.id;
+        }
+
+        const deal = await ensureDeal({
+          tenantId: request.tenantId,
           contactId,
-          masterAgentId,
-          source: 'linkedin_manual_extension',
+          masterAgentId: t.masterAgentId,
         });
-      } catch (err) {
-        logger.debug({ err, contactId }, 'manual_add_profile: enrichment dispatch failed (non-fatal)');
+
+        try {
+          await dispatchJob(request.tenantId, 'enrichment', {
+            contactId,
+            masterAgentId: t.masterAgentId,
+            source: 'linkedin_manual_extension',
+          });
+        } catch (err) {
+          logger.debug({ err, contactId }, 'manual_add_profile: enrichment dispatch failed (non-fatal)');
+        }
+
+        results.push({
+          contactId,
+          dealId: deal.id,
+          masterAgentId: t.masterAgentId,
+          agentName: t.agentName,
+          companyId: t.companyId,
+          reason: t.reason,
+          dedup,
+        });
       }
+
+      logger.info({
+        linkedinUrl,
+        userId: request.userId,
+        agentCount: results.length,
+        agents: results.map((r) => r.agentName),
+      }, 'manual_add_profile: completed fan-out');
 
       return reply.send({
         data: {
-          contactId,
-          dealId: deal.id,
-          dealCreated: deal.created,
+          rows: results,
+          // Backward-compat fields — first row is the "primary"
+          contactId: results[0]?.contactId,
+          dealId: results[0]?.dealId,
+          dealCreated: false,
           dealStage: 'lead',
-          dedup: !!existing,
-          masterAgentId,
-          masterAgentName: agent.name,
-          routeReason,
-          companyId,
+          dedup: !!results[0]?.dedup,
+          masterAgentId: results[0]?.masterAgentId,
+          masterAgentName: results[0]?.agentName,
+          routeReason: results[0]?.reason,
+          companyId: results[0]?.companyId,
         },
       });
     });

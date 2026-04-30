@@ -701,7 +701,7 @@
           </div>
         </div>
         ${hintsHtml}
-        <div class="tai-route-note">Auto-routed via company match (or your most active agent).</div>
+        <div class="tai-route-note">Linked to every one of your agents that has this company. New companies go to your most active agent.</div>
         <button type="button" class="tai-primary" ${canSubmit ? '' : 'disabled'}>+ Add to CRM</button>
         <div class="tai-result"></div>
       </div>
@@ -734,23 +734,44 @@
         const res = await chrome.runtime.sendMessage({ kind: 'manual_add_profile', payload });
         if (!res || !res.ok) throw new Error(res?.error || 'Save failed');
 
-        const dashboardLink = dashboardUrl
-          ? `<a href="${dashboardUrl}/contacts/${res.contactId}" target="_blank">View in dashboard ↗</a>`
-          : '';
-        const dedupNote = res.dedup ? ' (already existed — reused)' : '';
-        const roleLine = `Role: ${escapeHtml(payload.title || '—')}`;
-        const companyLine = `Company: ${escapeHtml(payload.companyName || 'not detected')}`;
         const reasonLabel = {
           company_match: 'matched existing company',
           most_active: 'auto-picked your most active agent',
           oldest: 'first agent (no activity yet)',
           override: 'requested',
-        }[res.routeReason] || 'auto-routed';
-        const agentLine = res.masterAgentName
-          ? `Agent: ${escapeHtml(res.masterAgentName)} <span class="tai-route-tag">${escapeHtml(reasonLabel)}</span>`
+        };
+
+        const rows = Array.isArray(res.rows) ? res.rows : [];
+        const roleLine = `Role: ${escapeHtml(payload.title || '—')}`;
+        const companyLine = `Company: ${escapeHtml(payload.companyName || 'not detected')}`;
+
+        let agentBlock = '';
+        if (rows.length > 1) {
+          // Fan-out: list every agent it landed under.
+          const items = rows.map((r) => {
+            const tag = `<span class="tai-route-tag">${escapeHtml(reasonLabel[r.reason] || 'auto-routed')}</span>`;
+            const dedupTag = r.dedup ? ' <span class="tai-route-tag" style="background:#eaeef2;color:#57606a">dedup</span>' : '';
+            return `<li>${escapeHtml(r.agentName)} ${tag}${dedupTag}</li>`;
+          }).join('');
+          agentBlock = `Linked to ${rows.length} agents:<ul style="margin:4px 0 0 16px;padding:0">${items}</ul>`;
+        } else if (rows.length === 1) {
+          const r = rows[0];
+          const tag = `<span class="tai-route-tag">${escapeHtml(reasonLabel[r.reason] || 'auto-routed')}</span>`;
+          agentBlock = `Agent: ${escapeHtml(r.agentName)} ${tag}`;
+        } else if (res.masterAgentName) {
+          // Backward-compat with older backend response shape
+          const tag = `<span class="tai-route-tag">${escapeHtml(reasonLabel[res.routeReason] || 'auto-routed')}</span>`;
+          agentBlock = `Agent: ${escapeHtml(res.masterAgentName)} ${tag}`;
+        }
+
+        const dashboardLink = dashboardUrl && res.contactId
+          ? `<a href="${dashboardUrl}/contacts/${res.contactId}" target="_blank">View in dashboard ↗</a>`
           : '';
+        const allDedup = rows.length > 0 && rows.every((r) => r.dedup);
+        const dedupNote = allDedup ? ' (already existed — reused)' : '';
+
         resultBox.className = 'tai-result tai-ok';
-        resultBox.innerHTML = `✓ Saved to CRM${dedupNote} as <strong>${escapeHtml(payload.name)}</strong>.<br/>${roleLine}<br/>${companyLine}<br/>${agentLine}<br/>${dashboardLink}`;
+        resultBox.innerHTML = `✓ Saved to CRM${dedupNote} as <strong>${escapeHtml(payload.name)}</strong>.<br/>${roleLine}<br/>${companyLine}<br/>${agentBlock}<br/>${dashboardLink}`;
         submit.textContent = '✓ Saved';
         console.log(LOG, 'saved', res);
       } catch (err) {

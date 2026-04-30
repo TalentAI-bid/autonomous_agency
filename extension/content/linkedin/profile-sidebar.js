@@ -68,37 +68,58 @@
   }
 
   // Adapted from fetch-company.js::extractPersonName, but scoped to a
-  // single /in/ profile page (no "card" element — the whole page is the
-  // profile). Priority chain:
-  //   1. H1 aria-label
-  //   2. H1 textContent, cleaned
-  //   3. visually-hidden span aria-label / textContent inside main
-  //   4. URL slug → "Jithin Joy"
-  //   5. <title> tag → "<Name> | LinkedIn"
+  // single /in/ profile page. Priority chain handles both the old layout
+  // (H1 with name) and the 2026 layout (H2 with name, hashed CSS classes).
   function extractProfileName() {
     const main = document.querySelector('main') || document.body;
 
-    // 1. H1 aria-label
-    const h1s = main.querySelectorAll('h1');
-    for (const h1 of h1s) {
-      const aria = h1.getAttribute && h1.getAttribute('aria-label');
-      if (aria) {
-        const cleaned = cleanLinkedInA11yText(aria);
+    // 1. H1 / H2 aria-label or textContent. LinkedIn's new layout uses H2
+    //    for the profile name — old layout used H1. Try both.
+    for (const tag of ['h1', 'h2']) {
+      const headings = main.querySelectorAll(tag);
+      for (const h of headings) {
+        const aria = h.getAttribute && h.getAttribute('aria-label');
+        if (aria) {
+          const cleaned = cleanLinkedInA11yText(aria);
+          if (isValidName(cleaned)) {
+            console.log(LOG, `extractProfileName: matched ${tag} aria-label`, cleaned);
+            return cleaned;
+          }
+        }
+        let raw = (h.innerText || h.textContent || '').trim().replace(/\s+/g, ' ');
+        raw = raw.replace(/\s*•\s*(?:1st|2nd|3rd)(?:\+)?\s*/g, ' ').trim();
+        const cleaned = cleanLinkedInA11yText(raw);
         if (isValidName(cleaned)) {
-          console.log(LOG, 'extractProfileName: matched H1 aria-label', cleaned);
+          console.log(LOG, `extractProfileName: matched ${tag} textContent`, cleaned);
           return cleaned;
         }
       }
     }
 
-    // 2. H1 textContent (most common path on a working profile)
-    for (const h1 of h1s) {
-      let raw = (h1.innerText || h1.textContent || '').trim().replace(/\s+/g, ' ');
-      raw = raw.replace(/\s*•\s*(?:1st|2nd|3rd)(?:\+)?\s*/g, ' ').trim();
-      const cleaned = cleanLinkedInA11yText(raw);
-      if (isValidName(cleaned)) {
-        console.log(LOG, 'extractProfileName: matched H1 textContent', cleaned);
-        return cleaned;
+    // 2. "View NAME's verifications" / "View NAME's profile" aria-label on
+    //    nearby SVG icons. Often only the FIRST name. Combine with slug.
+    const verifIcon = main.querySelector(
+      'svg[aria-label*="verifications"], svg[aria-label*="profile"], a[aria-label*="profile"]',
+    );
+    if (verifIcon) {
+      const aria = verifIcon.getAttribute('aria-label') || '';
+      const m = aria.match(/View\s+(.+?)(?:[’'‘`]s\s+(?:verifications|profile)|\s+(?:verifications|profile))/i);
+      if (m && m[1]) {
+        const partial = m[1].trim();
+        const slug = location.pathname.match(/\/in\/([^/?#]+)/)?.[1];
+        const slugName = slug ? decodeSlugToName(slug) : '';
+        // If the slug-derived name starts with the partial (likely first name),
+        // use the slug version (it has the full name).
+        if (slugName && slugName.toLowerCase().startsWith(partial.toLowerCase())) {
+          if (isValidName(slugName)) {
+            console.log(LOG, 'extractProfileName: aria-label first name + slug', slugName);
+            return slugName;
+          }
+        }
+        if (isValidName(partial)) {
+          console.log(LOG, 'extractProfileName: aria-label partial name', partial);
+          return partial;
+        }
       }
     }
 
@@ -123,7 +144,7 @@
       }
     }
 
-    // 4. URL slug fallback — works even when LinkedIn hasn't hydrated yet
+    // 4. URL slug fallback
     const slugMatch = location.pathname.match(/\/in\/([^/?#]+)/);
     if (slugMatch && slugMatch[1]) {
       const decoded = decodeSlugToName(slugMatch[1]);
@@ -133,7 +154,7 @@
       }
     }
 
-    // 5. <title> fallback — "<Name> | LinkedIn" or "(NN) <Name> | LinkedIn"
+    // 5. <title> fallback
     const titleStr = (document.title || '').trim();
     const tm = titleStr.match(/^(?:\(\d+\)\s+)?(.+?)\s*[|·-]\s*LinkedIn/i);
     if (tm && tm[1]) {
@@ -148,15 +169,91 @@
     return '';
   }
 
+  // Returns the H1/H2 element holding the profile name, so callers can
+  // walk DOM relative to it (e.g. find the headline <p> right below).
+  function findNameHeading() {
+    const main = document.querySelector('main') || document.body;
+    for (const tag of ['h1', 'h2']) {
+      const headings = main.querySelectorAll(tag);
+      for (const h of headings) {
+        const text = (h.innerText || h.textContent || '').trim();
+        const cleaned = cleanLinkedInA11yText(text);
+        if (isValidName(cleaned)) return h;
+      }
+    }
+    return null;
+  }
+
   // ─── Headline / title / company extraction ───────────────────────────
   // LinkedIn renames classes constantly, so each helper runs a multi-
   // selector cascade and logs which selector hit. When the next class
   // rename breaks something, the user pastes the console output and we
   // know exactly which step needs a new selector.
 
+  // Reject strings that are obviously not the headline / role.
+  function looksLikeJunkText(text) {
+    if (!text || text.length < 3 || text.length > 400) return true;
+    if (/^Status\s+is/i.test(text)) return true;
+    if (/^(Home|My Network|Jobs|Messaging|Notifications|Me|Search|Connect|Message|Follow|More)$/i.test(text)) return true;
+    if (/^connections?$/i.test(text)) return true;
+    if (/^\d+\+?$/.test(text)) return true; // "500+", "1234"
+    if (/^Contact info$/i.test(text)) return true;
+    if (/^·$/.test(text)) return true;
+    return false;
+  }
+
+  // Walk up from the name heading to a container that holds it AND the
+  // sibling <p> elements (headline, company-line, location). The sibling
+  // chain is the most reliable structure across LinkedIn layout versions.
+  function findTopCardContainer(nameHeading) {
+    if (!nameHeading) return null;
+    let node = nameHeading;
+    for (let i = 0; i < 8 && node; i++) {
+      const ps = node.querySelectorAll(':scope > p, :scope > div > p, :scope > div > div > p');
+      // We need at least 1 sibling-ish <p> for it to count as the top card.
+      if (ps.length >= 1) return node;
+      node = node.parentElement;
+    }
+    // Fallback: just walk up 4 levels.
+    let up = nameHeading;
+    for (let i = 0; i < 4 && up && up.parentElement; i++) up = up.parentElement;
+    return up || nameHeading.parentElement;
+  }
+
+  // Get all <p> elements that appear visually after the name heading
+  // within the same top-card region, in document order.
+  function topCardParagraphs() {
+    const nameHeading = findNameHeading();
+    if (!nameHeading) return [];
+    const container = findTopCardContainer(nameHeading);
+    if (!container) return [];
+    const allPs = [...container.querySelectorAll('p')];
+    // Keep only the <p>s positioned AFTER the name heading in document order.
+    const after = allPs.filter((p) => {
+      const pos = nameHeading.compareDocumentPosition(p);
+      return !!(pos & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    return after;
+  }
+
   function readHeadline() {
+    // Priority 1: first non-junk <p> sibling in the top card after the name.
+    const ps = topCardParagraphs();
+    for (const p of ps) {
+      const text = (p.innerText || p.textContent || '').trim().replace(/\s+/g, ' ');
+      if (looksLikeJunkText(text)) continue;
+      // Skip the "Company · School" line — usually has a dot-separator and
+      // is short. The headline is usually the longest descriptive line.
+      if (/·/.test(text) && text.length < 120) continue;
+      // Skip pure location strings like "United States" or "City, Country"
+      if (/^[A-Za-zÀ-ÿ\s.,'-]+$/.test(text) && text.length < 50 && !/\b\w{6,}\b/.test(text)) continue;
+      console.log(LOG, 'readHeadline: matched top-card <p>', text);
+      return text;
+    }
+
+    // Priority 2: legacy class selectors for older LinkedIn layouts.
     const main = document.querySelector('main') || document.body;
-    const selectors = [
+    const legacySelectors = [
       '.pv-text-details__left-panel .text-body-medium',
       '.ph5 .text-body-medium.break-words',
       '.pv-top-card .text-body-medium',
@@ -164,17 +261,12 @@
       '[data-test-id="profile-headline"]',
       'main .text-body-medium',
     ];
-    for (const sel of selectors) {
+    for (const sel of legacySelectors) {
       const candidates = main.querySelectorAll(sel);
       for (const el of candidates) {
         const text = (el.innerText || el.textContent || '').trim();
-        if (!text || text.length < 3) continue;
-        // Reject LinkedIn-wide nav elements that match similar classes.
-        if (/^Status\s+is/i.test(text)) continue;
-        if (/^(Home|My Network|Jobs|Messaging|Notifications|Me)$/i.test(text)) continue;
-        // Reject location strings (typically "City, Region, Country").
-        if (/^[\w\s.-]+,\s*[\w\s.-]+(?:,\s*[\w\s.-]+)?$/.test(text) && text.length < 60) continue;
-        console.log(LOG, 'readHeadline: matched', { selector: sel, text });
+        if (looksLikeJunkText(text)) continue;
+        console.log(LOG, 'readHeadline: matched legacy selector', { selector: sel, text });
         return text;
       }
     }
@@ -185,16 +277,36 @@
   function extractCurrentCompany() {
     const main = document.querySelector('main') || document.body;
 
-    // Priority 1: top-card current-employer link/button.
+    // Priority 1: SVG logo marker. LinkedIn's new layout uses
+    // <svg id="company-accent-N"> for company cards and
+    // <svg id="school-accent-N"> for schools. Walk up to the clickable
+    // card container and read the inner <p> with the company name.
+    const companyAccent = main.querySelector('svg[id^="company-accent"]');
+    if (companyAccent) {
+      const card = companyAccent.closest('[role="button"]')
+        || companyAccent.closest('div[style*="min-width"]')
+        || companyAccent.parentElement?.parentElement
+        || companyAccent.parentElement;
+      if (card) {
+        const p = card.querySelector('p');
+        if (p) {
+          const text = cleanLinkedInA11yText((p.innerText || p.textContent || '').trim());
+          if (text && text.length >= 2 && text.length <= 100) {
+            console.log(LOG, 'extractCurrentCompany: matched company-accent SVG card', text);
+            return { name: text, source: 'svg-company-accent' };
+          }
+        }
+      }
+    }
+
+    // Priority 2: top-card current-employer link/button (older layouts).
     const topCardSelectors = [
       'a[aria-label^="Current company"]',
       'button[aria-label^="Current company"]',
       '[data-section="topCard"] a[href*="/company/"]',
       '.pv-text-details__right-panel a[href*="/company/"]',
-      '.pv-text-details__right-panel-item a[href*="/company/"]',
       '.ph5 a[href*="/company/"]',
       '.pv-top-card a[href*="/company/"]',
-      '.pv-top-card--list a[href*="/company/"]',
     ];
     for (const sel of topCardSelectors) {
       const el = main.querySelector(sel);
@@ -204,23 +316,34 @@
         const ariaMatch = aria.match(/Current company:\s*(.+?)(?:\s+\(.+?\))?$/i);
         if (ariaMatch && ariaMatch[1]) {
           const name = ariaMatch[1].trim();
-          console.log(LOG, 'extractCurrentCompany: matched topcard aria', { selector: sel, name });
+          console.log(LOG, 'extractCurrentCompany: matched aria-label', { selector: sel, name });
           return { name, source: 'topcard-aria' };
         }
       }
       const text = cleanLinkedInA11yText((el.innerText || el.textContent || '').trim());
       if (text && text.length >= 2 && text.length <= 100) {
-        console.log(LOG, 'extractCurrentCompany: matched topcard text', { selector: sel, text });
+        console.log(LOG, 'extractCurrentCompany: matched topcard link text', { selector: sel, text });
         return { name: text, source: 'topcard-text' };
       }
     }
 
-    // Priority 2: experience section's first entry company.
-    const headers = document.querySelectorAll('section h2, section h3');
-    let expSection = document.getElementById('experience');
-    if (!expSection) {
-      expSection = document.querySelector('section[data-section="experience"]');
+    // Priority 3: "Company · School" pattern in the top-card sibling <p>s.
+    const ps = topCardParagraphs();
+    for (const p of ps) {
+      const text = (p.innerText || p.textContent || '').trim().replace(/\s+/g, ' ');
+      if (looksLikeJunkText(text)) continue;
+      if (!/·/.test(text)) continue;
+      const company = text.split('·')[0].trim();
+      if (company.length >= 2 && company.length <= 100 && !/connection|follower|location/i.test(company)) {
+        console.log(LOG, 'extractCurrentCompany: matched top-card · pattern', company);
+        return { name: company, source: 'topcard-dot' };
+      }
     }
+
+    // Priority 4: experience section first entry.
+    const headers = document.querySelectorAll('section h2, section h3');
+    let expSection = document.getElementById('experience')
+      || document.querySelector('section[data-section="experience"]');
     if (!expSection) {
       for (const h of headers) {
         if (/experience/i.test(h.textContent || '')) {
@@ -235,32 +358,15 @@
         const text = cleanLinkedInA11yText(
           (firstCompanyLink.innerText || firstCompanyLink.textContent || '').trim(),
         );
-        if (text) {
-          const name = text.split('·')[0].trim();
-          if (name.length >= 2 && name.length <= 100) {
-            console.log(LOG, 'extractCurrentCompany: matched experience link', name);
-            return { name, source: 'experience-link' };
-          }
-        }
-      }
-      // Fallback: first <li> spans, looking for "Acme · Full-time" pattern.
-      const firstItem = expSection.querySelector('li');
-      if (firstItem) {
-        const spans = firstItem.querySelectorAll('span[aria-hidden="true"], span.t-14');
-        for (const s of spans) {
-          const t = (s.innerText || s.textContent || '').trim();
-          if (t && /·/.test(t)) {
-            const name = t.split('·')[0].trim();
-            if (name.length >= 2 && name.length <= 100 && !/year|month|present/i.test(name)) {
-              console.log(LOG, 'extractCurrentCompany: matched experience span', name);
-              return { name, source: 'experience-span' };
-            }
-          }
+        const name = text.split('·')[0].trim();
+        if (name.length >= 2 && name.length <= 100) {
+          console.log(LOG, 'extractCurrentCompany: matched experience link', name);
+          return { name, source: 'experience-link' };
         }
       }
     }
 
-    // Priority 3: headline "Title at Company" parsing.
+    // Priority 5: headline "Title at Company" parsing.
     const headline = readHeadline();
     const m = headline.match(/^(.+?)\s+(?:at|@|chez|bei|en)\s+(.+)$/i);
     if (m && m[2]) {
@@ -312,10 +418,12 @@
   // the slug-derived name is still better than waiting forever.
   async function waitForProfileReady(maxMs = 6000) {
     const ok = () => {
-      const h1 = document.querySelector('main h1') || document.querySelector('h1');
-      const h1Text = h1 ? (h1.innerText || h1.textContent || '').trim() : '';
-      if (h1Text.length > 0) return true;
-      // Slug fallback: as long as the URL is a /in/<handle>/, extractProfileName
+      // Accept H1 OR H2 — newer LinkedIn layouts put the name in H2.
+      const h = document.querySelector('main h1, main h2')
+        || document.querySelector('h1, h2');
+      const text = h ? (h.innerText || h.textContent || '').trim() : '';
+      if (text.length > 0) return true;
+      // Slug fallback: as long as the URL is /in/<handle>/, extractProfileName
       // can derive a name immediately — no need to wait for LinkedIn.
       return !!extractProfileName();
     };

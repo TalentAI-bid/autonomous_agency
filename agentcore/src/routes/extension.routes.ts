@@ -488,17 +488,23 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           contactId = existing.id;
           dedup = true;
 
-          // Backfill any fields the original create may have missed.
-          // E.g. early manual-add saves had no company extraction, so the
-          // contact's companyId is NULL even though the company now exists.
-          // Without this update the contact won't show on the company's
-          // People tab in the dashboard.
+          // Backfill any fields the original create may have missed OR
+          // poisoned with junk from the previous (broken) scraper.
+          //   - Empty/null values: backfill with current payload
+          //   - Values containing scraper junk ("Verified", "View profile")
+          //     that we know are wrong: overwrite with current payload
+          //   - Otherwise: keep what's there (user may have edited it)
+          const isJunky = (v: string | null | undefined) =>
+            !v
+            || /\b(?:View|Verified|profile)\b/i.test(v)
+            || /\bverifications?\b/i.test(v);
+
           const patch: Partial<typeof contacts.$inferInsert> = {};
           if (t.companyId && existing.companyId !== t.companyId) patch.companyId = t.companyId;
-          if (companyName?.trim() && !existing.companyName) patch.companyName = companyName.trim();
-          if (title?.trim() && !existing.title) patch.title = title.trim();
-          if (firstName && !existing.firstName) patch.firstName = firstName;
-          if (lastName && !existing.lastName) patch.lastName = lastName;
+          if (companyName?.trim() && isJunky(existing.companyName)) patch.companyName = companyName.trim();
+          if (title?.trim() && isJunky(existing.title)) patch.title = title.trim();
+          if (firstName && isJunky(existing.firstName)) patch.firstName = firstName;
+          if (lastName && isJunky(existing.lastName)) patch.lastName = lastName;
 
           if (Object.keys(patch).length > 0) {
             patch.updatedAt = new Date();

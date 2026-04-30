@@ -466,7 +466,14 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
         // Dedup by (linkedinUrl + masterAgentId) — same person can exist
         // under multiple agents, but only once per agent.
         const [existing] = await withTenant(request.tenantId, async (tx) => {
-          return tx.select({ id: contacts.id }).from(contacts)
+          return tx.select({
+            id: contacts.id,
+            companyId: contacts.companyId,
+            companyName: contacts.companyName,
+            title: contacts.title,
+            firstName: contacts.firstName,
+            lastName: contacts.lastName,
+          }).from(contacts)
             .where(and(
               eq(contacts.tenantId, request.tenantId),
               eq(contacts.linkedinUrl, linkedinUrl),
@@ -480,6 +487,31 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
         if (existing) {
           contactId = existing.id;
           dedup = true;
+
+          // Backfill any fields the original create may have missed.
+          // E.g. early manual-add saves had no company extraction, so the
+          // contact's companyId is NULL even though the company now exists.
+          // Without this update the contact won't show on the company's
+          // People tab in the dashboard.
+          const patch: Partial<typeof contacts.$inferInsert> = {};
+          if (t.companyId && existing.companyId !== t.companyId) patch.companyId = t.companyId;
+          if (companyName?.trim() && !existing.companyName) patch.companyName = companyName.trim();
+          if (title?.trim() && !existing.title) patch.title = title.trim();
+          if (firstName && !existing.firstName) patch.firstName = firstName;
+          if (lastName && !existing.lastName) patch.lastName = lastName;
+
+          if (Object.keys(patch).length > 0) {
+            patch.updatedAt = new Date();
+            await withTenant(request.tenantId, async (tx) => {
+              return tx.update(contacts)
+                .set(patch)
+                .where(and(
+                  eq(contacts.id, existing.id),
+                  eq(contacts.tenantId, request.tenantId),
+                ));
+            });
+            logger.info({ contactId, patched: Object.keys(patch) }, 'manual_add_profile: backfilled fields on dedup');
+          }
         } else {
           const [inserted] = await withTenant(request.tenantId, async (tx) => {
             return tx.insert(contacts).values({

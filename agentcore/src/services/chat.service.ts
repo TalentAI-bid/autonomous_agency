@@ -196,6 +196,25 @@ function looksLikeAutonomyGrant(text: string): boolean {
   return patterns.some(p => lower.includes(p));
 }
 
+/**
+ * Parse the user's reply to the strategy quick-reply chips (Hiring / Industry
+ * / Hybrid). The chips are synthesized for display in `synthesizeQuickReplies`;
+ * when the user clicks one, the chip text gets typed into the chat. This
+ * detects either the chip letter ("A" / "B" / "C") or a typed strategy name
+ * ("hiring", "industry", "hybrid", "both").
+ */
+function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | null {
+  const t = content.trim().toLowerCase();
+  if (!t || t.length > 80) return null;
+  // Chip A / "Hiring" / "companies that are hiring"
+  if (/^a$|^a[.)]\s|^hiring(\s+signal)?$|^companies\s+(that\s+are\s+)?hiring/.test(t)) return 'hiring_signal';
+  // Chip B / "Industry" / "by industry"
+  if (/^b$|^b[.)]\s|^industry(\s+target)?$|^by\s+industry/.test(t)) return 'industry_target';
+  // Chip C / "Hybrid" / "both"
+  if (/^c$|^c[.)]\s|^hybrid$|^both(\s+strategies)?$/.test(t)) return 'hybrid';
+  return null;
+}
+
 /** Heuristic: decide whether a user's free-text reply should be treated as a
  * broaden-manual search term when pendingSearchChoice is active. Affirmative
  * short phrases ("yes, continue", "sounds good") should NOT trigger broaden. */
@@ -398,8 +417,37 @@ export async function sendMessage(
     }
   }
 
+  // ─── Explicit-strategy reply parser ─────────────────────────────────
+  // The chat shows A/B/C quick-reply chips (Hiring / Industry / Hybrid) on
+  // message 2. If the user clicks a chip or types the strategy name, lock it
+  // in `master_agents.config.userExplicitBdStrategy` so the strategist and
+  // master-agent can never override the user's choice via LLM heuristics.
+  const explicitStrategy = parseExplicitStrategyReply(content);
+  if (explicitStrategy && conversation.masterAgentId) {
+    try {
+      const merged = {
+        ...masterAgentConfig,
+        userExplicitBdStrategy: explicitStrategy,
+        bdStrategy: explicitStrategy,
+      };
+      await withTenant(tenantId, async (tx) => {
+        await tx.update(masterAgents)
+          .set({ config: merged, updatedAt: new Date() })
+          .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)));
+      });
+      masterAgentConfig = merged;
+      logger.info(
+        { tenantId, masterAgentId: conversation.masterAgentId, userExplicitBdStrategy: explicitStrategy },
+        'User explicitly chose strategy in chat',
+      );
+    } catch (err) {
+      logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist userExplicitBdStrategy');
+    }
+  }
+
   // Intent classifier gate: run only when bdStrategy is still null AND we are
   // within the first two user messages. Persist high-confidence extractions.
+  // Skipped when the user already gave us an explicit strategy reply above.
   let inferredIntent: InferredIntent | undefined;
   const userMessageCountAfter = userMessageCountSoFar + 1; // including the current message
   // Fix 1: the classifier must fire during Create-Agent chat too, before a
@@ -408,7 +456,8 @@ export async function sendMessage(
   const extractedCfg = (conversation.extractedConfig as Record<string, unknown> | null)?.config as Record<string, unknown> | undefined;
   const existingBdStrategy =
     (masterAgentConfig.bdStrategy as string | undefined) ?? (extractedCfg?.bdStrategy as string | undefined);
-  if (!existingBdStrategy && userMessageCountAfter <= 2) {
+  // Don't run the classifier when the user just gave us an explicit pick.
+  if (!existingBdStrategy && !explicitStrategy && userMessageCountAfter <= 2) {
     const mission = await classifyMissionIntent(tenantId, content);
     if (mission && mission.bdStrategy) {
       const conf: 'high' | 'medium' = mission.confidence >= 0.9 ? 'high' : 'medium';

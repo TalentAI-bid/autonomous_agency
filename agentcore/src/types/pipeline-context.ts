@@ -115,3 +115,26 @@ export interface SalesStrategy {
   hiringKeywords?: string[];
   targetTech?: string[];
 }
+
+/**
+ * Documented top-level flags persisted on `master_agents.config` (JSONB).
+ * Not enforced by the schema (config is untyped JSONB), but referenced by
+ * master-agent.ts, strategist.agent.ts and chat.service.ts at runtime.
+ */
+export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid';
+
+export interface MasterAgentConfigFlags {
+  /**
+   * The strategist's LLM-derived choice. Re-written every strategist run.
+   * Used as a fallback when `userExplicitBdStrategy` is not set.
+   */
+  bdStrategy?: BdStrategy;
+
+  /**
+   * The user's explicit pick from the chat (replied "industry" / "hiring" /
+   * "hybrid" or chip A/B/C to message 2). Once set, this is the single
+   * source of truth — strategist + master-agent must respect it and never
+   * overwrite it from LLM output.
+   */
+  userExplicitBdStrategy?: BdStrategy;
+}

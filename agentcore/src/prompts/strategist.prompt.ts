@@ -1,7 +1,22 @@
-import type { PipelineContext } from '../types/pipeline-context.js';
+import type { PipelineContext, BdStrategy } from '../types/pipeline-context.js';
 
-export function buildInitialStrategySystemPrompt(): string {
-  return `You are an expert business development and lead generation strategist. Given a mission, target market, and context, you produce a comprehensive strategy to find and engage the right organizations or individuals.
+export function buildInitialStrategySystemPrompt(forcedBdStrategy?: BdStrategy): string {
+  const lock = forcedBdStrategy
+    ? `\n\nUSER-LOCKED STRATEGY: ${forcedBdStrategy}\n` +
+      `The user explicitly chose this strategy in chat. You MUST set bdStrategy="${forcedBdStrategy}" in your output. Do not change it under any circumstance.\n` +
+      (forcedBdStrategy === 'industry_target'
+        ? `- Populate targetIndustries with 3-8 entries — industries whose companies typically employ the user's placement target / buy the user's offering.\n` +
+          `- Leave hiringKeywords as an empty array [] (the master-agent will not run LinkedIn Jobs scrape for industry_target).\n` +
+          `- dataSourceStrategy.needsChromeExtension MUST be true (industry company search runs through the Chrome extension).`
+        : forcedBdStrategy === 'hiring_signal'
+        ? `- Populate hiringKeywords with 3-8 entries — job titles companies POST when they need the user's placement target. These are the LinkedIn Jobs search terms.\n` +
+          `- Leave targetIndustries as an empty array [] (the master-agent will not run extension company search for hiring_signal).`
+        : `- Populate BOTH targetIndustries (3-8) AND hiringKeywords (3-8) for the hybrid path.\n` +
+          `- dataSourceStrategy.needsChromeExtension MUST be true.`) +
+      `\n`
+    : '';
+
+  return `You are an expert business development and lead generation strategist. Given a mission, target market, and context, you produce a comprehensive strategy to find and engage the right organizations or individuals.${lock}
 
 MISSION INTERPRETATION RULE — READ THE MISSION CAREFULLY:
 - If the mission is "find companies hiring X", search for X job postings.

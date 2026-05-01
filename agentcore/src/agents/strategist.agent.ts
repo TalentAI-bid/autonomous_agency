@@ -40,48 +40,66 @@ export class StrategistAgent extends BaseAgent {
     const ctx = input.pipelineContext as PipelineContext | undefined;
     if (!ctx) throw new Error('PipelineContext required for initial strategy');
 
-    // Load mission from master agent for richer context
+    // Load mission AND user-chosen strategy from master agent.
     let mission: string | undefined;
+    let userExplicitBdStrategy: SalesStrategy['bdStrategy'] | undefined;
     try {
       const [agent] = await withTenant(this.tenantId, async (tx) => {
-        return tx.select({ mission: masterAgents.mission }).from(masterAgents)
+        return tx.select({ mission: masterAgents.mission, config: masterAgents.config }).from(masterAgents)
           .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
           .limit(1);
       });
       mission = agent?.mission ?? undefined;
+      const cfg = (agent?.config as Record<string, unknown> | null) ?? {};
+      const explicit = cfg.userExplicitBdStrategy as string | undefined;
+      if (explicit === 'hiring_signal' || explicit === 'industry_target' || explicit === 'hybrid') {
+        userExplicitBdStrategy = explicit;
+        logger.info({ masterAgentId, userExplicitBdStrategy }, 'Strategist: user-locked bdStrategy detected');
+      }
     } catch { /* continue without mission */ }
 
     // Call LLM for strategy. Wrap in retry + deterministic fallback so the
     // strategist always returns a usable SalesStrategy, even when the LLM is
-    // flaky. The discovery gate in master-agent (master-agent.ts:830) trusts
-    // ONLY this output — there is intentionally no agentConfig fallback there
-    // — so this method is the single source of truth for bdStrategy and must
-    // not throw or return null.
-    const strategy = await this.generateStrategyWithFallback(ctx, mission, masterAgentId);
+    // flaky. When userExplicitBdStrategy is set, it's passed as a hard
+    // constraint to the prompt so the LLM generates the matching keyword set.
+    const strategy = await this.generateStrategyWithFallback(ctx, mission, masterAgentId, userExplicitBdStrategy);
 
-    // Safety net: the LLM occasionally picks bdStrategy='hiring_signal' for
-    // industry-only missions when regional coverage is limited, which makes
-    // master-agent dispatch (master-agent.ts:443 vs :574) take the wrong path.
-    // If the mission text has clear industry markers and no hiring verbs, force
-    // industry_target and clear stale pipelineSteps so the dispatcher rebuilds
-    // root steps from targetIndustries instead of generic jobTitles.
-    const intent = detectMissionStrategyFromText(mission ?? '');
-    if (
-      strategy.bdStrategy === 'hiring_signal' &&
-      intent.hasIndustryMentions &&
-      !intent.hasHiringVerbs
-    ) {
-      logger.warn(
-        {
-          masterAgentId,
-          missionExcerpt: (mission ?? '').slice(0, 200),
-          originalBdStrategy: strategy.bdStrategy,
-          recommendedByHeuristic: intent.recommended,
-        },
-        'Strategist safety-net: overriding hiring_signal → industry_target for industry-only mission',
-      );
-      strategy.bdStrategy = 'industry_target';
-      strategy.pipelineSteps = undefined;
+    if (userExplicitBdStrategy) {
+      // User locked the choice in chat. Force the bdStrategy regardless of
+      // LLM output, and skip the legacy industry-mention safety-net.
+      strategy.bdStrategy = userExplicitBdStrategy;
+      // Industry/hybrid paths require the extension. Force the flag so
+      // master-agent's dispatch decision doesn't silently skip them.
+      if (userExplicitBdStrategy === 'industry_target' || userExplicitBdStrategy === 'hybrid') {
+        strategy.dataSourceStrategy = {
+          ...(strategy.dataSourceStrategy ?? { primaryRegion: '', availableSources: [], expectedQuality: 'medium', userNotes: '' }),
+          needsChromeExtension: true,
+        };
+      }
+      logger.info({ masterAgentId, bdStrategy: strategy.bdStrategy }, 'Strategist: applied user-locked bdStrategy');
+    } else {
+      // Safety net: the LLM occasionally picks bdStrategy='hiring_signal' for
+      // industry-only missions when regional coverage is limited, which makes
+      // master-agent dispatch take the wrong path. If the mission text has
+      // clear industry markers and no hiring verbs, force industry_target.
+      const intent = detectMissionStrategyFromText(mission ?? '');
+      if (
+        strategy.bdStrategy === 'hiring_signal' &&
+        intent.hasIndustryMentions &&
+        !intent.hasHiringVerbs
+      ) {
+        logger.warn(
+          {
+            masterAgentId,
+            missionExcerpt: (mission ?? '').slice(0, 200),
+            originalBdStrategy: strategy.bdStrategy,
+            recommendedByHeuristic: intent.recommended,
+          },
+          'Strategist safety-net: overriding hiring_signal → industry_target for industry-only mission',
+        );
+        strategy.bdStrategy = 'industry_target';
+        strategy.pipelineSteps = undefined;
+      }
     }
 
     // Save to masterAgent.config.salesStrategy
@@ -131,9 +149,10 @@ export class StrategistAgent extends BaseAgent {
     ctx: PipelineContext,
     mission: string | undefined,
     masterAgentId: string,
+    forcedBdStrategy?: SalesStrategy['bdStrategy'],
   ): Promise<SalesStrategy> {
     const messages = [
-      { role: 'system' as const, content: buildInitialStrategySystemPrompt() },
+      { role: 'system' as const, content: buildInitialStrategySystemPrompt(forcedBdStrategy) },
       { role: 'user' as const, content: buildInitialStrategyUserPrompt(ctx, mission) },
     ];
 
@@ -172,6 +191,30 @@ export class StrategistAgent extends BaseAgent {
   private buildDeterministicStrategy(mission: string | undefined): SalesStrategy {
     const intent = detectMissionStrategyFromText(mission ?? '');
     const bdStrategy: SalesStrategy['bdStrategy'] = intent.recommended ?? 'industry_target';
+
+    // Generate matching pipelineSteps so the master-agent's pipeline-driven
+    // dispatcher has something to iterate. Without these, no discovery
+    // would run when the LLM call has failed.
+    const pipelineSteps: SalesStrategy['pipelineSteps'] = [];
+    if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
+      pipelineSteps.push({
+        id: 'discover_jobs',
+        tool: 'CRAWL4AI',
+        action: 'search_linkedin_jobs',
+        dependsOn: [],
+        params: {},
+      });
+    }
+    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
+      pipelineSteps.push({
+        id: 'discover_companies',
+        tool: 'LINKEDIN_EXTENSION',
+        action: 'search_companies',
+        dependsOn: [],
+        params: {},
+      });
+    }
+
     return {
       reasoning:
         'Deterministic fallback strategy — LLM call failed after retries. ' +
@@ -183,6 +226,7 @@ export class StrategistAgent extends BaseAgent {
       painPointsAddressed: [],
       opportunitySearchQueries: [],
       hiringKeywords: [],
+      pipelineSteps,
     };
   }
 }

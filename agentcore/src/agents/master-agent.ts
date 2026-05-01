@@ -468,7 +468,48 @@ export class MasterAgent extends BaseAgent {
               // we iterate and dispatch each step independently. No enum
               // branching — adding a new strategy means the strategist
               // generates new steps, no code change needed here.
-              const pipelineSteps = strategy.pipelineSteps ?? [];
+              //
+              // Defense-in-depth: even if the strategist (or a stale config)
+              // contains steps that contradict the user's locked bdStrategy,
+              // strip them HERE at dispatch time. The pipeline can't be
+              // corrupted between generation and execution because we
+              // re-validate the contract at the last possible moment.
+              let pipelineSteps = strategy.pipelineSteps ?? [];
+              if (userExplicit && pipelineSteps.length > 0) {
+                const wrongStepIds = new Set(
+                  pipelineSteps
+                    .filter((s) => {
+                      if (userExplicit === 'industry_target') {
+                        return s.tool === 'CRAWL4AI'
+                          && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+                      }
+                      if (userExplicit === 'hiring_signal') {
+                        return s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+                      }
+                      return false;
+                    })
+                    .map((s) => s.id),
+                );
+                if (wrongStepIds.size > 0) {
+                  const before = pipelineSteps.map((s) => `${s.tool}:${s.action}`);
+                  pipelineSteps = pipelineSteps
+                    .filter((s) => !wrongStepIds.has(s.id))
+                    .map((s) => ({
+                      ...s,
+                      dependsOn: (s.dependsOn ?? []).filter((d) => !wrongStepIds.has(d)),
+                    }));
+                  logger.warn(
+                    {
+                      masterAgentId,
+                      userExplicit,
+                      removedStepIds: [...wrongStepIds],
+                      before,
+                      after: pipelineSteps.map((s) => `${s.tool}:${s.action}`),
+                    },
+                    'Dispatcher: stripped wrong-strategy steps that contradicted the user lock at runtime',
+                  );
+                }
+              }
               if (pipelineSteps.length === 0) {
                 logger.warn({ masterAgentId, bdStrategy }, 'Strategist returned no pipelineSteps — no discovery dispatched');
                 this.sendMessage(null, 'system_alert', {

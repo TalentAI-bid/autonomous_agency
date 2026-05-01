@@ -728,14 +728,18 @@ export class MasterAgent extends BaseAgent {
             if (strategy.bdStrategy) {
               try {
                 // Never overwrite userExplicitBdStrategy from the strategist —
-                // it's the user's locked choice from chat.
+                // it's the user's locked choice from chat. Also never preserve
+                // stale pipelineSteps from a previous strategy: the dispatcher
+                // just executed the freshly-generated steps, so the persisted
+                // copy must be the same fresh set (or undefined when the
+                // strategist deliberately produced none).
                 const lockedBd = (agentConfig as Record<string, unknown>).userExplicitBdStrategy as
                   | 'hiring_signal' | 'industry_target' | 'hybrid' | undefined;
                 const mergedConfig = {
                   ...agentConfig,
                   bdStrategy: lockedBd ?? strategy.bdStrategy,
                   dataSourceStrategy: strategy.dataSourceStrategy ?? agentConfig.dataSourceStrategy,
-                  pipelineSteps: strategy.pipelineSteps ?? agentConfig.pipelineSteps,
+                  pipelineSteps: strategy.pipelineSteps,
                 };
                 await withTenant(this.tenantId, async (tx) => {
                   await tx.update(masterAgents)

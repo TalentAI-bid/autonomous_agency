@@ -76,7 +76,28 @@ export class StrategistAgent extends BaseAgent {
           needsChromeExtension: true,
         };
       }
-      logger.info({ masterAgentId, bdStrategy: strategy.bdStrategy }, 'Strategist: applied user-locked bdStrategy');
+
+      // The LLM sometimes ignores the lock and emits the wrong toolset (e.g.
+      // CRAWL4AI:search_linkedin_jobs even when industry_target is locked).
+      // Validate the generated pipelineSteps and regenerate deterministically
+      // when they don't match — this guarantees the dispatcher iterates the
+      // right discovery tools.
+      const stepsValid = this.pipelineStepsMatchStrategy(strategy.pipelineSteps, userExplicitBdStrategy);
+      if (!stepsValid) {
+        const before = strategy.pipelineSteps?.map(s => `${s.tool}:${s.action}`) ?? [];
+        strategy.pipelineSteps = this.buildDeterministicPipelineSteps(userExplicitBdStrategy);
+        logger.warn(
+          {
+            masterAgentId,
+            userExplicitBdStrategy,
+            llmSteps: before,
+            replacedWith: strategy.pipelineSteps.map(s => `${s.tool}:${s.action}`),
+          },
+          'Strategist: LLM pipelineSteps did not match locked strategy — replaced with deterministic steps',
+        );
+      }
+
+      logger.info({ masterAgentId, bdStrategy: strategy.bdStrategy, stepCount: strategy.pipelineSteps?.length ?? 0 }, 'Strategist: applied user-locked bdStrategy');
     } else {
       // Safety net: the LLM occasionally picks bdStrategy='hiring_signal' for
       // industry-only missions when regional coverage is limited, which makes
@@ -191,30 +212,6 @@ export class StrategistAgent extends BaseAgent {
   private buildDeterministicStrategy(mission: string | undefined): SalesStrategy {
     const intent = detectMissionStrategyFromText(mission ?? '');
     const bdStrategy: SalesStrategy['bdStrategy'] = intent.recommended ?? 'industry_target';
-
-    // Generate matching pipelineSteps so the master-agent's pipeline-driven
-    // dispatcher has something to iterate. Without these, no discovery
-    // would run when the LLM call has failed.
-    const pipelineSteps: SalesStrategy['pipelineSteps'] = [];
-    if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
-      pipelineSteps.push({
-        id: 'discover_jobs',
-        tool: 'CRAWL4AI',
-        action: 'search_linkedin_jobs',
-        dependsOn: [],
-        params: {},
-      });
-    }
-    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
-      pipelineSteps.push({
-        id: 'discover_companies',
-        tool: 'LINKEDIN_EXTENSION',
-        action: 'search_companies',
-        dependsOn: [],
-        params: {},
-      });
-    }
-
     return {
       reasoning:
         'Deterministic fallback strategy — LLM call failed after retries. ' +
@@ -226,7 +223,68 @@ export class StrategistAgent extends BaseAgent {
       painPointsAddressed: [],
       opportunitySearchQueries: [],
       hiringKeywords: [],
-      pipelineSteps,
+      pipelineSteps: this.buildDeterministicPipelineSteps(bdStrategy),
     };
+  }
+
+  /**
+   * Deterministic pipelineSteps[] for a given bdStrategy. Used as a safe
+   * fallback when:
+   *   - the LLM call fails (buildDeterministicStrategy)
+   *   - the LLM emits steps that contradict the user-locked bdStrategy
+   * Each strategy maps to a fixed root-step toolset:
+   *   - industry_target → LINKEDIN_EXTENSION:search_companies (root)
+   *   - hiring_signal   → CRAWL4AI:search_linkedin_jobs (root)
+   *   - hybrid          → BOTH as parallel roots
+   */
+  private buildDeterministicPipelineSteps(bdStrategy: SalesStrategy['bdStrategy']): NonNullable<SalesStrategy['pipelineSteps']> {
+    const steps: NonNullable<SalesStrategy['pipelineSteps']> = [];
+    if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
+      steps.push({
+        id: 'discover_jobs',
+        tool: 'CRAWL4AI',
+        action: 'search_linkedin_jobs',
+        dependsOn: [],
+        params: {},
+      });
+    }
+    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
+      steps.push({
+        id: 'discover_companies',
+        tool: 'LINKEDIN_EXTENSION',
+        action: 'search_companies',
+        dependsOn: [],
+        params: {},
+      });
+    }
+    return steps;
+  }
+
+  /**
+   * True iff the LLM-emitted pipelineSteps[] match the locked bdStrategy.
+   * Mismatch examples we reject:
+   *   - locked=industry_target but steps contain CRAWL4AI:search_linkedin_jobs
+   *   - locked=hiring_signal but steps contain LINKEDIN_EXTENSION:search_companies as a root
+   *   - locked=hybrid but missing one of the two roots
+   *   - any locked but no root step at all
+   */
+  private pipelineStepsMatchStrategy(
+    steps: SalesStrategy['pipelineSteps'] | undefined,
+    bdStrategy: SalesStrategy['bdStrategy'],
+  ): boolean {
+    if (!steps || steps.length === 0) return false;
+    const isExtSearch = (s: { tool: string; action: string }) =>
+      s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+    const isJobsSearch = (s: { tool: string; action: string }) =>
+      s.tool === 'CRAWL4AI'
+      && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+
+    const hasExt = steps.some(isExtSearch);
+    const hasJobs = steps.some(isJobsSearch);
+
+    if (bdStrategy === 'industry_target') return hasExt && !hasJobs;
+    if (bdStrategy === 'hiring_signal') return hasJobs && !hasExt;
+    if (bdStrategy === 'hybrid') return hasExt && hasJobs;
+    return true;
   }
 }

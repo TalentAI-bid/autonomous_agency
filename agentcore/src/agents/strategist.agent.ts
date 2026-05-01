@@ -77,13 +77,31 @@ export class StrategistAgent extends BaseAgent {
         };
       }
 
-      // The LLM sometimes ignores the lock and emits the wrong toolset (e.g.
-      // CRAWL4AI:search_linkedin_jobs even when industry_target is locked).
-      // Validate the generated pipelineSteps and regenerate deterministically
-      // when they don't match — this guarantees the dispatcher iterates the
-      // right discovery tools.
-      const stepsValid = this.pipelineStepsMatchStrategy(strategy.pipelineSteps, userExplicitBdStrategy);
-      if (!stepsValid) {
+      // The LLM often emits BOTH a correct root step (matching the lock) and
+      // a wrong-strategy root step (e.g. industry_target gets the right
+      // LINKEDIN_EXTENSION:search_companies AND a stray
+      // CRAWL4AI:search_linkedin_jobs). Filter out only the wrong-strategy
+      // steps and clean up dependsOn references so the rest of the pipeline
+      // (fetch_company_detail, LLM_ANALYSIS, REACHER, SCORING…) survives
+      // intact. Only fall back to a fresh deterministic pipeline if filtering
+      // leaves us with no valid root step at all.
+      if (strategy.pipelineSteps?.length) {
+        const before = strategy.pipelineSteps.map(s => `${s.tool}:${s.action}`);
+        const filtered = this.filterStepsForLockedStrategy(strategy.pipelineSteps, userExplicitBdStrategy);
+        if (filtered.length !== strategy.pipelineSteps.length) {
+          logger.warn(
+            {
+              masterAgentId,
+              userExplicitBdStrategy,
+              llmSteps: before,
+              keptSteps: filtered.map(s => `${s.tool}:${s.action}`),
+            },
+            'Strategist: removed wrong-strategy pipelineSteps that contradicted the user lock',
+          );
+          strategy.pipelineSteps = filtered;
+        }
+      }
+      if (!this.pipelineStepsMatchStrategy(strategy.pipelineSteps, userExplicitBdStrategy)) {
         const before = strategy.pipelineSteps?.map(s => `${s.tool}:${s.action}`) ?? [];
         strategy.pipelineSteps = this.buildDeterministicPipelineSteps(userExplicitBdStrategy);
         logger.warn(
@@ -93,7 +111,7 @@ export class StrategistAgent extends BaseAgent {
             llmSteps: before,
             replacedWith: strategy.pipelineSteps.map(s => `${s.tool}:${s.action}`),
           },
-          'Strategist: LLM pipelineSteps did not match locked strategy — replaced with deterministic steps',
+          'Strategist: pipelineSteps still missing required root after filtering — replaced with deterministic steps',
         );
       }
 
@@ -258,6 +276,42 @@ export class StrategistAgent extends BaseAgent {
       });
     }
     return steps;
+  }
+
+  /**
+   * Remove pipelineSteps that contradict the locked bdStrategy, preserving
+   * the rest of the chain.
+   *   - locked=industry_target → drop any CRAWL4AI jobs-search steps
+   *   - locked=hiring_signal   → drop LINKEDIN_EXTENSION:search_companies (root only)
+   *   - locked=hybrid          → keep everything (both roots are wanted)
+   *
+   * After dropping a step we strip its id from every other step's dependsOn
+   * so the dispatcher's dependency graph stays consistent.
+   */
+  private filterStepsForLockedStrategy(
+    steps: NonNullable<SalesStrategy['pipelineSteps']>,
+    bdStrategy: SalesStrategy['bdStrategy'],
+  ): NonNullable<SalesStrategy['pipelineSteps']> {
+    const isWrong = (s: { tool: string; action: string }) => {
+      if (bdStrategy === 'industry_target') {
+        return s.tool === 'CRAWL4AI'
+          && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+      }
+      if (bdStrategy === 'hiring_signal') {
+        return s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+      }
+      return false;
+    };
+
+    const wrongIds = new Set(steps.filter(isWrong).map(s => s.id));
+    if (wrongIds.size === 0) return steps;
+
+    return steps
+      .filter(s => !wrongIds.has(s.id))
+      .map(s => ({
+        ...s,
+        dependsOn: (s.dependsOn ?? []).filter(d => !wrongIds.has(d)),
+      }));
   }
 
   /**

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { apiGet, apiGetPaginated, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import type { MasterAgent, AgentConfig, Company, Document } from '@/types';
 
 export function useAgents() {
@@ -120,10 +120,17 @@ export function useAgentEmails(id: string) {
   });
 }
 
-export function useAgentCompanies(id: string) {
+export function useAgentCompanies(
+  id: string,
+  options: { includeIncomplete?: boolean; cursor?: string | null } = {},
+) {
+  const { includeIncomplete = false, cursor } = options;
   return useQuery({
-    queryKey: ['agents', id, 'companies'],
-    queryFn: () => apiGet<Company[]>(`/master-agents/${id}/companies`),
+    queryKey: ['agents', id, 'companies', { includeIncomplete, cursor: cursor ?? null }],
+    queryFn: () => apiGetPaginated<Company>(`/master-agents/${id}/companies`, {
+      ...(includeIncomplete ? { includeIncomplete: 'true' } : {}),
+      ...(cursor ? { cursor } : {}),
+    }),
     enabled: !!id,
     staleTime: 15000,
   });

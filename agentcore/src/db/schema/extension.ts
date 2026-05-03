@@ -47,6 +47,13 @@ export const extensionTasks = pgTable('extension_tasks', {
   error: text('error'),
   priority: integer('priority').default(5).notNull(),
   attempts: integer('attempts').default(0).notNull(),
+  // Earliest moment this task may be dispatched. Default `now()` keeps
+  // immediate-dispatch behaviour. Bulk fan-outs (LinkedIn Jobs scrape,
+  // search_companies result) distribute tasks across batches by setting
+  // future dispatchAfter so the extension processes them in waves instead
+  // of all at once — protects against LinkedIn 429s when 100+ companies
+  // would otherwise be queued back-to-back.
+  dispatchAfter: timestamp('dispatch_after', { withTimezone: true }).defaultNow().notNull(),
   dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -56,6 +63,7 @@ export const extensionTasks = pgTable('extension_tasks', {
   index('extension_tasks_site_status_idx').on(t.site, t.status),
   index('extension_tasks_session_status_idx').on(t.sessionId, t.status),
   index('extension_tasks_master_agent_idx').on(t.masterAgentId),
+  index('extension_tasks_dispatch_after_idx').on(t.tenantId, t.status, t.dispatchAfter),
 ]);
 
 export type ExtensionSession = typeof extensionSessions.$inferSelect;

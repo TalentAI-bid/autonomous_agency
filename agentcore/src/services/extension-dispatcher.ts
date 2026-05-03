@@ -1,4 +1,4 @@
-import { eq, and, asc, desc, isNull } from 'drizzle-orm';
+import { eq, and, asc, desc, isNull, lte, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies, contacts, extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
 import type { ExtensionTask } from '../db/schema/index.js';
@@ -46,6 +46,7 @@ export async function enqueueExtensionTask(params: {
   type: ExtensionTaskType;
   params: Record<string, unknown>;
   priority?: number;
+  dispatchAfter?: Date;
 }): Promise<{ taskId: string }> {
   const [row] = await withTenant(params.tenantId, async (tx) => {
     return tx
@@ -58,17 +59,96 @@ export async function enqueueExtensionTask(params: {
         params: params.params ?? {},
         priority: params.priority ?? 5,
         status: 'pending',
+        ...(params.dispatchAfter ? { dispatchAfter: params.dispatchAfter } : {}),
       })
       .returning({ id: extensionTasks.id });
   });
   const taskId = row!.id;
 
-  // Fire-and-forget immediate dispatch attempt (don't block the caller)
+  // Fire-and-forget immediate dispatch attempt (don't block the caller).
+  // tryDispatch internally bails when dispatchAfter > now; the periodic
+  // scheduled-drainer wakes the task up later.
   tryDispatch(params.tenantId, taskId).catch((err) => {
     logger.debug({ err, taskId }, 'Extension task immediate dispatch failed (will retry on reconnect)');
   });
 
   return { taskId };
+}
+
+// ─── Bulk batched enqueue ───────────────────────────────────────────────────
+
+interface BatchTaskInput {
+  masterAgentId?: string;
+  site: ExtensionSite;
+  type: ExtensionTaskType;
+  params: Record<string, unknown>;
+  priority?: number;
+}
+
+/**
+ * Insert N tasks at once and stagger their `dispatchAfter` so they are
+ * released to the extension in batches of `batchSize` separated by
+ * `batchCooldownMs`. Defaults: 10 tasks per batch, 60s cooldown.
+ *
+ * Rationale: the LinkedIn Jobs scrape can find 100+ companies, and the
+ * `search_companies` extension task can return a similar volume. Inserting
+ * all of them with `dispatch_after = now()` queued them into the extension
+ * back-to-back; the rate-limiter on the extension side serialised them but
+ * piled up a long backlog of `pending` rows and reportedly tripped LinkedIn
+ * rate-limits on long runs. Server-side staggering makes the queue visibly
+ * paced and lets `pause` / `cancel` actually stop the chain mid-fan-out.
+ *
+ * Tasks within the same batch share the same `dispatchAfter` timestamp;
+ * the extension's per-task minDelay still serialises them client-side.
+ */
+export async function enqueueExtensionTaskBatch(
+  tenantId: string,
+  tasks: BatchTaskInput[],
+  opts: { batchSize?: number; batchCooldownMs?: number; firstBatchDelayMs?: number } = {},
+): Promise<{ taskIds: string[]; batches: number }> {
+  if (tasks.length === 0) return { taskIds: [], batches: 0 };
+
+  const batchSize = opts.batchSize ?? 10;
+  const batchCooldownMs = opts.batchCooldownMs ?? 60_000;
+  const firstBatchDelayMs = opts.firstBatchDelayMs ?? 0;
+
+  const now = Date.now();
+  const values = tasks.map((t, idx) => {
+    const batchIdx = Math.floor(idx / batchSize);
+    const dispatchAfter = new Date(now + firstBatchDelayMs + batchIdx * batchCooldownMs);
+    return {
+      tenantId,
+      masterAgentId: t.masterAgentId,
+      site: t.site,
+      type: t.type,
+      params: t.params ?? {},
+      priority: t.priority ?? 5,
+      status: 'pending' as const,
+      dispatchAfter,
+    };
+  });
+
+  const inserted = await withTenant(tenantId, async (tx) => {
+    return tx.insert(extensionTasks).values(values).returning({ id: extensionTasks.id });
+  });
+
+  const taskIds = inserted.map((r) => r.id);
+  const batches = Math.ceil(tasks.length / batchSize);
+
+  logger.info(
+    { tenantId, count: tasks.length, batches, batchSize, batchCooldownMs },
+    'Enqueued extension tasks in batches',
+  );
+
+  // Fire-and-forget dispatch on the first batch only — later batches wake up
+  // via the scheduled drainer when their dispatchAfter passes.
+  for (let i = 0; i < Math.min(batchSize, taskIds.length); i++) {
+    tryDispatch(tenantId, taskIds[i]!).catch((err) => {
+      logger.debug({ err, taskId: taskIds[i] }, 'Batch first-wave dispatch attempt failed');
+    });
+  }
+
+  return { taskIds, batches };
 }
 
 // ─── Dispatch ───────────────────────────────────────────────────────────────
@@ -86,6 +166,11 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
       .where(and(eq(extensionTasks.id, taskId), eq(extensionTasks.tenantId, tenantId)))
       .limit(1);
     if (!task || task.status !== 'pending') return { task: null, session: null };
+    // Skip silently if the task is scheduled for the future — the periodic
+    // re-drainer will pick it up at its dispatchAfter timestamp.
+    if (task.dispatchAfter && task.dispatchAfter.getTime() > Date.now()) {
+      return { task: null, session: null };
+    }
 
     const [session] = await tx
       .select()
@@ -215,7 +300,11 @@ export async function drainPending(tenantId: string, sessionId: string): Promise
     return tx
       .select({ id: extensionTasks.id })
       .from(extensionTasks)
-      .where(and(eq(extensionTasks.tenantId, tenantId), eq(extensionTasks.status, 'pending')))
+      .where(and(
+        eq(extensionTasks.tenantId, tenantId),
+        eq(extensionTasks.status, 'pending'),
+        lte(extensionTasks.dispatchAfter, new Date()),
+      ))
       .orderBy(desc(extensionTasks.priority), asc(extensionTasks.createdAt))
       .limit(50);
   });
@@ -229,6 +318,62 @@ export async function drainPending(tenantId: string, sessionId: string): Promise
     logger.info({ tenantId, sessionId, dispatched, total: pending.length }, 'Drained pending extension tasks on reconnect');
   }
   return dispatched;
+}
+
+// ─── Scheduled drainer ──────────────────────────────────────────────────────
+// Periodic sweep that picks up tasks whose `dispatch_after` has just passed.
+// Without this, tasks staggered across batches would sit `pending` forever
+// because the immediate-dispatch path bails for future-scheduled rows.
+
+let scheduledDrainerInterval: NodeJS.Timeout | null = null;
+
+export async function runScheduledDispatchSweep(): Promise<number> {
+  // Use the global db (cross-tenant scan). RLS filters via withTenant aren't
+  // needed here — the read joins by tenant_id and the dispatch path itself
+  // re-loads under tenant context.
+  const { db } = await import('../config/database.js');
+  const eligible = await db
+    .select({ id: extensionTasks.id, tenantId: extensionTasks.tenantId })
+    .from(extensionTasks)
+    .where(and(
+      eq(extensionTasks.status, 'pending'),
+      lte(extensionTasks.dispatchAfter, new Date()),
+    ))
+    .orderBy(desc(extensionTasks.priority), asc(extensionTasks.createdAt))
+    .limit(200);
+
+  let dispatched = 0;
+  for (const row of eligible) {
+    try {
+      const ok = await tryDispatch(row.tenantId, row.id);
+      if (ok) dispatched++;
+    } catch (err) {
+      logger.debug({ err, taskId: row.id, tenantId: row.tenantId }, 'Scheduled drainer dispatch failed');
+    }
+  }
+  if (dispatched > 0) {
+    logger.info({ dispatched, scanned: eligible.length }, 'Scheduled dispatch sweep dispatched batched tasks');
+  }
+  return dispatched;
+}
+
+export function startScheduledDispatcher(intervalMs = 15_000): void {
+  if (scheduledDrainerInterval) return;
+  scheduledDrainerInterval = setInterval(() => {
+    runScheduledDispatchSweep().catch((err) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Scheduled dispatcher sweep errored');
+    });
+  }, intervalMs);
+  // Don't keep the event loop alive purely for this timer.
+  scheduledDrainerInterval.unref?.();
+  logger.info({ intervalMs }, 'Scheduled extension dispatcher started');
+}
+
+export function stopScheduledDispatcher(): void {
+  if (scheduledDrainerInterval) {
+    clearInterval(scheduledDrainerInterval);
+    scheduledDrainerInterval = null;
+  }
 }
 
 // ─── Task-complete handler ──────────────────────────────────────────────────
@@ -373,6 +518,11 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     const rawCompanies = (result.companies ?? []) as Array<Record<string, unknown>>;
     logger.info({ taskId: task.id, rawCount: rawCompanies.length }, 'ingest_linkedin_search_companies_raw');
     let saved = 0;
+    // Collect fetch_company auto-chain tasks and enqueue them in batches of
+    // 10 (60s cooldown) at the end of the loop. With a 100-result search this
+    // would otherwise queue 100 fetch_company tasks back-to-back into the
+    // extension and trip LinkedIn 429s.
+    const pendingFetchTasks: Array<{ linkedinUrl: string; companyId: string }> = [];
     for (const c of rawCompanies) {
       const name = String(c.name ?? '').trim();
       if (!name || name.length < 2) continue;
@@ -427,23 +577,11 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         );
 
         // Auto-chain the LinkedIn About-page fetch so enrichment gets a real
-        // website/domain instead of having to guess from the name. Runs
-        // inside the existing fetch_company daily cap (100); no cap change.
-        // companyId threads through so the detail task updates this exact
-        // row by id rather than re-running fuzzy domain/name dedup.
+        // website/domain. companyId threads through so the detail task
+        // updates this exact row by id rather than re-running fuzzy
+        // domain/name dedup. Queued for batched dispatch below.
         if (linkedinUrl) {
-          try {
-            await enqueueExtensionTask({
-              tenantId: task.tenantId,
-              masterAgentId: task.masterAgentId ?? undefined,
-              site: 'linkedin',
-              type: 'fetch_company',
-              params: { linkedinUrl, companyId: savedRow.id },
-              priority: 3,
-            });
-          } catch (err) {
-            logger.debug({ err, linkedinUrl }, 'Failed to auto-queue fetch_company (non-fatal)');
-          }
+          pendingFetchTasks.push({ linkedinUrl, companyId: savedRow.id });
         }
 
         saved++;
@@ -451,6 +589,27 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         logger.debug({ err, name }, 'Skipped invalid company from LinkedIn extension');
       }
     }
+
+    if (pendingFetchTasks.length > 0) {
+      try {
+        await enqueueExtensionTaskBatch(
+          task.tenantId,
+          pendingFetchTasks.map((t) => ({
+            masterAgentId: task.masterAgentId ?? undefined,
+            site: 'linkedin',
+            type: 'fetch_company',
+            params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
+            priority: 3,
+          })),
+        );
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), count: pendingFetchTasks.length, taskId: task.id },
+          'Batched fetch_company auto-chain enqueue failed (non-fatal)',
+        );
+      }
+    }
+
     return { extracted: rawCompanies.length, saved };
   }
 

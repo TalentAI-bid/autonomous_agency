@@ -1,6 +1,6 @@
 import { scrape } from './crawl4ai.tool.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
-import { enqueueExtensionTask } from '../services/extension-dispatcher.js';
+import { enqueueExtensionTaskBatch } from '../services/extension-dispatcher.js';
 import { eq, and } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies, opportunities } from '../db/schema/index.js';
@@ -128,8 +128,14 @@ export async function searchLinkedInJobs(
     'LinkedIn Jobs parsed, filtered, and deduped',
   );
 
-  // Save companies to DB and auto-chain fetch_company
+  // Save companies to DB and auto-chain fetch_company.
+  // Collect fetch_company tasks in `pendingFetchTasks` and enqueue them in
+  // batches of 10 (60s cooldown between batches) at the end of the loop —
+  // see enqueueExtensionTaskBatch. This stops 100+ companies from being
+  // dispatched to the extension back-to-back, which previously tripped
+  // LinkedIn 429s on long runs.
   let saved = 0;
+  const pendingFetchTasks: Array<{ linkedinUrl: string; companyId: string }> = [];
   for (const c of unique) {
     if (!c.companyName || c.companyName.length < 2) continue;
 
@@ -243,20 +249,9 @@ export async function searchLinkedInJobs(
         }
       }
 
-      // Auto-queue fetch_company to get full company details via extension
+      // Queue a fetch_company task for batched dispatch (see below).
       if (c.linkedinUrl) {
-        try {
-          await enqueueExtensionTask({
-            tenantId,
-            masterAgentId,
-            site: 'linkedin',
-            type: 'fetch_company',
-            params: { linkedinUrl: c.linkedinUrl, companyId: savedRow.id },
-            priority: 3,
-          });
-        } catch (err) {
-          logger.debug({ err, linkedinUrl: c.linkedinUrl }, 'Failed to auto-queue fetch_company from LinkedIn Jobs (non-fatal)');
-        }
+        pendingFetchTasks.push({ linkedinUrl: c.linkedinUrl, companyId: savedRow.id });
       }
 
       saved++;
@@ -265,8 +260,30 @@ export async function searchLinkedInJobs(
     }
   }
 
+  // Batch-enqueue all fetch_company tasks (10/min cadence) so we don't
+  // fire-hose the extension when a search returns 100+ companies.
+  if (pendingFetchTasks.length > 0) {
+    try {
+      await enqueueExtensionTaskBatch(
+        tenantId,
+        pendingFetchTasks.map((t) => ({
+          masterAgentId,
+          site: 'linkedin',
+          type: 'fetch_company',
+          params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
+          priority: 3,
+        })),
+      );
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), count: pendingFetchTasks.length },
+        'Batched fetch_company enqueue failed (non-fatal)',
+      );
+    }
+  }
+
   logger.info(
-    { tenantId, masterAgentId, jobTitle, location, parsed: unique.length, saved },
+    { tenantId, masterAgentId, jobTitle, location, parsed: unique.length, saved, queuedFetchCompany: pendingFetchTasks.length },
     'Server-side LinkedIn Jobs scrape completed',
   );
 

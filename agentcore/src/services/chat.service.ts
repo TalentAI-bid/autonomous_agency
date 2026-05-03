@@ -422,26 +422,52 @@ export async function sendMessage(
   // message 2. If the user clicks a chip or types the strategy name, lock it
   // in `master_agents.config.userExplicitBdStrategy` so the strategist and
   // master-agent can never override the user's choice via LLM heuristics.
+  //
+  // Two cases: (1) the master agent already exists — write the lock straight
+  // to its config. (2) The master agent doesn't exist yet (the typical chat
+  // flow hits this case: the user picks a strategy chip on message 2, but the
+  // agent isn't created until they approve the proposal at the end of chat).
+  // In case 2, persist the lock to `conversations.extractedConfig` so it
+  // survives until `approveProposal` can copy it into the new agent's config.
   const explicitStrategy = parseExplicitStrategyReply(content);
-  if (explicitStrategy && conversation.masterAgentId) {
-    try {
-      const merged = {
-        ...masterAgentConfig,
-        userExplicitBdStrategy: explicitStrategy,
-        bdStrategy: explicitStrategy,
-      };
-      await withTenant(tenantId, async (tx) => {
-        await tx.update(masterAgents)
-          .set({ config: merged, updatedAt: new Date() })
-          .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)));
-      });
-      masterAgentConfig = merged;
-      logger.info(
-        { tenantId, masterAgentId: conversation.masterAgentId, userExplicitBdStrategy: explicitStrategy },
-        'User explicitly chose strategy in chat',
-      );
-    } catch (err) {
-      logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist userExplicitBdStrategy');
+  if (explicitStrategy) {
+    if (conversation.masterAgentId) {
+      try {
+        const merged = {
+          ...masterAgentConfig,
+          userExplicitBdStrategy: explicitStrategy,
+          bdStrategy: explicitStrategy,
+        };
+        await withTenant(tenantId, async (tx) => {
+          await tx.update(masterAgents)
+            .set({ config: merged, updatedAt: new Date() })
+            .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)));
+        });
+        masterAgentConfig = merged;
+        logger.info(
+          { tenantId, masterAgentId: conversation.masterAgentId, userExplicitBdStrategy: explicitStrategy },
+          'User explicitly chose strategy in chat',
+        );
+      } catch (err) {
+        logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist userExplicitBdStrategy');
+      }
+    } else {
+      try {
+        const existing = (conversation.extractedConfig as Record<string, unknown> | null) ?? {};
+        const mergedExtracted = { ...existing, userExplicitBdStrategy: explicitStrategy };
+        await withTenant(tenantId, async (tx) => {
+          await tx.update(conversations)
+            .set({ extractedConfig: mergedExtracted, updatedAt: new Date() })
+            .where(eq(conversations.id, conversationId));
+        });
+        conversation.extractedConfig = mergedExtracted;
+        logger.info(
+          { tenantId, conversationId, userExplicitBdStrategy: explicitStrategy },
+          'User explicitly chose strategy in chat (pre-agent creation; staged on conversation.extractedConfig)',
+        );
+      } catch (err) {
+        logger.warn({ err, tenantId, conversationId }, 'Failed to stage userExplicitBdStrategy on conversation');
+      }
     }
   }
 
@@ -642,11 +668,19 @@ export async function sendMessage(
     }).returning();
   });
 
-  // Update extractedConfig if proposal found
+  // Update extractedConfig if proposal found. Merge into existing instead of
+  // overwriting — the explicit-strategy parser above stages
+  // userExplicitBdStrategy here for pre-creation conversations, and a blind
+  // overwrite would silently drop it whenever the proposal is regenerated.
   if (proposalData) {
     await withTenant(tenantId, async (tx) => {
+      const [row] = await tx.select({ extractedConfig: conversations.extractedConfig })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .limit(1);
+      const existing = (row?.extractedConfig as Record<string, unknown> | null) ?? {};
       return tx.update(conversations)
-        .set({ extractedConfig: proposalData, updatedAt: new Date() })
+        .set({ extractedConfig: { ...existing, ...proposalData }, updatedAt: new Date() })
         .where(eq(conversations.id, conversationId));
     });
   }
@@ -783,13 +817,60 @@ export async function* sendMessageStream(
     }
   }
 
+  // ─── Explicit-strategy reply parser (stream variant) ────────────────
+  // Mirror of the block in sendMessage. When the user clicks the A/B/C chip
+  // on message 2, persist the lock — to master_agents.config if the agent
+  // exists, otherwise stage on conversations.extractedConfig so approveProposal
+  // can copy it forward at agent creation.
+  const explicitStrategyStream = parseExplicitStrategyReply(content);
+  if (explicitStrategyStream) {
+    if (conversation.masterAgentId) {
+      try {
+        const merged = {
+          ...masterAgentConfig,
+          userExplicitBdStrategy: explicitStrategyStream,
+          bdStrategy: explicitStrategyStream,
+        };
+        await withTenant(tenantId, async (tx) => {
+          await tx.update(masterAgents)
+            .set({ config: merged, updatedAt: new Date() })
+            .where(and(eq(masterAgents.id, conversation.masterAgentId as string), eq(masterAgents.tenantId, tenantId)));
+        });
+        masterAgentConfig = merged;
+        logger.info(
+          { tenantId, masterAgentId: conversation.masterAgentId, userExplicitBdStrategy: explicitStrategyStream },
+          'User explicitly chose strategy in chat (stream)',
+        );
+      } catch (err) {
+        logger.warn({ err, tenantId, masterAgentId: conversation.masterAgentId }, 'Failed to persist userExplicitBdStrategy (stream)');
+      }
+    } else {
+      try {
+        const existing = (conversation.extractedConfig as Record<string, unknown> | null) ?? {};
+        const mergedExtracted = { ...existing, userExplicitBdStrategy: explicitStrategyStream };
+        await withTenant(tenantId, async (tx) => {
+          await tx.update(conversations)
+            .set({ extractedConfig: mergedExtracted, updatedAt: new Date() })
+            .where(eq(conversations.id, conversationId));
+        });
+        conversation.extractedConfig = mergedExtracted;
+        logger.info(
+          { tenantId, conversationId, userExplicitBdStrategy: explicitStrategyStream },
+          'User explicitly chose strategy in chat (stream; staged on conversation.extractedConfig)',
+        );
+      } catch (err) {
+        logger.warn({ err, tenantId, conversationId }, 'Failed to stage userExplicitBdStrategy on conversation (stream)');
+      }
+    }
+  }
+
   let inferredIntent: InferredIntent | undefined;
   const userMessageCountAfter = userMessageCountSoFar + 1;
   // Fix 1 (stream): same relaxed gate as sendMessage.
   const extractedCfgStream = (conversation.extractedConfig as Record<string, unknown> | null)?.config as Record<string, unknown> | undefined;
   const existingBdStrategyStream =
     (masterAgentConfig.bdStrategy as string | undefined) ?? (extractedCfgStream?.bdStrategy as string | undefined);
-  if (!existingBdStrategyStream && userMessageCountAfter <= 2) {
+  if (!existingBdStrategyStream && !explicitStrategyStream && userMessageCountAfter <= 2) {
     const mission = await classifyMissionIntent(tenantId, content);
     if (mission && mission.bdStrategy) {
       const conf: 'high' | 'medium' = mission.confidence >= 0.9 ? 'high' : 'medium';
@@ -968,11 +1049,18 @@ export async function* sendMessageStream(
     }).returning();
   });
 
-  // Update extractedConfig if proposal found
+  // Update extractedConfig if proposal found. Merge into existing instead of
+  // overwriting — preserves userExplicitBdStrategy staged by the explicit-
+  // strategy parser when the agent doesn't exist yet.
   if (proposalData) {
     await withTenant(tenantId, async (tx) => {
+      const [row] = await tx.select({ extractedConfig: conversations.extractedConfig })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .limit(1);
+      const existing = (row?.extractedConfig as Record<string, unknown> | null) ?? {};
       return tx.update(conversations)
-        .set({ extractedConfig: proposalData, updatedAt: new Date() })
+        .set({ extractedConfig: { ...existing, ...proposalData }, updatedAt: new Date() })
         .where(eq(conversations.id, conversationId));
     });
   }
@@ -1069,6 +1157,16 @@ export async function approveProposal(tenantId: string, conversationId: string, 
     }
   }
 
+  // Pull the user's chat-time strategy lock off the conversation so it
+  // becomes the new agent's source of truth. Without this, the lock the
+  // user picked via the A/B/C chips (parsed by parseExplicitStrategyReply
+  // and staged on conversations.extractedConfig because no agent existed
+  // yet) is silently dropped, the strategist runs unlocked, the LLM picks
+  // bdStrategy="hybrid", and both root steps end up in the saved pipeline.
+  const stagedExtracted = (conversation.extractedConfig as Record<string, unknown> | null) ?? {};
+  const stagedLock = stagedExtracted.userExplicitBdStrategy as
+    | 'hiring_signal' | 'industry_target' | 'hybrid' | undefined;
+
   // Create master agent
   const [agent] = await withTenant(tenantId, async (tx) => {
     return tx.insert(masterAgents).values({
@@ -1081,10 +1179,17 @@ export async function approveProposal(tenantId: string, conversationId: string, 
         ...((proposal.config as Record<string, unknown>) ?? {}),
         pipeline: proposal.pipeline,
         enabledAgents: (proposal.pipeline as Array<{ agentType: string }>)?.map(s => s.agentType) ?? [],
+        ...(stagedLock ? { userExplicitBdStrategy: stagedLock, bdStrategy: stagedLock } : {}),
       } as Record<string, unknown>,
       createdBy: userId,
     }).returning();
   });
+  if (stagedLock) {
+    logger.info(
+      { tenantId, masterAgentId: agent.id, userExplicitBdStrategy: stagedLock },
+      'Forwarded chat-time userExplicitBdStrategy onto new master agent',
+    );
+  }
 
   // Update conversation
   await withTenant(tenantId, async (tx) => {

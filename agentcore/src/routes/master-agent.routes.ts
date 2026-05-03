@@ -341,6 +341,57 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // POST /api/master-agents/:id/regenerate-strategy — Force the strategist to
+  // recompute config.salesStrategy. The normal Run path now reuses the saved
+  // strategy as-is (dispatch-only); this route is the only sanctioned way to
+  // discard the saved pipeline and rebuild it from scratch.
+  fastify.post<{ Params: { id: string } }>('/:id/regenerate-strategy', async (request, reply) => {
+    const { id } = request.params;
+
+    const [agent] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    const currentConfig = (agent.config as Record<string, unknown>) ?? {};
+    const { salesStrategy: _drop, ...configWithoutStrategy } = currentConfig;
+    void _drop;
+    await withTenant(request.tenantId, async (tx) => {
+      await tx.update(masterAgents)
+        .set({ config: configWithoutStrategy, updatedAt: new Date() })
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)));
+    });
+
+    const { StrategistAgent } = await import('../agents/strategist.agent.js');
+    const strategist = new StrategistAgent({ tenantId: request.tenantId, masterAgentId: id });
+    try {
+      const pipelineContext = (currentConfig.pipelineContext as PipelineContext | undefined) ?? {
+        useCase: agent.useCase as 'sales' | 'recruitment',
+        masterAgentId: id,
+        tenantId: request.tenantId,
+        missionText: agent.mission ?? undefined,
+      };
+      const result = await strategist.execute({
+        job: 'initialStrategy',
+        masterAgentId: id,
+        pipelineContext,
+        force: true,
+      });
+      await strategist.close();
+      logger.info(
+        { tenantId: request.tenantId, masterAgentId: id },
+        'Strategy regenerated via /regenerate-strategy',
+      );
+      return reply.status(200).send({ data: { status: 'regenerated', strategy: result.strategy } });
+    } catch (err) {
+      await strategist.close().catch(() => {});
+      logger.error({ err, tenantId: request.tenantId, masterAgentId: id }, 'Strategy regeneration failed');
+      throw err;
+    }
+  });
+
   // POST /api/master-agents/:id/stop — Stop all running agents
   fastify.post<{ Params: { id: string } }>('/:id/stop', async (request) => {
     const { id } = request.params;
@@ -449,24 +500,24 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   });
 
   // GET /api/master-agents/:id/companies — Companies discovered by this agent (paginated)
-  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>('/:id/companies', async (request) => {
+  //
+  // ?includeIncomplete=true returns every company including zero-completeness
+  // stubs (default hides anything with data_completeness <= 10). Hiring-signal
+  // job parsing creates a stub per company, but only ~10% finish enrichment;
+  // the dashboard's "show only with data" toggle defaults on so users see
+  // useful rows first. Toggle off to see the discovery firehose for diagnosis.
+  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string; includeIncomplete?: string } }>('/:id/companies', async (request) => {
     const { id } = request.params;
     const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
-    const { cursor } = request.query;
+    const { cursor, includeIncomplete } = request.query;
 
-    // Show every company discovered by this agent, regardless of enrichment
-    // state. The previous `data_completeness >= 10` filter silently hid all
-    // newly-discovered companies until the extension's fetch_company task
-    // completed — when that task failed or the extension was offline, the
-    // user could see only 1-2 enriched rows out of 20-30 discovered, with
-    // no way to tell the others existed. The dashboard renders empty
-    // industry/size/HQ fields gracefully and now exposes pipeline state
-    // honestly: discovered-but-unenriched companies show up so the user
-    // can see what's queued and diagnose extension-dispatch issues.
     const conditions = [
       eq(companies.masterAgentId, id),
       eq(companies.tenantId, request.tenantId),
     ];
+    if (includeIncomplete !== 'true') {
+      conditions.push(sql`COALESCE(${companies.dataCompleteness}, 0) > 10`);
+    }
     if (cursor) {
       try {
         const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString());

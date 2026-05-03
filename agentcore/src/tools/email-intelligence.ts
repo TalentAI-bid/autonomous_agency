@@ -99,12 +99,12 @@ class EmailIntelligenceEngine {
       if (!r.email) {
         return { email: null, confidence: 0, method: null, source: null };
       }
-      // Map probe outcome → confidence: SMTP-verified is high-confidence;
-      // catch-all guess is medium; everything else falls through above.
+      // Map probe outcome → confidence. Both `smtp_verified` and
+      // `cached_pattern` are now Reacher-verified per-person — catch-all
+      // results return null upstream so we never see them here.
       const confidence =
         r.method === 'smtp_verified' ? 95 :
         r.method === 'cached_pattern' ? 90 :
-        r.method === 'catch_all_guess' ? 70 :
         0;
       if (confidence < 70) {
         return { email: null, confidence: 0, method: null, source: null };

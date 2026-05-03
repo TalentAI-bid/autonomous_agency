@@ -28,6 +28,12 @@ const PATTERN_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h in-memory cache
 // enriches multiple companies on the same domain.
 const domainPatternCache = new Map<string, { templateId: string; verifiedAt: number }>();
 
+// In-memory catch-all cache: domains where Reacher reported is_catch_all=true.
+// Catch-all servers accept any local-part, so a "safe" reply is meaningless —
+// we skip these domains entirely to stop emitting unverifiable false-positives.
+const domainCatchAllCache = new Map<string, number>(); // domain → flaggedAt(ms)
+const CATCH_ALL_CACHE_TTL = 24 * 60 * 60 * 1000;
+
 // ── Pattern templates ────────────────────────────────────────────────────────
 // Templates are identified by string id (persisted in `domain_patterns.pattern`).
 // Adding new templates is safe — never rename existing ones.
@@ -167,6 +173,33 @@ export function hasCachedPattern(domain: string): boolean {
   return !!cached && Date.now() - cached.verifiedAt < PATTERN_CACHE_TTL;
 }
 
+/**
+ * Returns true if the domain is known to be catch-all (any local-part is
+ * accepted by SMTP). Reads memory cache first, then falls back to
+ * `domain_patterns.is_catch_all`.
+ *
+ * Catch-all domains are skipped entirely: a "safe" Reacher reply on a
+ * catch-all proves nothing about whether the actual mailbox exists, so any
+ * email we emit is a guess that frequently bounces in production.
+ */
+async function isDomainCatchAll(domain: string): Promise<boolean> {
+  const flaggedAt = domainCatchAllCache.get(domain);
+  if (flaggedAt && Date.now() - flaggedAt < CATCH_ALL_CACHE_TTL) return true;
+  try {
+    const [row] = await db.select({ isCatchAll: domainPatterns.isCatchAll })
+      .from(domainPatterns)
+      .where(and(eq(domainPatterns.domain, domain), eq(domainPatterns.isCatchAll, true)))
+      .limit(1);
+    if (row) {
+      domainCatchAllCache.set(domain, Date.now());
+      return true;
+    }
+  } catch (err) {
+    logger.debug({ err: err instanceof Error ? err.message : String(err), domain }, 'isDomainCatchAll: DB lookup failed');
+  }
+  return false;
+}
+
 interface CachedPattern { templateId: string }
 
 function isKnownTemplateId(id: string): boolean {
@@ -295,7 +328,7 @@ async function reacherCheck(candidate: string): Promise<SingleProbeResult> {
 
 export interface ProbeResult {
   email: string | null;
-  method: 'cached_pattern' | 'smtp_verified' | 'catch_all_guess' | 'catch_all_none' | 'exhausted' | 'no_patterns' | 'daily_limit';
+  method: 'cached_pattern' | 'smtp_verified' | 'catch_all' | 'cached_pattern_invalidated' | 'exhausted' | 'no_patterns' | 'daily_limit';
   attempts: number;
   templateId?: string;
 }
@@ -304,11 +337,14 @@ export interface ProbeResult {
  * Sequentially probe up to ~12 patterns against Reacher to discover the
  * working email pattern for a domain we don't yet know. Each probe consumes
  * one slot from the server-wide 300/day cap. On success, the winning pattern
- * is persisted to `domain_patterns` so future team members at this domain
- * skip SMTP entirely (see `applyCachedPatternToTeam`).
+ * is persisted to `domain_patterns`. Future team members at this domain
+ * still re-verify per-person (see `applyCachedPatternToTeam`).
  *
- * If a pattern is already cached (memory or DB) for this domain, returns it
- * immediately with zero SMTP cost.
+ * Catch-all domains are flagged and skipped — a "safe" Reacher reply on a
+ * catch-all means nothing because the SMTP server accepts any local-part.
+ *
+ * Cache hits also re-verify per person: a pattern that worked for one
+ * teammate doesn't guarantee the new person actually has a mailbox.
  */
 export async function probePatternForDomain(
   firstName: string,
@@ -321,19 +357,43 @@ export async function probePatternForDomain(
     return { email: null, method: 'no_patterns', attempts: 0 };
   }
 
-  // 1. Cache hit (memory or DB) — skip Reacher entirely
+  // 0. Catch-all short-circuit — never enrich
+  if (await isDomainCatchAll(domain)) {
+    logger.info({ domain }, 'probe: skipped (domain known catch-all)');
+    return { email: null, method: 'catch_all', attempts: 0 };
+  }
+
+  // 1. Cache hit: build candidate from cached pattern, then verify per-person
+  // (the cached pattern was right for someone — but the new person may not
+  // have a mailbox yet at this domain).
   const cached = await loadCachedPattern(domain);
   if (cached) {
-    const email = buildFromTemplate(cached.templateId, firstName, lastName, domain);
-    if (email) {
-      logger.info({ email, domain, templateId: cached.templateId }, 'probe: cache hit, no SMTP');
-      return { email, method: 'cached_pattern', attempts: 0, templateId: cached.templateId };
+    const candidate = buildFromTemplate(cached.templateId, firstName, lastName, domain);
+    if (candidate) {
+      const slotOk = await tryConsumeReacherSlot();
+      if (!slotOk) {
+        logger.info({ domain }, 'probe: cache hit but Reacher daily cap reached');
+        return { email: null, method: 'daily_limit', attempts: 0 };
+      }
+      const r = await reacherCheck(candidate);
+      if (r.status === 'safe') {
+        logger.info({ candidate, domain, templateId: cached.templateId }, 'probe: cache hit verified per-person');
+        return { email: candidate, method: 'cached_pattern', attempts: 1, templateId: cached.templateId };
+      }
+      if (r.status === 'catch_all') {
+        domainCatchAllCache.set(domain, Date.now());
+        await persistDomainPattern(domain, cached.templateId, { isCatchAll: true, mxProvider: r.raw?.mx?.records?.[0] });
+        logger.info({ domain, candidate }, 'probe: cache hit revealed catch-all, flagging and skipping');
+        return { email: null, method: 'catch_all', attempts: 1 };
+      }
+      // Cached pattern didn't verify for this person — fall through to full
+      // probe. The pattern stays cached (it worked for someone before).
+      logger.info({ candidate, domain, status: r.status }, 'probe: cache hit failed per-person verify, running full probe');
     }
   }
 
   // 2. Sequential probe — 1s gap between attempts to respect Reacher rate limits
   let attempts = 0;
-  let catchAllDetected = false;
   for (let i = 0; i < candidates.length; i++) {
     const { templateId, email: candidate } = candidates[i]!;
     const slotOk = await tryConsumeReacherSlot();
@@ -346,13 +406,11 @@ export async function probePatternForDomain(
     const result = await reacherCheck(candidate);
 
     if (result.status === 'catch_all') {
-      catchAllDetected = true;
       const mxProvider = result.raw?.mx?.records?.[0];
-      // Use first.last as the canonical guess for catch-all domains.
-      await persistDomainPattern(domain, 'first.last', { isCatchAll: true, mxProvider });
-      const guess = buildFromTemplate('first.last', firstName, lastName, domain) ?? candidate;
-      logger.info({ domain, candidate: guess }, 'probe: catch-all domain, returning first.last (cached)');
-      return { email: guess, method: 'catch_all_guess', attempts, templateId: 'first.last' };
+      domainCatchAllCache.set(domain, Date.now());
+      await persistDomainPattern(domain, templateId, { isCatchAll: true, mxProvider });
+      logger.info({ domain, candidate }, 'probe: catch-all domain detected, flagging and returning null');
+      return { email: null, method: 'catch_all', attempts };
     }
 
     if (result.status === 'safe') {
@@ -368,7 +426,7 @@ export async function probePatternForDomain(
     }
   }
 
-  return { email: null, method: catchAllDetected ? 'catch_all_none' : 'exhausted', attempts };
+  return { email: null, method: 'exhausted', attempts };
 }
 
 export interface TeamMember {
@@ -380,35 +438,74 @@ export interface TeamMember {
 export interface TeamMemberWithEmail<T extends TeamMember> {
   member: T;
   email: string | null;
-  method: 'cached_pattern' | 'no_pattern' | 'no_name';
+  method: 'cached_pattern' | 'no_pattern' | 'no_name' | 'catch_all' | 'cached_pattern_failed' | 'daily_limit';
 }
 
 /**
- * Build emails for an entire team using the cached pattern for the domain.
- * ZERO SMTP cost — assumes `probePatternForDomain` has already confirmed the
- * pattern (or that one was previously persisted to `domain_patterns`).
+ * Build emails for an entire team using the cached pattern for the domain,
+ * verifying each candidate against Reacher per-person.
  *
- * If no cached pattern exists, every member's email returns `null` with
- * method `no_pattern` so the caller can fall back to per-member probing.
+ * Why per-person verify (not zero-cost as before): a pattern that worked for
+ * one teammate just proves the pattern; it doesn't prove that this specific
+ * new person has a mailbox. Reusing the pattern blindly produces syntactically
+ * valid but undeliverable emails (false positives → bounces). Each member now
+ * costs one Reacher slot, but every email returned is SMTP-verified.
+ *
+ * Catch-all domains are skipped wholesale — no Reacher calls are made.
  */
 export async function applyCachedPatternToTeam<T extends TeamMember>(
   members: T[],
   domain: string,
 ): Promise<TeamMemberWithEmail<T>[]> {
+  // Catch-all → return null for every member, no Reacher cost
+  if (await isDomainCatchAll(domain)) {
+    return members.map((member) => ({ member, email: null, method: 'catch_all' as const }));
+  }
+
   const cached = await loadCachedPattern(domain);
   if (!cached) {
     return members.map((member) => ({ member, email: null, method: 'no_pattern' as const }));
   }
 
-  return members.map((member) => {
+  const out: TeamMemberWithEmail<T>[] = [];
+  for (const member of members) {
     const first = (member.firstName ?? '').toString();
     const last = (member.lastName ?? '').toString();
     if (!first || !last) {
-      return { member, email: null, method: 'no_name' as const };
+      out.push({ member, email: null, method: 'no_name' as const });
+      continue;
     }
-    const email = buildFromTemplate(cached.templateId, first, last, domain);
-    return { member, email, method: 'cached_pattern' as const };
-  });
+    const candidate = buildFromTemplate(cached.templateId, first, last, domain);
+    if (!candidate) {
+      out.push({ member, email: null, method: 'no_pattern' as const });
+      continue;
+    }
+    const slotOk = await tryConsumeReacherSlot();
+    if (!slotOk) {
+      out.push({ member, email: null, method: 'daily_limit' as const });
+      continue;
+    }
+    const r = await reacherCheck(candidate);
+    if (r.status === 'safe') {
+      out.push({ member, email: candidate, method: 'cached_pattern' as const });
+    } else if (r.status === 'catch_all') {
+      // Domain became catch-all — flag and bail; remaining members get null
+      domainCatchAllCache.set(domain, Date.now());
+      await persistDomainPattern(domain, cached.templateId, { isCatchAll: true, mxProvider: r.raw?.mx?.records?.[0] });
+      out.push({ member, email: null, method: 'catch_all' as const });
+      // Mark every remaining member as catch_all without Reacher cost
+      const idx = out.length;
+      for (let i = idx; i < members.length; i++) {
+        out.push({ member: members[i]!, email: null, method: 'catch_all' as const });
+      }
+      return out;
+    } else {
+      out.push({ member, email: null, method: 'cached_pattern_failed' as const });
+    }
+    // 1-second gap between Reacher checks to respect SMTP soft limits
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return out;
 }
 
 /**

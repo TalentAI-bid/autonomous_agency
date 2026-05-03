@@ -228,6 +228,16 @@ async function start() {
       logger.info('Circuit breaker state cleared');
     } catch { /* non-critical */ }
 
+    // Periodic re-drainer for batched extension tasks: wakes up tasks whose
+    // dispatchAfter just passed (search_companies / fetch_company fan-outs
+    // are staggered into batches of 10, see enqueueExtensionTaskBatch).
+    try {
+      const { startScheduledDispatcher } = await import('./services/extension-dispatcher.js');
+      startScheduledDispatcher();
+    } catch (err) {
+      logger.warn({ err }, 'Failed to start scheduled extension dispatcher');
+    }
+
     // Re-register workers and re-schedule repeating jobs for tenants with running agents (survives PM2 restarts)
     try {
       const allTenants = await db.select({ id: tenants.id }).from(tenants);

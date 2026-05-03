@@ -58,7 +58,15 @@ export default function AgentDetailPage() {
   const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 100 });
   const { data: stats } = useAgentStats(id);
   const { data: emails } = useAgentEmails(id);
-  const { data: companiesData } = useAgentCompanies(id);
+  // Companies tab state — toggle for the data-completeness filter (default
+  // hides zero/low-completeness stubs) + cursor stack for paging back/forward.
+  const [showOnlyWithData, setShowOnlyWithData] = useState(true);
+  const [cursorStack, setCursorStack] = useState<Array<string | null>>([null]);
+  const currentCursor = cursorStack[cursorStack.length - 1] ?? null;
+  const { data: companiesData } = useAgentCompanies(id, {
+    includeIncomplete: !showOnlyWithData,
+    cursor: currentCursor,
+  });
   const { data: documentsData } = useAgentDocuments(id);
   const startAgent = useStartAgent();
   const stopAgent = useStopAgent();
@@ -73,7 +81,8 @@ export default function AgentDetailPage() {
   const contacts = contactsRes?.data ?? [];
   const totalContacts = stats?.totalContacts ?? contactsRes?.pagination?.total ?? 0;
   const config = (agent?.config ?? {}) as Record<string, unknown>;
-  const agentCompanies = companiesData ?? [];
+  const agentCompanies = companiesData?.data ?? [];
+  const companiesPagination = companiesData?.pagination;
   const agentDocuments = documentsData ?? [];
 
   async function handleStart() {
@@ -403,16 +412,28 @@ export default function AgentDetailPage() {
 
       {activeTab === 'companies' && (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Building2 className="w-4 h-4" />
-              Companies ({agentCompanies.length})
+              Companies ({agentCompanies.length}{companiesPagination?.hasMore ? '+' : ''})
             </CardTitle>
+            <button
+              type="button"
+              onClick={() => {
+                setShowOnlyWithData((v) => !v);
+                setCursorStack([null]);
+              }}
+              className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
+            >
+              {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
+            </button>
           </CardHeader>
           <CardContent>
             {agentCompanies.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
-                No companies discovered yet.
+                {showOnlyWithData
+                  ? 'No enriched companies yet. Toggle "Show all" to see discovered-but-unenriched stubs.'
+                  : 'No companies discovered yet.'}
               </p>
             ) : (
               <div className="grid gap-3">
@@ -529,6 +550,33 @@ export default function AgentDetailPage() {
                     </Link>
                   );
                 })}
+              </div>
+            )}
+            {(cursorStack.length > 1 || companiesPagination?.hasMore) && (
+              <div className="flex items-center justify-between pt-4 mt-3 border-t">
+                <button
+                  type="button"
+                  disabled={cursorStack.length <= 1}
+                  onClick={() => setCursorStack((s) => s.slice(0, -1))}
+                  className="text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ← Previous
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  Page {cursorStack.length}
+                </span>
+                <button
+                  type="button"
+                  disabled={!companiesPagination?.hasMore || !companiesPagination?.nextCursor}
+                  onClick={() => {
+                    if (companiesPagination?.nextCursor) {
+                      setCursorStack((s) => [...s, companiesPagination.nextCursor!]);
+                    }
+                  }}
+                  className="text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next →
+                </button>
               </div>
             )}
           </CardContent>

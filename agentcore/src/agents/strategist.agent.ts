@@ -43,6 +43,7 @@ export class StrategistAgent extends BaseAgent {
     // Load mission AND user-chosen strategy from master agent.
     let mission: string | undefined;
     let userExplicitBdStrategy: SalesStrategy['bdStrategy'] | undefined;
+    let savedStrategy: SalesStrategy | undefined;
     try {
       const [agent] = await withTenant(this.tenantId, async (tx) => {
         return tx.select({ mission: masterAgents.mission, config: masterAgents.config }).from(masterAgents)
@@ -56,7 +57,23 @@ export class StrategistAgent extends BaseAgent {
         userExplicitBdStrategy = explicit;
         logger.info({ masterAgentId, userExplicitBdStrategy }, 'Strategist: user-locked bdStrategy detected');
       }
+      savedStrategy = cfg.salesStrategy as SalesStrategy | undefined;
     } catch { /* continue without mission */ }
+
+    // Defense-in-depth idempotency: the strategy is generated ONCE during
+    // chat setup. If a saved strategy with pipelineSteps already exists,
+    // return it without calling the LLM or overwriting config. The only
+    // sanctioned path to recompute is POST /:id/regenerate-strategy, which
+    // sets `force: true` on the input.
+    const force = input.force === true;
+    if (!force && savedStrategy?.pipelineSteps?.length) {
+      logger.info(
+        { masterAgentId, stepCount: savedStrategy.pipelineSteps.length },
+        'Strategist: saved salesStrategy present — short-circuiting (use force=true to regenerate)',
+      );
+      await this.clearCurrentAction();
+      return { strategy: savedStrategy, status: 'reused' };
+    }
 
     // Call LLM for strategy. Wrap in retry + deterministic fallback so the
     // strategist always returns a usable SalesStrategy, even when the LLM is

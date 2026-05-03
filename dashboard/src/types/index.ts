@@ -290,8 +290,8 @@ export interface ApiError {
 export interface PaginatedResponse<T> {
   data: T[];
   pagination: {
-    total: number;
-    cursor?: string;
+    total?: number;
+    nextCursor?: string | null;
     hasMore: boolean;
   };
 }

@@ -1,16 +1,134 @@
 import { eq, and, sql, count } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { masterAgents, opportunities } from '../db/schema/index.js';
+import { masterAgents, opportunities, agentActivityLog } from '../db/schema/index.js';
 import {
   buildInitialStrategySystemPrompt,
   buildInitialStrategyUserPrompt,
 } from '../prompts/strategist.prompt.js';
-import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
+import type { PipelineContext, SalesStrategy, PipelineStepParams } from '../types/pipeline-context.js';
 import { createRedisConnection } from '../queues/setup.js';
 import { SMART_MODEL } from '../tools/together-ai.tool.js';
 import { detectMissionStrategyFromText } from '../utils/mission-intent.js';
 import logger from '../utils/logger.js';
+
+// ─── Validation + defaults for the new strategist contract ──────────────────
+
+const DEFAULT_NEGATIVE_KEYWORDS = [
+  'association', 'federation', 'chamber', 'community', 'meetup', 'club',
+  'conference', 'summit', 'forum', 'expo', 'event series',
+  'magazine', 'newsletter', 'podcast', 'media', 'publication', 'journal', 'review',
+  'university', 'school', 'academy', 'lab', 'research center', 'department',
+  'student', 'alumni', 'msc', 'phd', 'course', 'bootcamp', 'training',
+  'book', 'publisher', 'press',
+  'ngo', 'non-profit', 'nonprofit',
+  'freelancer', 'self-employed',
+  'headhunter', 'recruitment agency', 'staffing agency',
+  'incubator', 'accelerator',
+];
+
+const DEFAULT_FORBIDDEN_PHRASES = [
+  'appears to', 'may need', 'likely needs', 'possibly', 'could benefit from',
+  'limited team', 'small team managing', 'no visible',
+  'website appears', 'may have', 'potential need', 'seems to',
+];
+
+const DEFAULT_GROUNDING_INSTRUCTION =
+  "Extract only signals that are directly supported by an exact phrase in the input. " +
+  "Each signal MUST include a 'citation' field with the supporting substring. " +
+  "If no signal is supported by the input, return an empty signals array. " +
+  "An empty output is the correct, honest answer for most companies. " +
+  "Never fabricate pain points, tech gaps, or outreach angles. " +
+  "Output without citations will be rejected by the validation layer and logged as a hallucination.";
+
+const DEFAULT_ICS = (): NonNullable<SalesStrategy['idealCustomerShape']> => ({
+  sizeRange: { min: 20, max: 500 },
+  preferredStages: [],
+  buyerSignals: [],
+  antiSignals: ['association', 'media', 'meetup', 'university', 'freelancer'],
+  geographicScope: ['Global'],
+  buyerFunctions: ['CEO', 'CTO', 'Founder'],
+});
+
+export function validateStrategistOutput(strategy: SalesStrategy): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!strategy.idealCustomerShape) errors.push('missing idealCustomerShape');
+  if (!strategy.idealCustomerShape?.sizeRange) errors.push('missing idealCustomerShape.sizeRange');
+  if (!strategy.idealCustomerShape?.buyerFunctions?.length) errors.push('idealCustomerShape.buyerFunctions empty');
+  if (!strategy.idealCustomerShape?.antiSignals?.length) errors.push('idealCustomerShape.antiSignals empty');
+  if (!strategy.queryDesignNotes) errors.push('missing queryDesignNotes');
+
+  for (const step of strategy.pipelineSteps ?? []) {
+    const isDiscoveryStep = step.tool === 'LINKEDIN_EXTENSION' || step.tool === 'CRAWL4AI';
+    const isAnalysisStep = step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING' || step.tool === 'CRAWL4AI';
+    const params = step.params as PipelineStepParams | undefined;
+
+    if (isDiscoveryStep) {
+      if (!params?.negativeKeywords?.length) errors.push(`step ${step.id} missing params.negativeKeywords`);
+      if (!params?.requiredAttributes) errors.push(`step ${step.id} missing params.requiredAttributes`);
+    }
+    if (isAnalysisStep) {
+      if (!params?.groundingRequired) errors.push(`step ${step.id} missing params.groundingRequired`);
+      if (!params?.outputContract) errors.push(`step ${step.id} missing params.outputContract`);
+    }
+    if (step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING') {
+      if (!params?.instruction) errors.push(`step ${step.id} missing params.instruction`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Mutate-in-place: fill any missing required params on each pipelineStep with
+ * deterministic defaults. Used as a last-resort safety net so a downstream
+ * dispatcher never sees a strategy without the contract fields.
+ */
+export function fillStrategyDefaults(strategy: SalesStrategy): SalesStrategy {
+  if (!strategy.idealCustomerShape) strategy.idealCustomerShape = DEFAULT_ICS();
+  if (!strategy.icpSegmentation) strategy.icpSegmentation = [];
+  if (!strategy.queryDesignNotes) {
+    strategy.queryDesignNotes =
+      'Downstream agents must produce grounded output only. Empty signals/painPoints arrays are ' +
+      'preferred over fabricated content. Every painPoint and outreachAngle must include a citation ' +
+      'field referencing the exact phrase from scraped input that supports it.';
+  }
+
+  const ics = strategy.idealCustomerShape;
+  const requiredAttributes = {
+    minSize: ics.sizeRange.min,
+    maxSize: ics.sizeRange.max,
+    geographicScope: ics.geographicScope,
+  };
+  const outputContract = {
+    noFabrication: true,
+    requireCitations: true,
+    forbiddenPhrases: DEFAULT_FORBIDDEN_PHRASES,
+    allowEmptyOutput: true,
+  };
+
+  for (const step of strategy.pipelineSteps ?? []) {
+    const params = (step.params ?? {}) as PipelineStepParams;
+    const isDiscoveryStep = step.tool === 'LINKEDIN_EXTENSION' || step.tool === 'CRAWL4AI';
+    const isAnalysisStep = step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING' || step.tool === 'CRAWL4AI';
+
+    if (isDiscoveryStep) {
+      if (!params.negativeKeywords?.length) params.negativeKeywords = [...DEFAULT_NEGATIVE_KEYWORDS];
+      if (!params.requiredAttributes) params.requiredAttributes = requiredAttributes;
+    }
+    if (isAnalysisStep) {
+      if (!params.groundingRequired) params.groundingRequired = true;
+      if (!params.outputContract) params.outputContract = outputContract;
+    }
+    if (step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING') {
+      if (!params.instruction) params.instruction = DEFAULT_GROUNDING_INSTRUCTION;
+    }
+    step.params = params;
+  }
+
+  return strategy;
+}
 
 const redis = createRedisConnection();
 
@@ -65,7 +183,34 @@ export class StrategistAgent extends BaseAgent {
     // return it without calling the LLM or overwriting config. The only
     // sanctioned path to recompute is POST /:id/regenerate-strategy, which
     // sets `force: true` on the input.
-    const force = input.force === true;
+    let force = input.force === true;
+
+    // PART 7 — lazy migration: existing strategies that pre-date the
+    // idealCustomerShape contract get auto-regenerated the first time they
+    // run. Without this, downstream validation would reject them.
+    const isLegacyShape = savedStrategy?.pipelineSteps?.length && !savedStrategy.idealCustomerShape;
+    if (isLegacyShape && !force) {
+      logger.info(
+        { masterAgentId },
+        'Strategist: saved strategy missing idealCustomerShape — forcing regeneration (lazy migration)',
+      );
+      try {
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.insert(agentActivityLog).values({
+            tenantId: this.tenantId,
+            masterAgentId,
+            agentType: 'strategist',
+            action: 'lazy_migration_idealCustomerShape',
+            status: 'started',
+            details: { reason: 'saved strategy lacks idealCustomerShape' },
+          });
+        });
+      } catch (err) {
+        logger.debug({ err }, 'Strategist: failed to log lazy-migration event (non-fatal)');
+      }
+      force = true;
+    }
+
     if (!force && savedStrategy?.pipelineSteps?.length) {
       logger.info(
         { masterAgentId, stepCount: savedStrategy.pipelineSteps.length },
@@ -197,8 +342,10 @@ export class StrategistAgent extends BaseAgent {
   }
 
   /**
-   * Run extractJSON with a single retry, then fall back to a deterministic
-   * strategy derived from the mission text. Never throws — the master-agent
+   * Run extractJSON with a single retry on JSON-parse failure, validate the
+   * structured contract (idealCustomerShape + per-step grounding params), and
+   * re-prompt the LLM ONCE if validation fails. Final safety net: deterministic
+   * strategy with defaults filled in. Never throws — the master-agent
    * discovery gate depends on ALWAYS having a strategist-produced bdStrategy.
    */
   private async generateStrategyWithFallback(
@@ -207,34 +354,112 @@ export class StrategistAgent extends BaseAgent {
     masterAgentId: string,
     forcedBdStrategy?: SalesStrategy['bdStrategy'],
   ): Promise<SalesStrategy> {
-    const messages = [
+    const baseMessages = [
       { role: 'system' as const, content: buildInitialStrategySystemPrompt(forcedBdStrategy) },
       { role: 'user' as const, content: buildInitialStrategyUserPrompt(ctx, mission) },
     ];
 
-    const maxAttempts = 2;
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // First call — extract JSON with the existing 2-attempt JSON-parse retry.
+    let strategy: SalesStrategy | null = null;
+    let firstErr: unknown;
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        return await this.extractJSON<SalesStrategy>(
-          messages,
+        strategy = await this.extractJSON<SalesStrategy>(
+          baseMessages,
           undefined,
-          { model: SMART_MODEL, temperature: 0.4 },
+          { model: SMART_MODEL, temperature: 0.2 },
         );
+        break;
       } catch (err) {
-        lastErr = err;
-        logger.warn(
-          { err, attempt, maxAttempts, masterAgentId },
-          'StrategistAgent: extractJSON attempt failed',
-        );
+        firstErr = err;
+        logger.warn({ err, attempt, masterAgentId }, 'StrategistAgent: extractJSON attempt failed');
       }
     }
 
-    logger.error(
-      { err: lastErr, masterAgentId, missionExcerpt: (mission ?? '').slice(0, 200) },
-      'StrategistAgent: all extractJSON attempts failed — using deterministic fallback strategy',
+    if (!strategy) {
+      logger.error(
+        { err: firstErr, masterAgentId, missionExcerpt: (mission ?? '').slice(0, 200) },
+        'StrategistAgent: all extractJSON attempts failed — using deterministic fallback strategy',
+      );
+      return fillStrategyDefaults(this.buildDeterministicStrategy(mission));
+    }
+
+    // Schema-level validation. If invalid, log and re-prompt ONCE with errors.
+    const firstCheck = validateStrategistOutput(strategy);
+    if (firstCheck.valid) return strategy;
+
+    logger.warn(
+      { masterAgentId, errors: firstCheck.errors },
+      'StrategistAgent: validation failed — re-prompting LLM once',
     );
-    return this.buildDeterministicStrategy(mission);
+    try {
+      await withTenant(this.tenantId, async (tx) => {
+        await tx.insert(agentActivityLog).values({
+          tenantId: this.tenantId,
+          masterAgentId,
+          agentType: 'strategist',
+          action: 'validation_failed',
+          status: 'failed',
+          details: { attempt: 'first', errors: firstCheck.errors },
+        });
+      });
+    } catch (err) {
+      logger.debug({ err }, 'Strategist: failed to log validation_failed (non-fatal)');
+    }
+
+    const retryMessages = [
+      ...baseMessages,
+      { role: 'assistant' as const, content: JSON.stringify(strategy) },
+      {
+        role: 'user' as const,
+        content:
+          'Your previous strategy was missing the following required fields: ' +
+          firstCheck.errors.join('; ') +
+          '. Re-emit the COMPLETE strategy with these fields filled in. Same JSON format.',
+      },
+    ];
+
+    let retried: SalesStrategy | null = null;
+    try {
+      retried = await this.extractJSON<SalesStrategy>(
+        retryMessages,
+        undefined,
+        { model: SMART_MODEL, temperature: 0.2 },
+      );
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'StrategistAgent: re-prompt extractJSON failed');
+    }
+
+    if (retried) {
+      const secondCheck = validateStrategistOutput(retried);
+      if (secondCheck.valid) {
+        logger.info({ masterAgentId }, 'StrategistAgent: re-prompt produced valid strategy');
+        return retried;
+      }
+      logger.warn(
+        { masterAgentId, errors: secondCheck.errors },
+        'StrategistAgent: re-prompt still invalid — falling back to defaults',
+      );
+      try {
+        await withTenant(this.tenantId, async (tx) => {
+          await tx.insert(agentActivityLog).values({
+            tenantId: this.tenantId,
+            masterAgentId,
+            agentType: 'strategist',
+            action: 'validation_failed',
+            status: 'failed',
+            details: { attempt: 'retry', errors: secondCheck.errors },
+          });
+        });
+      } catch (err) {
+        logger.debug({ err }, 'Strategist: failed to log retry validation_failed (non-fatal)');
+      }
+      // Take the retried strategy (closer to LLM intent) and fill missing pieces.
+      return fillStrategyDefaults(retried);
+    }
+
+    // Both LLM passes failed validation; patch the first response with defaults.
+    return fillStrategyDefaults(strategy);
   }
 
   /**
@@ -259,6 +484,12 @@ export class StrategistAgent extends BaseAgent {
       opportunitySearchQueries: [],
       hiringKeywords: [],
       pipelineSteps: this.buildDeterministicPipelineSteps(bdStrategy),
+      idealCustomerShape: DEFAULT_ICS(),
+      icpSegmentation: [],
+      queryDesignNotes:
+        'Downstream agents must produce grounded output only. Empty signals/painPoints arrays are ' +
+        'preferred over fabricated content. Every painPoint and outreachAngle must include a citation ' +
+        'field referencing the exact phrase from scraped input that supports it.',
     };
   }
 

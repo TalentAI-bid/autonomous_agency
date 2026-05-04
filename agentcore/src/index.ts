@@ -51,6 +51,7 @@ import teamRoutes from './routes/team.routes.js';
 import copilotRoutes from './routes/copilot.routes.js';
 import exportRoutes from './routes/export.routes.js';
 import triageRoutes from './routes/triage.routes.js';
+import followupRoutes from './routes/followup.routes.js';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -185,6 +186,7 @@ async function buildApp() {
   await fastify.register(copilotRoutes, { prefix: '/api/copilot' });
   await fastify.register(exportRoutes, { prefix: '/api/export' });
   await fastify.register(triageRoutes, { prefix: '/api/triage' });
+  await fastify.register(followupRoutes, { prefix: '/api/followup' });
 
   // Tracking pixel route — registered WITHOUT /api prefix (email clients hit this directly)
   await fastify.register(trackingRoutes, { prefix: '/track' });

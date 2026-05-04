@@ -110,10 +110,67 @@ export interface SalesStrategy {
     tool: 'LINKEDIN_EXTENSION' | 'CRAWL4AI' | 'LLM_ANALYSIS' | 'REACHER' | 'EMAIL_PATTERN' | 'SCORING';
     action: string;
     dependsOn: string[];
-    params?: Record<string, unknown>;
+    params?: PipelineStepParams;
   }>;
   hiringKeywords?: string[];
   targetTech?: string[];
+
+  /**
+   * Concrete shape of a "good lead" for this seller. Drives both the
+   * strategist's downstream-step params (negativeKeywords, requiredAttributes)
+   * and the company-triage seller profile.
+   */
+  idealCustomerShape?: {
+    sizeRange: { min: number; max: number };
+    preferredStages: string[];
+    buyerSignals: string[];
+    antiSignals: string[];
+    geographicScope: string[];
+    buyerFunctions: string[];
+  };
+
+  /**
+   * If the mission combines multiple distinct ICPs, the strategist surfaces
+   * the suggested split so the dashboard can prompt the user to spin up
+   * additional agents. Empty when the mission is already a single ICP.
+   */
+  icpSegmentation?: Array<{
+    name: string;
+    rationale: string;
+    suggestedSeparateAgent: boolean;
+  }>;
+
+  queryDesignNotes?: string;
+}
+
+/**
+ * Per-step params shape. The dispatcher routes purely by `tool` + `action`,
+ * so these are always optional — but for the discovery and analysis tools
+ * they are MANDATORY at strategy validation time. See validateStrategistOutput.
+ */
+export interface PipelineStepParams {
+  // Free-form params still allowed (industries, location, jobTitles, etc.)
+  [key: string]: unknown;
+
+  // Mandatory for LINKEDIN_EXTENSION + CRAWL4AI discovery steps
+  negativeKeywords?: string[];
+  requiredAttributes?: {
+    minSize: number;
+    maxSize: number;
+    geographicScope: string[];
+  };
+
+  // Mandatory for LLM_ANALYSIS, SCORING, CRAWL4AI analysis steps
+  groundingRequired?: boolean;
+  outputContract?: {
+    noFabrication: boolean;
+    requireCitations: boolean;
+    forbiddenPhrases: string[];
+    allowEmptyOutput: boolean;
+  };
+
+  // Mandatory for LLM_ANALYSIS and SCORING
+  instruction?: string;
 }
 
 /**

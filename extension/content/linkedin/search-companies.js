@@ -217,8 +217,32 @@
       };
     }
 
-    console.log('[TalentAI cs] li/search done', { extracted: companies.length, matchedSelector });
-    return { companies, debug: { matchedSelector, cardsScanned: cards.length, extracted: companies.length } };
+    // ─── Client-side negative-keyword filter (PART 6B) ──────────────────────
+    // Strategist-emitted params.negativeKeywords ride along on extension_tasks.params.
+    // Mark — don't drop — so agentcore can audit what was filtered. The
+    // server-side pre-save filter (extension-dispatcher.ts) re-applies this
+    // as defense in depth.
+    const negativeKeywords = Array.isArray(params?.negativeKeywords)
+      ? params.negativeKeywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean)
+      : [];
+    let clientFiltered = 0;
+    if (negativeKeywords.length) {
+      for (const c of companies) {
+        const haystack = [c.name, c.industry, (c.rawMeta || []).join(' ')]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        const hit = negativeKeywords.find((kw) => kw && haystack.includes(kw));
+        if (hit) {
+          c.filteredOut = true;
+          c.filterReason = `matched negative keyword: ${hit}`;
+          clientFiltered++;
+        }
+      }
+    }
+
+    console.log('[TalentAI cs] li/search done', { extracted: companies.length, clientFiltered, matchedSelector });
+    return { companies, debug: { matchedSelector, cardsScanned: cards.length, extracted: companies.length, clientFiltered } };
   };
 
   // ─── Diagnostics ───────────────────────────────────────────────────────────

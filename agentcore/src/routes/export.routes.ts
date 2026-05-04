@@ -525,13 +525,20 @@ function buildRepliesSheet(workbook: ExcelJS.Workbook, rows: ReplyRow[]): void {
   applyHeaderStyle(sheet);
 }
 
-// ─── Streaming helper ───────────────────────────────────────────────────────
-
-async function streamWorkbook(reply: FastifyReply, workbook: ExcelJS.Workbook): Promise<void> {
-  // Stream the workbook to the raw response so we don't buffer the full
-  // file in memory for large exports.
-  await workbook.xlsx.write(reply.raw);
-  reply.raw.end();
+// ─── Send helper ────────────────────────────────────────────────────────────
+//
+// Writing to `reply.raw` directly bypasses the Fastify response lifecycle,
+// which means @fastify/cors never gets a chance to add the
+// Access-Control-Allow-Origin header. The browser then rejects the response
+// with a generic CORS error even though the request itself was authorized.
+// For workbooks of typical size (≤ a few MB for 500–5000 rows) the buffer
+// path is fast enough; we'd only revisit streaming if exports start crossing
+// tens of MB.
+async function sendWorkbook(reply: FastifyReply, workbook: ExcelJS.Workbook): Promise<void> {
+  const buffer = await workbook.xlsx.writeBuffer();
+  reply
+    .type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    .send(Buffer.from(buffer));
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
@@ -552,7 +559,7 @@ export default async function exportRoutes(fastify: FastifyInstance) {
       workbook.created = new Date();
       buildCompaniesSheet(workbook, rows);
       setXlsxHeaders(reply, 'companies');
-      await streamWorkbook(reply, workbook);
+      await sendWorkbook(reply, workbook);
     },
   );
 
@@ -569,7 +576,7 @@ export default async function exportRoutes(fastify: FastifyInstance) {
       workbook.created = new Date();
       buildContactsSheet(workbook, rows);
       setXlsxHeaders(reply, 'contacts');
-      await streamWorkbook(reply, workbook);
+      await sendWorkbook(reply, workbook);
     },
   );
 
@@ -586,7 +593,7 @@ export default async function exportRoutes(fastify: FastifyInstance) {
       workbook.created = new Date();
       buildEmailsSentSheet(workbook, rows);
       setXlsxHeaders(reply, 'emails-sent');
-      await streamWorkbook(reply, workbook);
+      await sendWorkbook(reply, workbook);
     },
   );
 
@@ -630,7 +637,7 @@ export default async function exportRoutes(fastify: FastifyInstance) {
       buildEmailsSentSheet(workbook, emailsSentRows);
       buildRepliesSheet(workbook, repliesRows);
       setXlsxHeaders(reply, `full-batch-${masterAgentId.slice(0, 8)}`);
-      await streamWorkbook(reply, workbook);
+      await sendWorkbook(reply, workbook);
     },
   );
 }

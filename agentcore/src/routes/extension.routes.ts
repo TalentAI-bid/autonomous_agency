@@ -18,6 +18,7 @@ import { sanitizePersonName } from '../services/extension-dispatcher.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import { dispatchJob } from '../services/queue.service.js';
 import { ensureDeal } from '../services/crm-activity.service.js';
+import { triageCompany } from '../services/company-triage.service.js';
 import logger from '../utils/logger.js';
 
 function generateApiKey(): { key: string; hash: string } {
@@ -365,6 +366,18 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
               overrideAgentId,
             );
             companyId = savedCompany.id;
+            try {
+              await triageCompany({
+                tenantId: request.tenantId,
+                companyId: savedCompany.id,
+                masterAgentId: overrideAgentId,
+              });
+            } catch (err) {
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
+                'manual_add_profile: triage failed (non-fatal)',
+              );
+            }
           } catch (err) {
             logger.warn({ err: err instanceof Error ? err.message : String(err), companyName }, 'manual_add_profile: company create failed');
           }
@@ -437,6 +450,18 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
               best.id,
             );
             companyId = savedCompany.id;
+            try {
+              await triageCompany({
+                tenantId: request.tenantId,
+                companyId: savedCompany.id,
+                masterAgentId: best.id,
+              });
+            } catch (err) {
+              logger.warn(
+                { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
+                'manual_add_profile: triage failed (non-fatal, fallback path)',
+              );
+            }
           } catch (err) {
             logger.warn({ err: err instanceof Error ? err.message : String(err), companyName }, 'manual_add_profile: company create failed (fallback path)');
           }

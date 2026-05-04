@@ -5,6 +5,7 @@ import type { ExtensionTask } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
+import { triageCompany } from './company-triage.service.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
@@ -637,6 +638,22 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       },
       task.masterAgentId ?? undefined,
     );
+
+    // Post-scrape triage (informational; never blocks downstream dispatch)
+    if (task.masterAgentId) {
+      try {
+        await triageCompany({
+          tenantId: task.tenantId,
+          companyId: savedCompany.id,
+          masterAgentId: task.masterAgentId,
+        });
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
+          'company triage failed (non-fatal)',
+        );
+      }
+    }
 
     // Dispatch enrichment now that we have the real domain from LinkedIn
     await dispatchJob(task.tenantId, 'enrichment', {

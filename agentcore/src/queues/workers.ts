@@ -9,6 +9,8 @@ import { emailListenerConfigs, masterAgents, tenants } from '../db/schema/index.
 import { scheduleEmailListenerJob, removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
 import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import { checkCrawl4aiHealth } from '../tools/crawl4ai.tool.js';
+import { startFollowupSendWorker } from '../workers/followup-send.worker.js';
+import { startFollowupSchedulerWorker, ensureFollowupSchedulerRepeatable } from '../workers/followup-scheduler.worker.js';
 import logger from '../utils/logger.js';
 
 /** Active workers registry */
@@ -242,6 +244,17 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
         } catch (err) {
           logger.error({ err, tenantId: agent.tenantId, agentId: agent.id }, 'Failed to schedule jobs for agent in worker process');
         }
+      }
+
+      // Global (cross-tenant) followup workers + repeatable scheduler tick.
+      // One process handles follow-up sends for all tenants; per-job
+      // withTenant scopes each DB op correctly.
+      try {
+        startFollowupSchedulerWorker();
+        startFollowupSendWorker();
+        await ensureFollowupSchedulerRepeatable();
+      } catch (err) {
+        logger.error({ err }, 'Failed to start followup workers (sequence sends will not run)');
       }
 
       logger.info({ tenants: tenantIds.length, agents: runningAgents.length }, 'Worker process ready — workers registered and jobs scheduled');

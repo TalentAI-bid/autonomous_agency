@@ -18,6 +18,7 @@ import {
   type DeepCompanyProfile,
   normalizeLegacyPainPoint,
 } from '../prompts/company-deep.prompt.js';
+import { validateGroundedFields, type GroundedInput, type GroundedOutput } from '../services/grounded-validation.service.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 import { calculateSeoScore, detectSeoIssues } from '../utils/seo-analysis.js';
@@ -496,8 +497,33 @@ export class EnrichmentAgent extends BaseAgent {
         const resolvedLinkedinUrl = linkedinCompanyUrl
           || (deepCompany.linkedinUrl?.includes('linkedin.com/company/') ? deepCompany.linkedinUrl : undefined);
 
+        // ─── Grounded-or-nothing validation ───────────────────────────────
+        // The LLM may still hallucinate despite the prompt — discard any
+        // painPoint/outreachAngle/techGapScore whose citation is not a
+        // verbatim substring of the scraped input. Drops are persisted to
+        // agent_activity_log with action='hallucination_filtered'.
+        const groundedInput: GroundedInput = {
+          name: resolvedCompanyName,
+          description: deepCompany.description ?? null,
+          openPositions: deepCompany.openPositions?.map((p) => ({ title: p.title ?? null, description: p.description ?? null })) ?? null,
+        };
+        const grounded = validateGroundedFields(
+          groundedInput,
+          deepCompany as unknown as GroundedOutput,
+          {
+            tenantId: this.tenantId,
+            masterAgentId: this.masterAgentId ?? null,
+            companyId: contact.companyId ?? null,
+            promptName: 'company-deep',
+          },
+        );
+
         // Structured pain points + SEO analysis
-        const structuredPainPoints = buildStructuredPainPoints({ companyUrl, homepageContent, deepCompany });
+        const structuredPainPoints = buildStructuredPainPoints({
+          companyUrl,
+          homepageContent,
+          deepCompany: { ...deepCompany, painPoints: grounded.painPoints.map((p) => ({ claim: p.claim, citation: p.citation ?? '' })) },
+        });
         const computedWebsiteStatus = !companyUrl ? 'no_website' : (!homepageContent || homepageContent.length < 100) ? 'unreachable' : 'active';
         const computedSeoScore = (homepageContent && homepageContent.length > 200)
           ? calculateSeoScore(homepageContent) : undefined;
@@ -532,9 +558,10 @@ export class EnrichmentAgent extends BaseAgent {
             employeeCount: deepCompany.employeeCount || undefined,
             recentFunding: deepCompany.recentFunding || undefined,
             teamPageUrl: deepCompany.teamPageUrl || undefined,
-            painPoints: deepCompany.painPoints?.length ? deepCompany.painPoints : undefined,
-            techGapScore: deepCompany.techGapScore ?? undefined,
-            outreachAngle: deepCompany.outreachAngle || undefined,
+            painPoints: grounded.painPoints.length > 0 ? grounded.painPoints : undefined,
+            techGapScore: grounded.techGapScore || undefined,
+            techGapScoreEvidence: grounded.techGapScoreEvidence || undefined,
+            outreachAngle: grounded.outreachAngle || undefined,
           },
         });
 
@@ -1319,8 +1346,29 @@ export class EnrichmentAgent extends BaseAgent {
       const resolvedLinkedinUrl = linkedinCompanyUrl
         || (deepCompany.linkedinUrl?.includes('linkedin.com/company/') ? deepCompany.linkedinUrl : undefined);
 
+      // ─── Grounded-or-nothing validation (company-only path) ─────────────
+      const groundedInputCO: GroundedInput = {
+        name: resolvedName,
+        description: deepCompany.description ?? null,
+        openPositions: deepCompany.openPositions?.map((p) => ({ title: p.title ?? null, description: p.description ?? null })) ?? null,
+      };
+      const groundedCO = validateGroundedFields(
+        groundedInputCO,
+        deepCompany as unknown as GroundedOutput,
+        {
+          tenantId: this.tenantId,
+          masterAgentId: this.masterAgentId ?? null,
+          companyId: companyId ?? null,
+          promptName: 'company-deep',
+        },
+      );
+
       // Structured pain points + SEO analysis
-      const structuredPainPointsCO = buildStructuredPainPoints({ companyUrl, homepageContent, deepCompany });
+      const structuredPainPointsCO = buildStructuredPainPoints({
+        companyUrl,
+        homepageContent,
+        deepCompany: { ...deepCompany, painPoints: groundedCO.painPoints.map((p) => ({ claim: p.claim, citation: p.citation ?? '' })) },
+      });
       const computedWebsiteStatusCO = !companyUrl ? 'no_website' : (!homepageContent || homepageContent.length < 100) ? 'unreachable' : 'active';
       const computedSeoScoreCO = (homepageContent && homepageContent.length > 200)
         ? calculateSeoScore(homepageContent) : undefined;
@@ -1356,9 +1404,10 @@ export class EnrichmentAgent extends BaseAgent {
           employeeCount: deepCompany.employeeCount || undefined,
           recentFunding: deepCompany.recentFunding || undefined,
           teamPageUrl: deepCompany.teamPageUrl || undefined,
-          painPoints: deepCompany.painPoints?.length ? deepCompany.painPoints : undefined,
-          techGapScore: deepCompany.techGapScore ?? undefined,
-          outreachAngle: deepCompany.outreachAngle || undefined,
+          painPoints: groundedCO.painPoints.length > 0 ? groundedCO.painPoints : undefined,
+          techGapScore: groundedCO.techGapScore || undefined,
+          techGapScoreEvidence: groundedCO.techGapScoreEvidence || undefined,
+          outreachAngle: groundedCO.outreachAngle || undefined,
         },
       });
 

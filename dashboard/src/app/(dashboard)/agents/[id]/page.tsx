@@ -18,6 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { ExportButton } from '@/components/shared/export-button';
 import { StrategyPanel } from '@/components/agents/strategy-panel';
+import { IcpSegmentationCard } from '@/components/agents/icp-segmentation-card';
 import { ActionPlanPanel } from '@/components/agents/action-plan-panel';
 import { QuotaBadge } from '@/components/agents/quota-badge';
 import { IssuesBanner } from '@/components/agents/issues-banner';
@@ -679,7 +680,17 @@ export default function AgentDetailPage() {
       )}
 
       {activeTab === 'strategy' && (
-        <StrategyPanel masterAgentId={id} />
+        <div className="space-y-4">
+          <IcpSegmentationCard
+            agentMission={agent?.mission ?? null}
+            segments={
+              ((agent?.config as Record<string, unknown> | undefined)?.salesStrategy as
+                | { icpSegmentation?: Array<{ name: string; rationale: string; suggestedSeparateAgent: boolean }> }
+                | undefined)?.icpSegmentation
+            }
+          />
+          <StrategyPanel masterAgentId={id} />
+        </div>
       )}
 
       {activeTab === 'room' && (

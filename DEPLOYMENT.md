@@ -565,6 +565,32 @@ psql $DATABASE_URL -c "SELECT * FROM drizzle.__drizzle_migrations ORDER BY creat
 
 ---
 
+## Data Export (.xlsx)
+
+Endpoints under `/api/export/*` (JWT-required) generate Excel files for offline analysis.
+
+| Endpoint | Default scope | Filename |
+|---|---|---|
+| `GET /api/export/companies` | optional `masterAgentId`, `since`, `limit` (default 500, max 5000) | `talentai-companies-YYYY-MM-DD.xlsx` |
+| `GET /api/export/contacts` | optional `masterAgentId`, `since`, `limit` (default 500, max 5000) | `talentai-contacts-YYYY-MM-DD.xlsx` |
+| `GET /api/export/emails-sent` | optional `masterAgentId`, `since` (default last 60d), `limit` (default 200) | `talentai-emails-sent-YYYY-MM-DD.xlsx` |
+| `GET /api/export/full-batch` | **required** `masterAgentId`, optional `since` (default last 30d) | `talentai-full-batch-<id>-YYYY-MM-DD.xlsx` (4 sheets: Companies, Contacts, Emails Sent, Replies) |
+
+Implementation: `agentcore/src/routes/export.routes.ts`. Uses [`exceljs`](https://www.npmjs.com/package/exceljs) — already declared in `agentcore/package.json`. Workbooks are streamed via `workbook.xlsx.write(reply.raw)` to avoid buffering large exports in memory.
+
+Dashboard UI: an `Export` dropdown button on the main dashboard page and on each agent's detail page (`<ExportButton masterAgentId={id} showFullBatch />`). The agent-detail variant also exposes a "Since" date filter so users can scope exports to a recent window.
+
+If `exceljs` is missing on the server (older deploys), run:
+
+```bash
+cd /opt/agentcore-platform/agentcore
+npm install
+npm run build
+pm2 reload agentcore
+```
+
+---
+
 ## Quick Reference
 
 | Service | Port | URL |

@@ -15,6 +15,7 @@ import { FunnelRow } from '@/components/ui/funnel-row';
 import { StreamRow } from '@/components/ui/stream-row';
 import { AgentGlyph, type AgentType } from '@/components/ui/agent-glyph';
 import { Panel, PanelBody, PanelHead } from '@/components/ui/panel';
+import { ExportButton } from '@/components/shared/export-button';
 import type { Contact, MasterAgent } from '@/types';
 
 const LANES: AgentType[] = ['discovery', 'enrichment', 'scoring', 'outreach', 'reply', 'action'];
@@ -200,6 +201,7 @@ export default function DashboardPage() {
           <button className="btn" type="button">
             <Icon name="calendar" /> Today
           </button>
+          <ExportButton />
           <Link href="/agents/new" className="btn is-primary">
             <Icon name="plus" /> Deploy agent
           </Link>

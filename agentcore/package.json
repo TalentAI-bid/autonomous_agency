@@ -28,6 +28,7 @@
     "bullmq": "^5.30.0",
     "country-state-city": "^3.2.1",
     "drizzle-orm": "^0.38.0",
+    "exceljs": "^4.4.0",
     "fastify": "^5.2.1",
     "imapflow": "^1.2.13",
     "ioredis": "^5.4.0",

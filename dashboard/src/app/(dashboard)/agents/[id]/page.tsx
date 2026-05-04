@@ -16,6 +16,7 @@ import { formatDate, getStatusColor } from '@/lib/utils';
 import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
+import { ExportButton } from '@/components/shared/export-button';
 import { StrategyPanel } from '@/components/agents/strategy-panel';
 import { ActionPlanPanel } from '@/components/agents/action-plan-panel';
 import { QuotaBadge } from '@/components/agents/quota-badge';
@@ -186,6 +187,7 @@ export default function AgentDetailPage() {
               </div>
             </div>
             <div className="flex gap-2 shrink-0">
+              <ExportButton masterAgentId={id} showFullBatch />
               {agent.status === 'running' ? (
                 <Button variant="outline" size="sm" onClick={handleStop} disabled={stopAgent.isPending}>
                   <Square className="w-3.5 h-3.5 mr-1.5" />

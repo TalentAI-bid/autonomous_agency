@@ -118,6 +118,30 @@ export interface PainPoint {
   roles?: string[];
 }
 
+export interface CompanyTriageVerdict {
+  verdict: 'accept' | 'reject' | 'review';
+  rejection_reason: string | null;
+  rejection_explanation: string | null;
+  key_person: {
+    name: string;
+    title: string;
+    linkedinUrl: string;
+    rationale: string;
+  } | null;
+  key_person_problem: string | null;
+  signals: {
+    hiring_signals: Array<{ claim: string; citation: string }>;
+    funding_signals: Array<{ claim: string; citation: string }>;
+    growth_signals: Array<{ claim: string; citation: string }>;
+    tech_signals: Array<{ claim: string; citation: string }>;
+    pain_hypotheses: Array<{ stated_fact: string; inferred_pain: string; confidence: number }>;
+  };
+  fit_score: number;
+  fit_score_explanation: string;
+  triaged_at: string;
+  model_used: string;
+}
+
 export interface Company {
   id: string;
   tenantId: string;
@@ -134,7 +158,7 @@ export interface Company {
   painPoints?: PainPoint[];
   websiteStatus?: string;
   seoScore?: number;
-  rawData?: Record<string, unknown>;
+  rawData?: Record<string, unknown> & { triage?: CompanyTriageVerdict };
   createdAt: string;
   updatedAt: string;
 }
@@ -586,6 +610,8 @@ export interface CompanyFilters {
   masterAgentId?: string;
   cursor?: string;
   limit?: number;
+  hideRejected?: boolean;
+  sortBy?: 'createdAt' | 'fit_score';
 }
 
 // ── Product & Company Profile Types ──────────────────────────────────────────

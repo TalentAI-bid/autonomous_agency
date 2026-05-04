@@ -122,14 +122,21 @@ export function useAgentEmails(id: string) {
 
 export function useAgentCompanies(
   id: string,
-  options: { includeIncomplete?: boolean; cursor?: string | null } = {},
+  options: {
+    includeIncomplete?: boolean;
+    cursor?: string | null;
+    hideRejected?: boolean;
+    sortBy?: 'createdAt' | 'fit_score';
+  } = {},
 ) {
-  const { includeIncomplete = false, cursor } = options;
+  const { includeIncomplete = false, cursor, hideRejected = false, sortBy } = options;
   return useQuery({
-    queryKey: ['agents', id, 'companies', { includeIncomplete, cursor: cursor ?? null }],
+    queryKey: ['agents', id, 'companies', { includeIncomplete, cursor: cursor ?? null, hideRejected, sortBy: sortBy ?? null }],
     queryFn: () => apiGetPaginated<Company>(`/master-agents/${id}/companies`, {
       ...(includeIncomplete ? { includeIncomplete: 'true' } : {}),
       ...(cursor ? { cursor } : {}),
+      ...(hideRejected ? { hideRejected: 'true' } : {}),
+      ...(sortBy ? { sortBy } : {}),
     }),
     enabled: !!id,
     staleTime: 15000,

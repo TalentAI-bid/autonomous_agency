@@ -23,6 +23,8 @@ import { QuotaBadge } from '@/components/agents/quota-badge';
 import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
+import { FitScoreBadge } from '@/components/companies/fit-score-badge';
+import type { CompanyTriageVerdict } from '@/types';
 
 type Tab = 'overview' | 'contacts' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room';
 const VALID_TABS: readonly Tab[] = [
@@ -59,14 +61,18 @@ export default function AgentDetailPage() {
   const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 100 });
   const { data: stats } = useAgentStats(id);
   const { data: emails } = useAgentEmails(id);
-  // Companies tab state — toggle for the data-completeness filter (default
-  // hides zero/low-completeness stubs) + cursor stack for paging back/forward.
+  // Companies tab state — toggles for the data-completeness filter (default
+  // hides zero/low-completeness stubs) and the triage-reject filter (default
+  // hides rejects). Cursor stack supports paging back/forward.
   const [showOnlyWithData, setShowOnlyWithData] = useState(true);
+  const [showRejected, setShowRejected] = useState(false);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null]);
   const currentCursor = cursorStack[cursorStack.length - 1] ?? null;
   const { data: companiesData } = useAgentCompanies(id, {
     includeIncomplete: !showOnlyWithData,
     cursor: currentCursor,
+    hideRejected: !showRejected,
+    sortBy: 'fit_score',
   });
   const { data: documentsData } = useAgentDocuments(id);
   const startAgent = useStartAgent();
@@ -419,16 +425,28 @@ export default function AgentDetailPage() {
               <Building2 className="w-4 h-4" />
               Companies ({agentCompanies.length}{companiesPagination?.hasMore ? '+' : ''})
             </CardTitle>
-            <button
-              type="button"
-              onClick={() => {
-                setShowOnlyWithData((v) => !v);
-                setCursorStack([null]);
-              }}
-              className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
-            >
-              {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRejected((v) => !v);
+                  setCursorStack([null]);
+                }}
+                className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
+              >
+                {showRejected ? 'Hide rejected' : 'Show rejected'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowOnlyWithData((v) => !v);
+                  setCursorStack([null]);
+                }}
+                className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
+              >
+                {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
+              </button>
+            </div>
           </CardHeader>
           <CardContent>
             {agentCompanies.length === 0 ? (
@@ -447,6 +465,7 @@ export default function AgentDetailPage() {
                   const openJob = typeof raw.openJob === 'string' ? raw.openJob : '';
                   const jobUrl = typeof raw.jobUrl === 'string' ? raw.jobUrl : '';
                   const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
+                  const triage = (raw.triage as CompanyTriageVerdict | undefined);
 
                   return (
                     <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">
@@ -460,6 +479,12 @@ export default function AgentDetailPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
+                            <FitScoreBadge score={triage?.fit_score} explanation={triage?.fit_score_explanation} />
+                            {triage?.verdict === 'reject' && (
+                              <Badge variant="outline" className="text-xs text-red-400 border-red-500/30">
+                                {triage.rejection_reason ?? 'reject'}
+                              </Badge>
+                            )}
                             {company.funding && (
                               <Badge variant="outline" className="text-xs">{company.funding}</Badge>
                             )}

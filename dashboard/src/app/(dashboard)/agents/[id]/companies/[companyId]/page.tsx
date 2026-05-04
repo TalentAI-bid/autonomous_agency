@@ -19,7 +19,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
-import type { CompanyDeepData, PainPoint } from '@/types';
+import type { CompanyDeepData, CompanyTriageVerdict, PainPoint } from '@/types';
+import { TriagePanel } from '@/components/companies/triage-panel';
 
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string; companyId: string }> }) {
   // Route is /agents/[id]/companies/[companyId] — `id` is the agent, `companyId` is the company.
@@ -80,6 +81,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const deep = (company.rawData ?? {}) as CompanyDeepData;
+  const triage = (company.rawData as { triage?: CompanyTriageVerdict } | undefined)?.triage;
 
   const painPointIcon = (type: string) => {
     switch (type) {
@@ -137,6 +139,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       </div>
+
+      {/* Triage panel — always rendered (offers a "Triage now" button when no verdict yet) */}
+      <TriagePanel companyId={company.id} triage={triage} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Basic Info */}

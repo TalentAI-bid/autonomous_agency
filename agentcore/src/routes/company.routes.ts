@@ -27,15 +27,19 @@ export default async function companyRoutes(fastify: FastifyInstance) {
 
   // GET /api/companies
   fastify.get<{
-    Querystring: { cursor?: string; limit?: string; search?: string; industry?: string; masterAgentId?: string; includeIncomplete?: string };
+    Querystring: { cursor?: string; limit?: string; search?: string; industry?: string; masterAgentId?: string; includeIncomplete?: string; hideRejected?: string; sortBy?: string };
   }>('/', async (request) => {
     const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
-    const { cursor, search, industry, masterAgentId, includeIncomplete } = request.query;
+    const { cursor, search, industry, masterAgentId, includeIncomplete, hideRejected, sortBy } = request.query;
+    const sortByFitScore = sortBy === 'fit_score';
 
     const results = await withTenant(request.tenantId, async (tx) => {
       const conditions = [eq(companies.tenantId, request.tenantId)];
       if (includeIncomplete !== 'true') {
         conditions.push(sql`COALESCE(${companies.dataCompleteness}, 0) >= 10`);
+      }
+      if (hideRejected === 'true') {
+        conditions.push(sql`COALESCE(${companies.rawData} -> 'triage' ->> 'verdict', '') <> 'reject'`);
       }
       if (industry) conditions.push(eq(companies.industry, industry));
       if (masterAgentId) conditions.push(eq(companies.masterAgentId, masterAgentId));
@@ -53,9 +57,12 @@ export default async function companyRoutes(fastify: FastifyInstance) {
           throw new ValidationError('Invalid cursor');
         }
       }
+      const orderBy = sortByFitScore
+        ? [sql`(${companies.rawData} -> 'triage' ->> 'fit_score')::numeric DESC NULLS LAST`, desc(companies.createdAt)]
+        : [desc(companies.createdAt)];
       return tx.select().from(companies)
         .where(and(...conditions))
-        .orderBy(desc(companies.createdAt))
+        .orderBy(...orderBy)
         .limit(limit + 1);
     });
 

@@ -506,10 +506,11 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // job parsing creates a stub per company, but only ~10% finish enrichment;
   // the dashboard's "show only with data" toggle defaults on so users see
   // useful rows first. Toggle off to see the discovery firehose for diagnosis.
-  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string; includeIncomplete?: string } }>('/:id/companies', async (request) => {
+  fastify.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string; includeIncomplete?: string; hideRejected?: string; sortBy?: string } }>('/:id/companies', async (request) => {
     const { id } = request.params;
     const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
-    const { cursor, includeIncomplete } = request.query;
+    const { cursor, includeIncomplete, hideRejected, sortBy } = request.query;
+    const sortByFitScore = sortBy === 'fit_score';
 
     const conditions = [
       eq(companies.masterAgentId, id),
@@ -517,6 +518,9 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     ];
     if (includeIncomplete !== 'true') {
       conditions.push(sql`COALESCE(${companies.dataCompleteness}, 0) > 10`);
+    }
+    if (hideRejected === 'true') {
+      conditions.push(sql`COALESCE(${companies.rawData} -> 'triage' ->> 'verdict', '') <> 'reject'`);
     }
     if (cursor) {
       try {
@@ -526,9 +530,12 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     }
 
     const results = await withTenant(request.tenantId, async (tx) => {
+      const orderBy = sortByFitScore
+        ? [sql`(${companies.rawData} -> 'triage' ->> 'fit_score')::numeric DESC NULLS LAST`, desc(companies.createdAt)]
+        : [desc(companies.createdAt)];
       return tx.select().from(companies)
         .where(and(...conditions))
-        .orderBy(desc(companies.createdAt))
+        .orderBy(...orderBy)
         .limit(limit + 1);
     });
 

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, and, desc, lt, ilike, sql, or } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { contacts, companies, masterAgents, outreachEmails, opportunities } from '../db/schema/index.js';
+import { contacts, companies, masterAgents, outreachEmails, opportunities, emailsSent } from '../db/schema/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { selectEmailAccount, incrementQuota } from '../tools/email-queue.tool.js';
 import { sendEmail } from '../tools/smtp.tool.js';
@@ -15,6 +15,7 @@ import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-genera
 import { findEmailByPattern, verifyEmailManual } from '../tools/email-finder.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
+import { ensureDefaultCampaign, enrollContactInSequence } from '../services/followup.service.js';
 import logger from '../utils/logger.js';
 
 // Defensive: convert any HTML the LLM might still emit back to plain text
@@ -568,6 +569,40 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       });
     } catch (err) {
       logger.warn({ err, contactId: id }, 'Failed to ensure deal after manual email send');
+    }
+
+    // Follow-up sequence enrollment. The manual /send-email path writes to
+    // outreach_emails (above) but follow-ups read from emails_sent — so we
+    // also persist a touch-1 row in emails_sent linked to the campaign_contact
+    // we're about to create. Failure here is logged but non-fatal: the
+    // initial email is already in flight.
+    if (contact.masterAgentId) {
+      try {
+        const followupCampaignId = await ensureDefaultCampaign(request.tenantId, contact.masterAgentId);
+        const enrolled = await enrollContactInSequence({
+          tenantId: request.tenantId,
+          campaignId: followupCampaignId,
+          contactId: id,
+          touch1Angle: 'manual_send',
+          touch1SentAt: new Date(),
+        });
+        if (enrolled) {
+          await withTenant(request.tenantId, async (tx) => {
+            await tx.insert(emailsSent).values({
+              campaignContactId: enrolled.id,
+              fromEmail: account.fromEmail,
+              toEmail: contact.email!,
+              subject,
+              body,
+              sentAt: new Date(),
+              messageId: result.messageId,
+              touchNumber: 1,
+            });
+          });
+        }
+      } catch (err) {
+        logger.warn({ err, contactId: id }, 'Failed to enroll contact in follow-up sequence (non-fatal)');
+      }
     }
 
     logger.info({ tenantId: request.tenantId, contactId: id, messageId: result.messageId }, 'Outreach email sent');

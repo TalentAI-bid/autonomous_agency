@@ -196,6 +196,33 @@ export async function enrollContactInSequence(params: {
       .limit(1);
 
     if (existing) {
+      // Upgrade existing rows from the legacy outreach flow ("active" /
+      // "pending" with no nextScheduledAt) to a schedulable in_sequence
+      // row so the follow-up scheduler picks them up. Touched rows that
+      // are already terminal (replied / bounced / unsubscribed / completed
+      // / stopped_manual / failed) are left alone.
+      const upgradable = existing.status === 'active' || existing.status === 'pending' || existing.status === 'in_sequence';
+      const [fullRow] = await tx.select().from(campaignContacts).where(eq(campaignContacts.id, existing.id)).limit(1);
+      const needsScheduling = upgradable && fullRow && !fullRow.nextScheduledAt;
+      if (needsScheduling) {
+        const newAngles = touch1Angle && !(fullRow.sequenceState?.anglesUsed ?? []).includes(touch1Angle)
+          ? [...(fullRow.sequenceState?.anglesUsed ?? []), touch1Angle]
+          : (fullRow.sequenceState?.anglesUsed ?? []);
+        await tx.update(campaignContacts).set({
+          status: nextSlot ? 'in_sequence' : 'completed',
+          nextScheduledAt: nextSlot?.nextScheduledAt ?? null,
+          lastActionAt: fullRow.lastActionAt ?? sentAt,
+          sequenceState: {
+            touch1Angle: fullRow.sequenceState?.touch1Angle ?? touch1Angle ?? undefined,
+            anglesUsed: newAngles,
+          },
+        }).where(eq(campaignContacts.id, existing.id));
+        logger.info(
+          { campaignId, contactId, ccId: existing.id, nextScheduledAt: nextSlot?.nextScheduledAt },
+          'enrollContactInSequence: upgraded legacy row to schedulable in_sequence',
+        );
+        return { id: existing.id, nextScheduledAt: nextSlot?.nextScheduledAt ?? null, status: nextSlot ? 'in_sequence' : 'completed' };
+      }
       logger.debug(
         { campaignId, contactId, existingId: existing.id, status: existing.status },
         'enrollContactInSequence: already enrolled, skipping',

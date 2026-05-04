@@ -6,6 +6,7 @@ import { contacts, companies, campaigns, campaignContacts, campaignSteps, emails
 import { enqueueEmail } from '../tools/email-queue.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
+import { ensureDefaultCampaign, enrollContactInSequence } from '../services/followup.service.js';
 import { buildSystemPrompt, buildUserPrompt, type OutreachEmail } from '../prompts/outreach.prompt.js';
 import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
 import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-generation.js';
@@ -374,6 +375,29 @@ export class OutreachAgent extends BaseAgent {
           .set({ currentStep: stepNumber, lastActionAt: new Date(), status: 'active' })
           .where(eq(campaignContacts.id, campaignContactId!));
       });
+    }
+
+    // 6b. Follow-up sequence enrollment (touch 1 just queued).
+    // Skipped on dry-run and on follow-up steps (stepNumber > 1) since those
+    // are driven by the followup-send worker itself. Failure is logged but
+    // doesn't roll back the outreach send.
+    if (!dryRun && stepNumber === 1 && masterAgentId) {
+      try {
+        const followupCampaignId = effectiveCampaignId
+          ?? await ensureDefaultCampaign(this.tenantId, masterAgentId);
+        await enrollContactInSequence({
+          tenantId: this.tenantId,
+          campaignId: followupCampaignId,
+          contactId,
+          touch1Angle: (email as { angleUsed?: string }).angleUsed ?? null,
+          touch1SentAt: new Date(),
+        });
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), contactId },
+          'OutreachAgent: followup enrollment failed (non-fatal)',
+        );
+      }
     }
 
     // 7. Update contact status + CRM (skip in dry-run)

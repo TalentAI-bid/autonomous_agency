@@ -17,6 +17,18 @@ export interface SendEmailOpts {
   trackingId?: string;
   /** Optional email account config. Falls back to env SMTP settings. */
   emailAccount?: EmailAccount;
+  /**
+   * RFC 2822 In-Reply-To header — set on follow-ups (touches 2/3) to the
+   * original send's Message-Id so the recipient's mail client threads them
+   * under the original conversation.
+   */
+  inReplyTo?: string;
+  /**
+   * RFC 2822 References header — accumulating chain of Message-Ids
+   * (original + previous followups). Some clients (Outlook) prefer this
+   * over In-Reply-To alone.
+   */
+  references?: string;
 }
 
 const redis: Redis = createRedisConnection();
@@ -53,7 +65,7 @@ function injectTrackingPixel(html: string, trackingId: string): string {
 }
 
 export async function sendEmail(opts: SendEmailOpts): Promise<{ messageId: string }> {
-  const { tenantId, from, to, subject, html, text, trackingId, emailAccount } = opts;
+  const { tenantId, from, to, subject, html, text, trackingId, emailAccount, inReplyTo, references } = opts;
 
   // Rate limit: 50 emails/sender/day (for env-based sending)
   if (!emailAccount) {
@@ -94,6 +106,8 @@ export async function sendEmail(opts: SendEmailOpts): Promise<{ messageId: strin
     text: text ?? html.replace(/<[^>]+>/g, ''),
     headers: Object.keys(headers).length ? headers : undefined,
     replyTo: replyTo ?? undefined,
+    inReplyTo: inReplyTo ?? undefined,
+    references: references ?? undefined,
   });
   const rawMessage = composed.message as Buffer;
 

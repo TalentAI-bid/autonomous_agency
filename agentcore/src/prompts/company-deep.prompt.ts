@@ -1,3 +1,18 @@
+/**
+ * Structured pain point with required citation. The LLM must output this
+ * shape going forward; legacy `string[]` saves are normalised at the read
+ * boundary by `normalizeLegacyPainPoint`.
+ */
+export interface GroundedPainPoint {
+  claim: string;
+  citation: string;
+}
+
+export interface GroundedOutreachAngle {
+  angle: string;
+  citation: string;
+}
+
 export interface DeepCompanyProfile {
   name: string;
   domain: string;
@@ -28,9 +43,29 @@ export interface DeepCompanyProfile {
   employeeCount: string;
   recentFunding: string;
   teamPageUrl: string;
-  painPoints: string[];
+  // Grounded-or-nothing fields. New writes use structured shape; legacy
+  // string[] reads should pass through normalizeLegacyPainPoints first.
+  painPoints: GroundedPainPoint[];
   techGapScore: number;
-  outreachAngle: string;
+  techGapScoreEvidence: string | null;
+  outreachAngle: GroundedOutreachAngle | null;
+}
+
+/**
+ * Normalise a painPoint that might be in the legacy `string` format or the
+ * new `{ claim, citation }` format. Returns `{ claim, citation: null }` for
+ * legacy strings so consumers can iterate uniformly.
+ */
+export function normalizeLegacyPainPoint(
+  pp: string | { claim?: string; citation?: string | null; description?: string; type?: string },
+): { claim: string; citation: string | null } {
+  if (typeof pp === 'string') return { claim: pp, citation: null };
+  if (pp && typeof pp === 'object') {
+    const claim = pp.claim ?? pp.description ?? '';
+    const citation = pp.citation ?? null;
+    return { claim, citation };
+  }
+  return { claim: String(pp), citation: null };
 }
 
 export function buildSystemPrompt(missionContext?: string): string {
@@ -54,6 +89,34 @@ The mission context determines which roles to prioritize:
 
   return `You are a company research analyst specializing in deep company intelligence. Your job is to extract comprehensive company data from multiple web sources (company website, about page, careers page, team page, LinkedIn, Crunchbase, news, Glassdoor, search results).${missionBlock}
 
+──────────────────────────────────────────────
+GROUNDED-OR-NOTHING RULE (MANDATORY)
+──────────────────────────────────────────────
+
+For every painPoint, outreachAngle, techGapScore, or signal you produce, you MUST cite the EXACT phrase from the input text that supports it. If you cannot cite a specific phrase from the description, openPositions, rawMeta, specialties, or other input fields, DO NOT INCLUDE THAT FIELD.
+
+An empty painPoints array is the correct output for most companies. A null outreachAngle is the correct output when no concrete angle is supported. Do NOT manufacture content to fill the field.
+
+FORBIDDEN PATTERNS (these are hallucinations — never produce them):
+  ✗ "Website appears [...]" — you cannot see the website
+  ✗ "May need modernization" / "Possibly needs scaling" — speculation
+  ✗ "Small team managing X" — generic, applies to thousands of companies
+  ✗ "Limited tech team" / "No visible engineering team" — you don't know their composition
+  ✗ "WordPress / Wix / Squarespace [...]" — you only see this if EXPLICITLY mentioned in the input
+  ✗ Anything starting with: "appears to," "likely," "possibly," "may have," "could benefit from," "seems to," "potential need"
+  ✗ Recycled boilerplate like "they could use modern web development" — generic outreach is worse than no outreach
+
+ALLOWED PATTERNS (only if input EXPLICITLY supports them):
+  ✓ "Hiring 3 backend engineers" — IF openPositions has those entries
+  ✓ "Recently raised Series A" — IF the description says so verbatim
+  ✓ "Migrating to AWS" — IF specialties or description states it
+  ✓ "200 employees and growing 40% YoY" — IF rawMeta or description states the growth rate
+
+Each painPoint and the outreachAngle MUST include a 'citation' field showing the exact substring from input that supports it. Output without citations will be discarded by the validation layer and logged as a hallucination.
+
+techGapScore: only output a non-zero value when grounded signals exist. If signals/painPoints arrays are empty, techGapScore MUST be 0. There is no "vibes-based" tech gap score.
+
+──────────────────────────────────────────────
 Rules:
 - Extract all available information; use empty strings for unknown text, empty arrays for unknown lists.
 - For techStack, infer from job postings, careers page, and product descriptions.
@@ -80,17 +143,13 @@ Rules:
 - Extract culture values from about page or careers page.
 - Extract contactEmail (general company contact email) and hiringContactEmails (HR/recruiting emails found on careers pages, job posts, or contact pages). Use empty string / empty array if not found.
 - For competitors, infer from industry and product descriptions.
-- painPoints: Analyze the company's website, job postings, and available information to detect potential pain points. Look for signals like:
-  * Hiring many engineers → scaling fast, might need external help
-  * Job posts mention 'legacy', 'migration', 'modernization' → tech debt
-  * Website loads slow or looks dated → needs web modernization
-  * Many open DevOps/Cloud roles → infrastructure challenges
-  * Small team but ambitious product → resource constrained
-  * No blog or developer docs → needs developer experience
-  * Job posts mention specific tech you offer → direct match
-  Return as array of short strings. If no pain points detected, return [].
-- techGapScore: Rate 0-100 how likely this company needs external tech services. 0 = big tech company with everything in-house, 50 = medium company that might outsource, 100 = small company with many tech needs and few engineers.
-- outreachAngle: Suggest ONE sentence describing the best angle to approach this company based on detected signals. If not enough data, return empty string.
+- painPoints: Array of grounded pain points. Each entry MUST be { "claim": "<short pain point>", "citation": "<exact substring from input that supports it>" }. Allowed citations come from the description, openPositions text, careers page, or specialties — NOT from speculation. Examples:
+  * { "claim": "Hiring multiple senior engineers — scaling pressure", "citation": "Senior Backend Engineer @ Berlin — Go + k8s" }  (citation taken verbatim from openPositions)
+  * { "claim": "Recent Series A — likely investing in infrastructure", "citation": "raised a $12M Series A in October 2025" }  (citation taken verbatim from description)
+  Return [] when no pain point can be cited verbatim. An empty array is the correct, honest output for most companies.
+- techGapScore: integer 0–100. MUST be 0 when painPoints is empty. Non-zero values REQUIRE at least one grounded painPoint.
+- techGapScoreEvidence: string or null. Exact substring from input that justifies a non-zero score. Set to null when techGapScore is 0.
+- outreachAngle: { "angle": "<one sentence>", "citation": "<exact substring from input>" } OR null. Return null when no specific angle is grounded in the input.
 
 Always respond with valid JSON.`;
 }

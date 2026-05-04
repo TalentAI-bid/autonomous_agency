@@ -16,6 +16,7 @@ import {
   buildSystemPrompt as companyDeepSystemPrompt,
   buildUserPrompt as companyDeepUserPrompt,
   type DeepCompanyProfile,
+  normalizeLegacyPainPoint,
 } from '../prompts/company-deep.prompt.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
@@ -48,8 +49,11 @@ function buildStructuredPainPoints(opts: {
   }
 
   if (deepCompany.painPoints?.length) {
-    for (const pp of deepCompany.painPoints) {
-      out.push({ type: 'llm_detected', severity: 'medium', description: pp });
+    for (const ppRaw of deepCompany.painPoints) {
+      const pp = normalizeLegacyPainPoint(ppRaw as unknown as Parameters<typeof normalizeLegacyPainPoint>[0]);
+      if (pp.claim) {
+        out.push({ type: 'llm_detected', severity: 'medium', description: pp.claim });
+      }
     }
   }
 

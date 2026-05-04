@@ -183,6 +183,13 @@
       "when": 1777405247612,
       "tag": "0025_strong_jetstream",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1777929434738,
+      "tag": "0026_soft_black_bolt",
+      "breakpoints": true
     }
   ]
 }

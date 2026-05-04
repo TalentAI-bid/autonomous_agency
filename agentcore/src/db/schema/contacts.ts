@@ -35,6 +35,14 @@ export const contacts = pgTable('contacts', {
   status: contactStatusEnum('status').default('discovered').notNull(),
   rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
   dataCompleteness: integer('data_completeness').default(0),
+  // IANA timezone string (e.g. "Europe/Vilnius") used by the followup
+  // scheduler's sending-window check. Resolved lazily from
+  // company.headquarters and cached here.
+  timezone: varchar('timezone', { length: 64 }),
+  // Permanent unsubscribe — set via the manual /unsubscribe API. When true
+  // the followup-scheduler skips the contact and the dashboard hides the
+  // sequence buttons. Distinct from the per-sequence stopped_manual state.
+  unsubscribed: boolean('unsubscribed').default(false).notNull(),
   // enrichmentRetryCount: integer('enrichment_retry_count').default(0), // Disabled — not migrated to production
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

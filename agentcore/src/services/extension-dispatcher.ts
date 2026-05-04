@@ -6,8 +6,118 @@ import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import { triageCompany } from './company-triage.service.js';
+import { agentActivityLog } from '../db/schema/index.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
+
+// ─── Pre-save filter (PART 6C) ─────────────────────────────────────────────
+// Strategist-emitted negativeKeywords + requiredAttributes ride along on
+// extension_tasks.params via the master-agent dispatcher's spread. We apply
+// them here as defense-in-depth before saving anything to the database.
+
+interface PreSaveFilterOpts {
+  negativeKeywords?: string[];
+  requiredAttributes?: {
+    minSize?: number;
+    maxSize?: number;
+    geographicScope?: string[];
+  };
+}
+
+interface PreSaveCheck {
+  pass: boolean;
+  reason?: string;
+}
+
+/** Parse a LinkedIn-style "201-500 employees" / "11-50" / "5000+" range. */
+function parseSizeRange(size: string | undefined | null): { min?: number; max?: number } {
+  if (!size) return {};
+  const s = String(size).toLowerCase();
+  const range = s.match(/(\d[\d,]*)\s*[–-]\s*(\d[\d,]*)/);
+  if (range) {
+    return { min: Number(range[1]!.replace(/,/g, '')), max: Number(range[2]!.replace(/,/g, '')) };
+  }
+  const plus = s.match(/(\d[\d,]*)\s*\+/);
+  if (plus) return { min: Number(plus[1]!.replace(/,/g, '')) };
+  const single = s.match(/(\d[\d,]*)/);
+  if (single) {
+    const n = Number(single[1]!.replace(/,/g, ''));
+    return { min: n, max: n };
+  }
+  return {};
+}
+
+function preSaveFilter(c: Record<string, unknown>, opts: PreSaveFilterOpts): PreSaveCheck {
+  const name = String(c.name ?? '').toLowerCase();
+  const description = String(c.description ?? '').toLowerCase();
+  const industry = String(c.industry ?? '').toLowerCase();
+  const haystack = [name, description, industry].filter(Boolean).join(' ');
+
+  // Negative keywords — substring match across name + description + industry.
+  if (opts.negativeKeywords?.length) {
+    for (const raw of opts.negativeKeywords) {
+      const kw = String(raw).trim().toLowerCase();
+      if (!kw) continue;
+      if (haystack.includes(kw)) {
+        return { pass: false, reason: `matched negative keyword: ${kw}` };
+      }
+    }
+  }
+
+  // Size constraints — only enforce when the candidate has a parseable size.
+  const req = opts.requiredAttributes;
+  if (req && (typeof req.minSize === 'number' || typeof req.maxSize === 'number')) {
+    const range = parseSizeRange(c.size as string | undefined);
+    if (typeof req.minSize === 'number' && typeof range.max === 'number' && range.max < req.minSize) {
+      return { pass: false, reason: `size too small (max ${range.max} < required min ${req.minSize})` };
+    }
+    if (typeof req.maxSize === 'number' && typeof range.min === 'number' && range.min > req.maxSize) {
+      return { pass: false, reason: `size too large (min ${range.min} > required max ${req.maxSize})` };
+    }
+  }
+
+  // Geography — match the company HQ / location string against the scope list.
+  if (req?.geographicScope?.length) {
+    const scope = req.geographicScope.map((g) => String(g).trim().toLowerCase()).filter(Boolean);
+    if (scope.length && !scope.includes('global')) {
+      const hqRaw = c.headquarters ?? c.hq ?? c.location ?? '';
+      const hqStr = typeof hqRaw === 'string'
+        ? hqRaw
+        : (hqRaw && typeof hqRaw === 'object' ? Object.values(hqRaw as Record<string, unknown>).filter(Boolean).join(' ') : '');
+      const hq = hqStr.toLowerCase();
+      if (hq && !scope.some((g) => hq.includes(g))) {
+        return { pass: false, reason: `geography mismatch (hq="${hqStr}", scope=${scope.join(',')})` };
+      }
+      // No HQ data → don't filter (avoid false rejects on missing fields).
+    }
+  }
+
+  return { pass: true };
+}
+
+async function logPreSaveFilterDrop(
+  tenantId: string,
+  masterAgentId: string | null,
+  taskId: string,
+  name: string,
+  linkedinUrl: string | undefined,
+  reason: string,
+): Promise<void> {
+  try {
+    await withTenant(tenantId, async (tx) => {
+      await tx.insert(agentActivityLog).values({
+        tenantId,
+        masterAgentId,
+        agentType: 'discovery',
+        action: 'pre_save_filter_dropped',
+        status: 'completed',
+        details: { taskId, companyName: name, linkedinUrl, reason },
+      });
+    });
+  } catch (err) {
+    logger.debug({ err }, 'pre-save filter: failed to log drop (non-fatal)');
+  }
+}
 
 // ─── Rate limits (server-authoritative; client mirrors these) ──────────────
 
@@ -519,6 +629,14 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     const rawCompanies = (result.companies ?? []) as Array<Record<string, unknown>>;
     logger.info({ taskId: task.id, rawCount: rawCompanies.length }, 'ingest_linkedin_search_companies_raw');
     let saved = 0;
+    let preSaveDropped = 0;
+    // Pull strategist-emitted filter contract from the task params (rides
+    // along via master-agent dispatcher's spread of step.params).
+    const taskParams = (task.params ?? {}) as Record<string, unknown>;
+    const filterOpts: PreSaveFilterOpts = {
+      negativeKeywords: Array.isArray(taskParams.negativeKeywords) ? taskParams.negativeKeywords as string[] : undefined,
+      requiredAttributes: taskParams.requiredAttributes as PreSaveFilterOpts['requiredAttributes'],
+    };
     // Collect fetch_company auto-chain tasks and enqueue them in batches of
     // 10 (60s cooldown) at the end of the loop. With a 100-result search this
     // would otherwise queue 100 fetch_company tasks back-to-back into the
@@ -527,6 +645,21 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     for (const c of rawCompanies) {
       const name = String(c.name ?? '').trim();
       if (!name || name.length < 2) continue;
+
+      // Pre-save filter: drop non-buyer noise (associations, media, meetups,
+      // out-of-size, out-of-scope) BEFORE writing to the DB. Logged to
+      // agent_activity_log with action='pre_save_filter_dropped'.
+      const filterCheck = preSaveFilter(c, filterOpts);
+      if (!filterCheck.pass) {
+        preSaveDropped++;
+        const linkedinUrlForLog = typeof c.linkedinUrl === 'string' ? c.linkedinUrl : undefined;
+        logger.info(
+          { taskId: task.id, name, linkedinUrl: linkedinUrlForLog, reason: filterCheck.reason },
+          'pre_save_filter_dropped',
+        );
+        await logPreSaveFilterDrop(task.tenantId, task.masterAgentId ?? null, task.id, name, linkedinUrlForLog, filterCheck.reason ?? 'unknown');
+        continue;
+      }
 
       // Dedup by linkedinUrl first. saveOrUpdateCompanyStatic only dedupes by
       // domain/name, and search results rarely carry a domain, so two sessions
@@ -609,6 +742,13 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
           'Batched fetch_company auto-chain enqueue failed (non-fatal)',
         );
       }
+    }
+
+    if (preSaveDropped > 0) {
+      logger.info(
+        { taskId: task.id, dropped: preSaveDropped, kept: saved, total: rawCompanies.length },
+        'pre_save_filter_summary',
+      );
     }
 
     return { extracted: rawCompanies.length, saved };

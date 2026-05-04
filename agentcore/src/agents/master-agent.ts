@@ -630,6 +630,11 @@ export class MasterAgent extends BaseAgent {
                         // step.action is e.g. 'search_companies' — the strategist
                         // generates the right action name per strategy.
                         type: step.action as 'search_companies' | 'fetch_company',
+                        // Spread step.params first so the strategist's
+                        // negativeKeywords + requiredAttributes ride along
+                        // into extension_tasks.params for both client-side
+                        // (extension) and server-side (extension-dispatcher
+                        // pre-save filter) consumption.
                         params: {
                           ...(step.params ?? {}),
                           industry: term,

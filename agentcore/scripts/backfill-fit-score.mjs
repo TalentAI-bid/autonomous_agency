@@ -1,16 +1,17 @@
 #!/usr/bin/env node
-// Triage backfill — runs the LLM triage layer over every untriaged
-// company for one master agent (or all agents in the workspace).
+// Fit-score backfill — runs the LLM buyer-fit scorer over every unscored
+// company for one master agent (or all agents in the workspace). Costly
+// (one LLM call per company); use for catch-up rather than per-deploy.
 //
 // Usage:
 //   npm run build  # required: imports from dist/
-//   node scripts/backfill-triage.mjs                  # all agents
-//   node scripts/backfill-triage.mjs <masterAgentId>  # one agent
+//   node scripts/backfill-fit-score.mjs                  # all agents
+//   node scripts/backfill-fit-score.mjs <masterAgentId>  # one agent
 //
 // Env: DATABASE_URL (required), AWS_BEARER_TOKEN_BEDROCK, AWS_BEDROCK_REGION
 
 import pg from 'pg';
-import { batchTriageCompanies } from '../dist/services/company-triage.service.js';
+import { batchScoreCompanies } from '../dist/services/buyer-fit-score.service.js';
 
 const argMasterAgentId = process.argv[2];
 
@@ -22,7 +23,7 @@ if (!process.env.DATABASE_URL) {
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 
-const totals = { agents: 0, triaged: 0, accepted: 0, rejected: 0, reviewed: 0, errors: 0 };
+const totals = { agents: 0, scored: 0, errors: 0, full: 0, partial: 0 };
 
 try {
   let agentRows;
@@ -44,13 +45,13 @@ try {
     process.exit(0);
   }
 
-  console.log(`Backfilling triage for ${agentRows.length} agent(s).`);
+  console.log(`Backfilling fit-score for ${agentRows.length} agent(s).`);
 
   for (const agent of agentRows) {
     totals.agents += 1;
     console.log(`\n— ${agent.name} (${agent.id}) — tenant ${agent.tenant_id}`);
 
-    const counts = await batchTriageCompanies({
+    const counts = await batchScoreCompanies({
       tenantId: agent.tenant_id,
       masterAgentId: agent.id,
       force: false,
@@ -58,14 +59,14 @@ try {
     });
 
     console.log(
-      `  done — triaged: ${counts.triaged}  accepted: ${counts.accepted}  rejected: ${counts.rejected}  reviewed: ${counts.reviewed}  errors: ${counts.errors}`,
+      `  done — scored: ${counts.scored}  errors: ${counts.errors}  avg: ${counts.avgScore}  full: ${counts.fullDataCount}  partial: ${counts.partialDataCount}`,
     );
+    console.log(`  distribution:`, counts.distribution);
 
-    totals.triaged += counts.triaged;
-    totals.accepted += counts.accepted;
-    totals.rejected += counts.rejected;
-    totals.reviewed += counts.reviewed;
+    totals.scored += counts.scored;
     totals.errors += counts.errors;
+    totals.full += counts.fullDataCount;
+    totals.partial += counts.partialDataCount;
   }
 
   console.log('\n=== Final summary ===');

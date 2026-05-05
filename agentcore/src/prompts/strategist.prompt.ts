@@ -560,7 +560,13 @@ For the strategy as a whole:
   [ ] Is the SAME geographyFilter.regions array used on EVERY search step (no per-step narrowing)?
   [ ] Is sizeFilter consistent across steps (or intentionally varied with explanation in queryRationale)?
 
-If any check fails, REWRITE the step. Validation in code will reject broad terms, banned phrases, country names in keywords, more than 2 keywords per step, and empty geography.
+For each LLM_ANALYSIS / SCORING / CRAWL4AI step:
+
+  [ ] Does params.instruction exist and contain a complete sentence describing what to extract or score (not "..." or empty)?
+  [ ] Does the instruction explicitly require grounding / citations and forbid fabrication?
+  [ ] For SCORING: does the instruction reference idealCustomerShape (or its sub-fields) so the scorer knows what "fit" means?
+
+If any check fails, REWRITE the step. Validation in code will reject broad terms, banned phrases, country names in keywords, more than 2 keywords per step, empty geography, AND empty/missing params.instruction on SCORING/LLM_ANALYSIS steps.
 
 In your output's queryDesignNotes field, briefly state:
   "Expanded user's [broad term] into [N] sub-categories: [list]. All steps use full [region library name] geography ([N] regions) and consistent size range. Sub-category is the only narrowing signal between steps."
@@ -589,7 +595,26 @@ In addition to the existing top-level fields (bdStrategy, targetIndustries, hiri
           // MANDATORY for LLM_ANALYSIS, SCORING, CRAWL4AI analysis steps:
           "groundingRequired": true,
           "outputContract": { "noFabrication": true, "requireCitations": true, "forbiddenPhrases": [...], "allowEmptyOutput": true },
-          "instruction": "..."
+
+          // MANDATORY for LLM_ANALYSIS and SCORING — non-empty string telling
+          // the downstream LLM exactly what to extract / score. Validation
+          // rejects empty or missing instruction. Examples (copy the SHAPE,
+          // not the literal text — write one tailored to the seller's offer):
+          //
+          //   tool=SCORING:
+          //     "Score this company on its fit with the seller's idealCustomerShape on a 0-100 scale.
+          //      Cite specific signals from the input (employee count, tech stack, hiring posts, etc.)
+          //      that justify the score. If the input lacks evidence, return score:null with reason.
+          //      Never fabricate evidence."
+          //
+          //   tool=LLM_ANALYSIS (e.g. extract pain points):
+          //     "Extract pain points the company is currently solving, citing the exact input phrase
+          //      that supports each one. Return an empty array if no pain points are evidenced.
+          //      Never fabricate."
+          //
+          //   tool=CRAWL4AI:
+          //     "Extract structured data from the URL according to the schema below..."
+          "instruction": "<one sentence: what the downstream LLM must extract or score, with grounding requirement>"
         }
       }
     ]
@@ -597,7 +622,7 @@ In addition to the existing top-level fields (bdStrategy, targetIndustries, hiri
 
 Output 3-5 LINKEDIN_EXTENSION search_companies steps with DIFFERENT angles, not 1 broad step.
 
-Validation in code will reject strategist output if these mandatory fields are missing.
+Validation in code will reject strategist output if these mandatory fields are missing — including empty/missing params.instruction on SCORING and LLM_ANALYSIS steps. Do NOT emit a SCORING step without instruction; the validator will reject it and you'll be re-prompted.
 
 CRITICAL QUERY RULES — YOU MUST FOLLOW ALL OF THESE:
 

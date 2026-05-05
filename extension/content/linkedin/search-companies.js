@@ -85,11 +85,11 @@
     }
 
     // Pre-extraction settle: LinkedIn's search results lazy-load below the
-    // fold and even within the visible viewport (description previews,
-    // location subtitles). Sleep + scroll-to-bottom + return-to-top before
-    // extraction so the DOM is fully populated when we read it.
-    await u.sleep(u.jitter(3000));
-    await u.scrollAndLoad({ scrolls: 4, scrollDelay: 2000, settleDelay: 2000 });
+    // fold (description previews, location subtitles). Round 11 dialed
+    // back from Round 9's 3s+4×2s+2s settle to 1.5s+2×1s+1s — still enough
+    // for the visible viewport to render but ~half the wall-clock.
+    await u.sleep(u.jitter(1500));
+    await u.scrollAndLoad({ scrolls: 2, scrollDelay: 1000, settleDelay: 1000 });
 
     // Try every known card selector; first one with hits wins.
     const cardSelectors = [

@@ -33,15 +33,15 @@ let currentStatus = 'idle';
 let taskQueueTail = Promise.resolve();
 
 // Post-task pacing — pause between consecutive dispatches so we avoid
-// burning through LinkedIn's per-minute ceiling. Tuned per task type:
-// search results render slower than detail pages, team scrapes need extra
-// recovery before the next page load.
+// burning through LinkedIn's per-minute ceiling. Round 11 dial-back from
+// Round 9's settings: ~half wall-clock, still well under LinkedIn's 429
+// floor (sustained ~1 hit/sec).
 const TASK_DELAYS_MS = {
-  search_companies: 8000,
-  fetch_company_info: 5000,
-  fetch_company_team: 6000,
-  fetch_company: 5000,
-  default: 4000,
+  search_companies: 3000,
+  fetch_company_info: 2000,
+  fetch_company_team: 3000,
+  fetch_company: 2500,
+  default: 2000,
 };
 function taskJitter(ms, fraction = 0.3) {
   return Math.max(0, Math.round(ms + (Math.random() * 2 - 1) * fraction * ms));

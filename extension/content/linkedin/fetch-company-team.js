@@ -52,12 +52,12 @@
       return { debug: { reason: 'rate_limited_429' } };
     }
 
-    // Pre-extraction settle + deep scroll so LinkedIn lazy-loads ALL team
-    // cards before we read the DOM. The previous 6×scrollBy(0,900) loop
-    // only advanced 5400px — many people pages are 8000px+ tall and we'd
-    // miss the bottom half of the listing.
-    await u.sleep(u.jitter(2500));
-    await u.scrollAndLoad({ scrolls: 8, scrollDelay: 2000, settleDelay: 3000 });
+    // Pre-extraction settle + deep scroll so LinkedIn lazy-loads team
+    // cards. Round 11 dial-back: 4 scrolls × 900px = ~3600px covers the
+    // top of the people listing — top-3 ranking still works since rankPeopleByTitle
+    // sorts by score and we only save top 3.
+    await u.sleep(u.jitter(1500));
+    await u.scrollAndLoad({ scrolls: 4, scrollDelay: 1500, settleDelay: 1500 });
 
     const cards = document.querySelectorAll('div[data-chameleon-result-urn]');
     const seen = new Set();

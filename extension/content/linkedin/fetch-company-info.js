@@ -33,11 +33,11 @@
     ]);
 
     // Pre-extraction settle. About-page descriptions are clipped and
-    // expanded by lazy "Show more" controls only after the user scrolls
-    // near them. The 14/16 empty-description rows on agent 4c232eb4-... in
-    // production correlate with skipping this step.
-    await u.sleep(u.jitter(2500));
-    await u.scrollAndLoad({ scrolls: 3, scrollDelay: 1500, settleDelay: 2000 });
+    // expanded by lazy "Show more" controls. Round 11 dial-back: 2 scrolls
+    // is enough to reach the company-details DT/DD list and trigger the
+    // expander.
+    await u.sleep(u.jitter(1500));
+    await u.scrollAndLoad({ scrolls: 2, scrollDelay: 1000, settleDelay: 1000 });
 
     const RATE_LIMIT_INDICATORS = [
       "you've reached the",

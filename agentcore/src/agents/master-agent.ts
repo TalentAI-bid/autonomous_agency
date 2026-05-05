@@ -1,7 +1,7 @@
 import { eq, and, inArray, sql, count, lt, isNotNull } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks, products as productsTable, extensionTasks } from '../db/schema/index.js';
+import { masterAgents, documents, agentConfigs, campaigns, campaignSteps, contacts, companies, agentTasks, products as productsTable, extensionTasks, agentActivityLog } from '../db/schema/index.js';
 import { getTenantById } from '../services/tenant.service.js';
 import { AGENT_TYPES } from '../queues/queues.js';
 import { getQueueStatus } from '../services/queue.service.js';
@@ -319,7 +319,9 @@ export class MasterAgent extends BaseAgent {
               );
             }
           }
-          let strategyResult: { strategy: SalesStrategy } | null = null;
+          let strategyResult:
+            | { strategy: SalesStrategy | null; status?: string; error?: string }
+            | null = null;
 
           if (savedStrategy?.pipelineSteps?.length) {
             logger.info(
@@ -338,13 +340,58 @@ export class MasterAgent extends BaseAgent {
             // Run with 180s timeout; fall back to fire-and-forget if it takes too long
             const strategyPromise = strategist.execute({ job: 'initialStrategy', masterAgentId, pipelineContext });
             const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 180000));
-            strategyResult = (await Promise.race([strategyPromise, timeoutPromise])) as { strategy: SalesStrategy } | null;
+            strategyResult = (await Promise.race([strategyPromise, timeoutPromise])) as
+              | { strategy: SalesStrategy | null; status?: string; error?: string }
+              | null;
 
             await strategist.close();
 
             if (strategyResult && strategyResult.strategy) {
               strategyFreshlyGenerated = true;
             }
+          }
+
+          // Round 8 — strategist returned status:'failed' (validation failed
+          // twice and no last-known-good was available). Surface to dashboard
+          // via lastError + agent_activity_log, and skip dispatch entirely.
+          // Don't fabricate searches the user didn't ask for.
+          if (strategyResult?.status === 'failed') {
+            logger.error(
+              { masterAgentId, error: strategyResult.error },
+              'master-agent: strategist failed validation — skipping dispatch and surfacing error',
+            );
+            try {
+              await withTenant(this.tenantId, async (tx) => {
+                const [agent] = await tx.select({ config: masterAgents.config }).from(masterAgents)
+                  .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+                  .limit(1);
+                const currentConfig = (agent?.config as Record<string, unknown> | null) ?? {};
+                await tx.update(masterAgents).set({
+                  config: { ...currentConfig, lastError: strategyResult?.error ?? 'strategy_generation_failed' },
+                  updatedAt: new Date(),
+                }).where(eq(masterAgents.id, masterAgentId));
+                await tx.insert(agentActivityLog).values({
+                  tenantId: this.tenantId,
+                  masterAgentId,
+                  agentType: 'discovery',
+                  action: 'strategy_generation_failed',
+                  status: 'failed',
+                  details: {
+                    error: strategyResult?.error ?? 'strategy_generation_failed',
+                    surfaced: 'master-agent: skipped dispatch',
+                  },
+                });
+              });
+            } catch (err) {
+              logger.warn({ err, masterAgentId }, 'master-agent: failed to record strategy_generation_failed (non-fatal)');
+            }
+            this.sendMessage(null, 'system_alert', {
+              action: 'strategy_generation_failed',
+              severity: 'error',
+              message: 'Strategy generation failed validation. No search tasks were dispatched. Click "Regenerate Strategy" or contact support.',
+            });
+            await this.clearCurrentAction();
+            return { status: 'failed', error: strategyResult?.error ?? 'strategy_generation_failed' };
           }
 
           if (strategyResult && strategyResult.strategy) {

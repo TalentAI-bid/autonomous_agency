@@ -239,10 +239,15 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
         }
       }
 
-      // Round 8 — max 2 keywords per step (sub-category + optional synonym).
-      if (kws.length > 2) {
+      // Round 11 — max 4 keywords per step (sub-category noun + 1-2 technical
+      // specialties + optional service word). Round 8's "max 2" was too
+      // restrictive — single-noun queries returned categorically wrong matches
+      // (LinkedIn ranks by relevance, not category, so "HR tech" alone caught
+      // furniture companies). Banned phrases (Round 8) stay banned — they
+      // still return zero results.
+      if (kws.length > 4) {
         errors.push(
-          `step ${step.id} too_many_keywords (${kws.length}) — max 2 (sub-category + optional synonym), split into separate steps`,
+          `step ${step.id} too_many_keywords (${kws.length}) — max 4 (sub-category + 1-2 technical specialties + optional service word), split further into separate steps`,
         );
       }
     }
@@ -322,10 +327,25 @@ export function fillStrategyDefaults(strategy: SalesStrategy): SalesStrategy {
       // New contract — fall back to seller's idealCustomerShape when the LLM
       // didn't emit per-step searchKeywords / geographyFilter / sizeFilter.
       if (!params.searchKeywords?.length) {
-        const fallback = strategy.targetIndustries?.length
-          ? strategy.targetIndustries.slice(0, 4)
-          : ['B2B SaaS'];
-        params.searchKeywords = fallback;
+        // CRITICAL: Do NOT auto-fill with strategy.targetIndustries.
+        // targetIndustries are user-input BROAD terms ("Fintech", "AI",
+        // "Healthtech", "B2B SaaS") that return associations and media outlets
+        // on LinkedIn — exactly what the validator rejects. Auto-filling them
+        // produces broken queries that burn LinkedIn search quota on garbage.
+        //
+        // If the LLM emitted a search step without keywords, that's a bug
+        // upstream. The right answer is to NOT dispatch the broken step,
+        // not to fabricate keywords from a forbidden source.
+        logger.warn(
+          {
+            stepId: step.id,
+            masterAgentId: (strategy as any).masterAgentId,
+            targetIndustries: strategy.targetIndustries,
+          },
+          'fillStrategyDefaults: search step has no keywords — marking step inactive instead of auto-filling broad terms',
+        );
+        (step as any).inactive = true;
+        params.searchKeywords = [];
       }
       if (!params.geographyFilter || !Array.isArray(params.geographyFilter.regions) || params.geographyFilter.regions.length === 0) {
         params.geographyFilter = {
@@ -791,7 +811,7 @@ export class StrategistAgent extends BaseAgent {
     }
     if (firstCheck.errors.some((e) => e.includes('too_many_keywords'))) {
       fixHints.push(
-        'Each search step has AT MOST 2 keywords: the sub-category name plus one optional synonym (e.g. ["neobank","digital bank"]). If you have more sub-categories, split them across SEPARATE search steps. Stacking 3+ keywords returns zero results.',
+        'Each search step has AT MOST 4 keywords: sub-category name + 1-2 technical specialties + optional service word (e.g. ["payment processing","API","PCI"] or ["neobank","core banking","BaaS"]). If you have more sub-categories, split them across SEPARATE search steps.',
       );
     }
     const retryMessages = [

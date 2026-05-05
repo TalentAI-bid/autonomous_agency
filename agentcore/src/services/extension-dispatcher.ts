@@ -5,7 +5,7 @@ import type { ExtensionTask } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
-import { triageCompany } from './company-triage.service.js';
+import { scoreCompany } from './buyer-fit-score.service.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
@@ -650,7 +650,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     // Post-scrape triage (informational; never blocks downstream dispatch)
     if (task.masterAgentId) {
       try {
-        await triageCompany({
+        await scoreCompany({
           tenantId: task.tenantId,
           companyId: savedCompany.id,
           masterAgentId: task.masterAgentId,

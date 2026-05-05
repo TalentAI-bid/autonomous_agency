@@ -118,7 +118,7 @@ export interface SalesStrategy {
   /**
    * Concrete shape of a "good lead" for this seller. Drives both the
    * strategist's downstream-step params (negativeKeywords, requiredAttributes)
-   * and the company-triage seller profile.
+   * and the buyer-fit-score seller profile.
    */
   idealCustomerShape?: {
     sizeRange: { min: number; max: number };

@@ -118,7 +118,7 @@ export interface PainPoint {
   roles?: string[];
 }
 
-export interface CompanyTriageVerdict {
+export interface CompanyFitScoreVerdict {
   verdict: 'accept' | 'reject' | 'review';
   rejection_reason: string | null;
   rejection_explanation: string | null;
@@ -158,7 +158,7 @@ export interface Company {
   painPoints?: PainPoint[];
   websiteStatus?: string;
   seoScore?: number;
-  rawData?: Record<string, unknown> & { triage?: CompanyTriageVerdict };
+  rawData?: Record<string, unknown> & { triage?: CompanyFitScoreVerdict };
   createdAt: string;
   updatedAt: string;
 }

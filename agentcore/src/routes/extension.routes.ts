@@ -18,7 +18,7 @@ import { sanitizePersonName } from '../services/extension-dispatcher.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import { dispatchJob } from '../services/queue.service.js';
 import { ensureDeal } from '../services/crm-activity.service.js';
-import { triageCompany } from '../services/company-triage.service.js';
+import { scoreCompany } from '../services/buyer-fit-score.service.js';
 import logger from '../utils/logger.js';
 
 function generateApiKey(): { key: string; hash: string } {
@@ -367,7 +367,7 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
             );
             companyId = savedCompany.id;
             try {
-              await triageCompany({
+              await scoreCompany({
                 tenantId: request.tenantId,
                 companyId: savedCompany.id,
                 masterAgentId: overrideAgentId,
@@ -451,7 +451,7 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
             );
             companyId = savedCompany.id;
             try {
-              await triageCompany({
+              await scoreCompany({
                 tenantId: request.tenantId,
                 companyId: savedCompany.id,
                 masterAgentId: best.id,

@@ -1,33 +1,33 @@
 'use client';
 
-import type { CompanyTriageVerdict } from '@/types';
+import type { CompanyFitScoreVerdict } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useReTriageCompany } from '@/hooks/use-triage';
+import { useReScoreCompany } from '@/hooks/use-fit-score';
 import { useToast } from '@/hooks/use-toast';
 import { CheckCircle2, XCircle, HelpCircle, RefreshCw, Loader2, Quote } from 'lucide-react';
 import { FitScoreBadge } from './fit-score-badge';
 
-interface TriagePanelProps {
+interface FitScorePanelProps {
   companyId: string;
-  triage: CompanyTriageVerdict | undefined;
+  triage: CompanyFitScoreVerdict | undefined;
 }
 
-export function TriagePanel({ companyId, triage }: TriagePanelProps) {
-  const reTriage = useReTriageCompany();
+export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
+  const reScore = useReScoreCompany();
   const { toast } = useToast();
 
-  const handleReTriage = async () => {
+  const handleReScore = async () => {
     try {
-      const r = await reTriage.mutateAsync({ companyId, force: true });
+      const r = await reScore.mutateAsync({ companyId, force: true });
       if (r.verdict) {
-        toast({ title: 'Re-triaged', description: `Verdict: ${r.verdict.verdict} (fit ${r.verdict.fit_score})` });
+        toast({ title: 'Re-scored', description: `Verdict: ${r.verdict.verdict} (fit ${r.verdict.fit_score})` });
       } else {
-        toast({ title: 'Re-triage failed', description: 'LLM returned no usable verdict.' });
+        toast({ title: 'Re-score failed', description: 'LLM returned no usable verdict.' });
       }
     } catch (err) {
-      toast({ title: 'Re-triage failed', description: err instanceof Error ? err.message : String(err) });
+      toast({ title: 'Re-score failed', description: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -38,8 +38,8 @@ export function TriagePanel({ companyId, triage }: TriagePanelProps) {
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <HelpCircle className="w-4 h-4" /> Triage
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={handleReTriage} disabled={reTriage.isPending}>
-            {reTriage.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          <Button variant="outline" size="sm" onClick={handleReScore} disabled={reScore.isPending}>
+            {reScore.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             <span className="ml-1.5 text-xs">Triage now</span>
           </Button>
         </CardHeader>
@@ -65,7 +65,7 @@ export function TriagePanel({ companyId, triage }: TriagePanelProps) {
       </Badge>
     );
 
-  const signalGroups: Array<{ key: keyof CompanyTriageVerdict['signals']; label: string }> = [
+  const signalGroups: Array<{ key: keyof CompanyFitScoreVerdict['signals']; label: string }> = [
     { key: 'hiring_signals', label: 'Hiring' },
     { key: 'funding_signals', label: 'Funding' },
     { key: 'growth_signals', label: 'Growth' },
@@ -79,9 +79,9 @@ export function TriagePanel({ companyId, triage }: TriagePanelProps) {
           {verdictBadge}
           <FitScoreBadge score={triage.fit_score} explanation={triage.fit_score_explanation} />
         </CardTitle>
-        <Button variant="outline" size="sm" onClick={handleReTriage} disabled={reTriage.isPending}>
-          {reTriage.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-          <span className="ml-1.5 text-xs">Re-triage</span>
+        <Button variant="outline" size="sm" onClick={handleReScore} disabled={reScore.isPending}>
+          {reScore.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          <span className="ml-1.5 text-xs">Re-score</span>
         </Button>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">

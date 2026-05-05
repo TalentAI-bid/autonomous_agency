@@ -3,17 +3,17 @@ import { withTenant } from '../config/database.js';
 import { companies, masterAgents, type MasterAgent } from '../db/schema/index.js';
 import { extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
 import {
-  buildTriageSystemPrompt,
-  buildTriageUserPrompt,
+  buildFitScoreSystemPrompt,
+  buildFitScoreUserPrompt,
   type SellerProfile,
   type ScrapedCompany,
-  type TriageVerdict,
-} from '../prompts/company-triage.prompt.js';
+  type FitScoreVerdict,
+} from '../prompts/buyer-fit-score.prompt.js';
 import logger from '../utils/logger.js';
 
 const VALID_VERDICTS = new Set(['accept', 'reject', 'review']);
 
-function isValidVerdict(v: unknown): v is TriageVerdict {
+function isValidVerdict(v: unknown): v is FitScoreVerdict {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
   if (typeof o.verdict !== 'string' || !VALID_VERDICTS.has(o.verdict)) return false;
@@ -178,12 +178,12 @@ function buildScrapedCompany(company: typeof companies.$inferSelect): ScrapedCom
   };
 }
 
-export async function triageCompany(params: {
+export async function scoreCompany(params: {
   tenantId: string;
   companyId: string;
   masterAgentId: string;
   force?: boolean;
-}): Promise<TriageVerdict | null> {
+}): Promise<FitScoreVerdict | null> {
   const { tenantId, companyId, masterAgentId, force = false } = params;
 
   // 1. Load company + master agent in a tenant-scoped transaction.
@@ -202,13 +202,13 @@ export async function triageCompany(params: {
   });
 
   if (!loaded) {
-    logger.debug({ tenantId, companyId, masterAgentId }, 'triageCompany: company or agent not found');
+    logger.debug({ tenantId, companyId, masterAgentId }, 'scoreCompany: company or agent not found');
     return null;
   }
 
   // 2. Idempotency — return cached verdict unless force.
   const existingRaw = (loaded.company.rawData ?? {}) as Record<string, unknown>;
-  const existingTriage = existingRaw.triage as TriageVerdict | undefined;
+  const existingTriage = existingRaw.triage as FitScoreVerdict | undefined;
   if (existingTriage && !force) {
     return existingTriage;
   }
@@ -223,23 +223,23 @@ export async function triageCompany(params: {
     parsed = await extractJSON<unknown>(
       tenantId,
       [
-        { role: 'system', content: buildTriageSystemPrompt() },
-        { role: 'user', content: buildTriageUserPrompt(seller, scraped) },
+        { role: 'system', content: buildFitScoreSystemPrompt() },
+        { role: 'user', content: buildFitScoreUserPrompt(seller, scraped) },
       ],
       2,
       { model: SMART_MODEL, temperature: 0.1 },
     );
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err), companyId }, 'triageCompany: LLM call failed');
+    logger.warn({ err: err instanceof Error ? err.message : String(err), companyId }, 'scoreCompany: LLM call failed');
     return null;
   }
 
   if (!isValidVerdict(parsed)) {
-    logger.warn({ companyId, parsed }, 'triageCompany: invalid verdict shape from LLM');
+    logger.warn({ companyId, parsed }, 'scoreCompany: invalid verdict shape from LLM');
     return null;
   }
 
-  const verdict: TriageVerdict = {
+  const verdict: FitScoreVerdict = {
     ...parsed,
     triaged_at: new Date().toISOString(),
     model_used: SMART_MODEL,
@@ -261,7 +261,7 @@ export async function triageCompany(params: {
   return verdict;
 }
 
-export async function batchTriageCompanies(params: {
+export async function batchScoreCompanies(params: {
   tenantId: string;
   masterAgentId: string;
   companyIds?: string[];
@@ -294,7 +294,7 @@ export async function batchTriageCompanies(params: {
   for (let i = 0; i < targets.length; i += chunkSize) {
     const chunk = targets.slice(i, i + chunkSize);
     const results = await Promise.allSettled(
-      chunk.map((id) => triageCompany({ tenantId, companyId: id, masterAgentId, force })),
+      chunk.map((id) => scoreCompany({ tenantId, companyId: id, masterAgentId, force })),
     );
     for (const r of results) {
       if (r.status === 'rejected' || r.value === null) {
@@ -308,7 +308,7 @@ export async function batchTriageCompanies(params: {
     }
     logger.info(
       { masterAgentId, processed: Math.min(i + chunkSize, targets.length), total: targets.length, ...counts },
-      'batchTriageCompanies progress',
+      'batchScoreCompanies progress',
     );
   }
 

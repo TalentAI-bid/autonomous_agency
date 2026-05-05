@@ -3,22 +3,22 @@ import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies, masterAgents } from '../db/schema/index.js';
-import { triageCompany, batchTriageCompanies } from '../services/company-triage.service.js';
+import { scoreCompany, batchScoreCompanies } from '../services/buyer-fit-score.service.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
-const triageOneBodySchema = z.object({ force: z.boolean().optional() });
+const scoreOneBodySchema = z.object({ force: z.boolean().optional() });
 const batchBodySchema = z.object({
   force: z.boolean().optional(),
   companyIds: z.array(z.string().uuid()).optional(),
 });
 
-export default async function triageRoutes(fastify: FastifyInstance) {
+export default async function fitScoreRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
 
   // POST /api/triage/companies/:id  — re-triage a single company
   fastify.post<{ Params: { id: string } }>('/companies/:id', async (request) => {
     const { id } = request.params;
-    const parsed = triageOneBodySchema.safeParse(request.body ?? {});
+    const parsed = scoreOneBodySchema.safeParse(request.body ?? {});
     if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
     const force = parsed.data.force ?? false;
 
@@ -36,7 +36,7 @@ export default async function triageRoutes(fastify: FastifyInstance) {
       throw new ValidationError('Company has no master agent — cannot derive seller profile');
     }
 
-    const verdict = await triageCompany({
+    const verdict = await scoreCompany({
       tenantId: request.tenantId,
       companyId: id,
       masterAgentId: target.masterAgentId,
@@ -64,7 +64,7 @@ export default async function triageRoutes(fastify: FastifyInstance) {
       });
       if (!agent) throw new NotFoundError('Master agent', masterAgentId);
 
-      const counts = await batchTriageCompanies({
+      const counts = await batchScoreCompanies({
         tenantId: request.tenantId,
         masterAgentId,
         companyIds,

@@ -23,7 +23,7 @@ export type ScrapedCompany = {
   openPositions?: Array<{ title?: string; location?: string; description?: string }> | null;
 };
 
-export type TriageVerdict = {
+export type FitScoreVerdict = {
   verdict: 'accept' | 'reject' | 'review';
   rejection_reason: string | null;
   rejection_explanation: string | null;
@@ -47,7 +47,7 @@ export type TriageVerdict = {
   model_used: string;
 };
 
-export function buildTriageSystemPrompt(): string {
+export function buildFitScoreSystemPrompt(): string {
   return `You are a B2B sales triage analyst working for a specific seller. Your job is to look at one scraped company at a time and produce a strict JSON verdict that tells the seller whether this company is worth contacting, who to contact, and what real signal (if any) supports outreach.
 
 You will be given:
@@ -164,7 +164,7 @@ A score above 60 REQUIRES at least one real, cited signal.
 Return ONLY the JSON object.`;
 }
 
-export function buildTriageUserPrompt(seller: SellerProfile, company: ScrapedCompany): string {
+export function buildFitScoreUserPrompt(seller: SellerProfile, company: ScrapedCompany): string {
   const exclusionsBlock = seller.exclusions.length
     ? seller.exclusions.map((e) => '  - ' + e).join('\n')
     : '  - (none)';

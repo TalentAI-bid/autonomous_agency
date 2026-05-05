@@ -25,7 +25,7 @@ import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
 import { FitScoreBadge } from '@/components/companies/fit-score-badge';
-import type { CompanyTriageVerdict } from '@/types';
+import type { CompanyFitScoreVerdict } from '@/types';
 
 type Tab = 'overview' | 'contacts' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room';
 const VALID_TABS: readonly Tab[] = [
@@ -466,7 +466,7 @@ export default function AgentDetailPage() {
                   const openJob = typeof raw.openJob === 'string' ? raw.openJob : '';
                   const jobUrl = typeof raw.jobUrl === 'string' ? raw.jobUrl : '';
                   const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
-                  const triage = (raw.triage as CompanyTriageVerdict | undefined);
+                  const triage = (raw.triage as CompanyFitScoreVerdict | undefined);
 
                   return (
                     <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">

@@ -87,6 +87,30 @@
     return sleep(Math.max(0, Math.round(baseMs + jitter)));
   }
 
+  // Synchronous jitter — returns a jittered number of milliseconds. Useful
+  // when paired with sleep(jitter(...)) for human-ish pacing without the
+  // promise indirection of randomDelay.
+  function jitter(ms, fraction = 0.3) {
+    return Math.max(0, Math.round(ms + (Math.random() * 2 - 1) * fraction * ms));
+  }
+
+  // Full-document scrollAndLoad — scrolls to the bottom of the page in
+  // chunks, waiting between scrolls so LinkedIn's IntersectionObserver can
+  // populate lazy-loaded sections (long descriptions, people cards), then
+  // returns to the top so subsequent extraction sees the full DOM in scope.
+  async function scrollAndLoad({ scrolls = 5, scrollDelay = 1500, settleDelay = 2000 } = {}) {
+    let lastHeight = 0;
+    for (let i = 0; i < scrolls; i++) {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      await sleep(jitter(scrollDelay));
+      if (document.body.scrollHeight === lastHeight) break;
+      lastHeight = document.body.scrollHeight;
+    }
+    await sleep(jitter(settleDelay));
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    await sleep(800);
+  }
+
   function absoluteUrl(href) {
     if (!href) return '';
     try { return new URL(href, location.href).toString(); } catch (_) { return href; }
@@ -97,10 +121,12 @@
     waitForSelectorAll,
     scrollContainer,
     scrollToBottom,
+    scrollAndLoad,
     extractText,
     extractAttribute,
     safeClick,
     sleep,
+    jitter,
     randomDelay,
     absoluteUrl,
   };

@@ -517,6 +517,100 @@ export async function onExtensionTaskComplete(taskId: string, payload: CompleteP
 
 type IngestSummary = { extracted: number; saved: number };
 
+// ─── Server-side post-extraction geo filter ────────────────────────────────
+// LinkedIn's `companyHqGeo` URL facet is a SOFT filter — when keyword
+// matching is strong (e.g. "neobank digital bank"), LinkedIn surfaces
+// globally-relevant companies even when their HQ is outside the requested
+// URN list. We confirmed empirically: agent 4c232eb4-... requested EU only
+// and got Mumbai/Atlanta/Istanbul rows alongside London/Paris/Amsterdam.
+//
+// The extension already extracts a `location` string per card. We match it
+// against the strategist's `geographyFilter.regions` here. Companies whose
+// location does not plausibly belong to any requested region are dropped
+// before save. Empty location → pass through (don't drop on missing data;
+// `fetch_company_info` will populate `headquarters` and the next pass can
+// re-evaluate).
+const CITY_TO_COUNTRY: Record<string, string> = {
+  // EU
+  london: 'united kingdom', manchester: 'united kingdom', edinburgh: 'united kingdom',
+  birmingham: 'united kingdom', leeds: 'united kingdom', glasgow: 'united kingdom',
+  paris: 'france', lyon: 'france', toulouse: 'france', marseille: 'france',
+  berlin: 'germany', munich: 'germany', hamburg: 'germany', frankfurt: 'germany',
+  cologne: 'germany', stuttgart: 'germany',
+  amsterdam: 'netherlands', rotterdam: 'netherlands', 'the hague': 'netherlands',
+  utrecht: 'netherlands', eindhoven: 'netherlands',
+  stockholm: 'sweden', gothenburg: 'sweden', malmö: 'sweden', malmo: 'sweden',
+  dublin: 'ireland', cork: 'ireland',
+  madrid: 'spain', barcelona: 'spain', valencia: 'spain', seville: 'spain',
+  milan: 'italy', rome: 'italy', turin: 'italy', naples: 'italy', bologna: 'italy',
+  warsaw: 'poland', krakow: 'poland', kraków: 'poland', lublin: 'poland', mokotów: 'poland',
+  brussels: 'belgium', antwerp: 'belgium', ghent: 'belgium',
+  copenhagen: 'denmark', oslo: 'norway', helsinki: 'finland',
+  lisbon: 'portugal', porto: 'portugal',
+  vienna: 'austria', zurich: 'switzerland', geneva: 'switzerland', basel: 'switzerland',
+  vilnius: 'lithuania', luxembourg: 'luxembourg',
+  // MENA
+  dubai: 'united arab emirates', 'abu dhabi': 'united arab emirates',
+  riyadh: 'saudi arabia', jeddah: 'saudi arabia',
+  cairo: 'egypt', alexandria: 'egypt',
+  doha: 'qatar', 'kuwait city': 'kuwait',
+  casablanca: 'morocco', rabat: 'morocco',
+  // NA
+  'new york': 'united states', 'san francisco': 'united states', 'palo alto': 'united states',
+  miami: 'united states', atlanta: 'united states', somerville: 'united states',
+  boston: 'united states', chicago: 'united states', seattle: 'united states',
+  'los angeles': 'united states', austin: 'united states', denver: 'united states',
+  toronto: 'canada', vancouver: 'canada', montreal: 'canada', ottawa: 'canada',
+};
+
+// Region-name aliases LinkedIn occasionally puts in the location string
+// (state/country variants beyond the canonical names in geographyFilter).
+const REGION_ALIASES: Record<string, string> = {
+  uk: 'united kingdom',
+  england: 'united kingdom',
+  scotland: 'united kingdom',
+  wales: 'united kingdom',
+  uae: 'united arab emirates',
+  usa: 'united states',
+  us: 'united states',
+};
+
+export function isLocationInRegions(
+  location: string | undefined | null,
+  requestedRegions: string[],
+): boolean {
+  if (!location || !location.trim()) return true; // pass-through on missing data
+  if (!requestedRegions.length) return true;
+  const loc = location.toLowerCase();
+  const wanted = new Set(requestedRegions.map((r) => r.trim().toLowerCase()));
+
+  // Direct country-name substring match — handles "London, England, United Kingdom"
+  // and "İstanbul, Şişli" (latter doesn't contain any wanted country → drop).
+  for (const w of wanted) {
+    if (loc.includes(w)) return true;
+  }
+
+  // Alias check (LinkedIn says "England" — strategist says "United Kingdom").
+  for (const [alias, canonical] of Object.entries(REGION_ALIASES)) {
+    if (wanted.has(canonical) && new RegExp(`\\b${alias}\\b`, 'i').test(loc)) {
+      return true;
+    }
+  }
+
+  // City-level fallback. Tokenise the location string on commas + middle-dot
+  // and look up each token in CITY_TO_COUNTRY.
+  const tokens = loc
+    .split(/[,•·]/g)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  for (const tok of tokens) {
+    const country = CITY_TO_COUNTRY[tok];
+    if (country && wanted.has(country)) return true;
+  }
+
+  return false;
+}
+
 async function ingestResult(task: ExtensionTask, result: Record<string, unknown>): Promise<IngestSummary> {
   const site = task.site as ExtensionSite;
   const type = task.type as ExtensionTaskType;
@@ -538,9 +632,30 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     // would otherwise queue 100 fetch_company tasks back-to-back into the
     // extension and trip LinkedIn 429s.
     const pendingFetchTasks: Array<{ linkedinUrl: string; companyId: string }> = [];
+    const requestedRegions =
+      ((task.params as { geographyFilter?: { regions?: string[] } })?.geographyFilter?.regions ?? [])
+        .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
+    let droppedGeoMismatch = 0;
     for (const c of rawCompanies) {
       const name = String(c.name ?? '').trim();
       if (!name || name.length < 2) continue;
+
+      // Geo filter — LinkedIn's `companyHqGeo` is a soft facet that leaks
+      // globally-relevant matches when keywords are strong. Drop any company
+      // whose extracted `location` clearly falls outside the requested
+      // regions. Empty location passes through (fetch_company_info will fill
+      // `headquarters` and a future pass can re-evaluate).
+      if (requestedRegions.length > 0) {
+        const cLocation = typeof c.location === 'string' ? c.location : '';
+        if (!isLocationInRegions(cLocation, requestedRegions)) {
+          droppedGeoMismatch++;
+          logger.info(
+            { taskId: task.id, name, location: cLocation, requestedRegions },
+            'discovery_dropped_geo_mismatch',
+          );
+          continue;
+        }
+      }
 
       // Dedup by linkedinUrl first. saveOrUpdateCompanyStatic only dedupes by
       // domain/name, and search results rarely carry a domain, so two sessions
@@ -638,7 +753,14 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     }
 
     logger.info(
-      { taskId: task.id, masterAgentId: task.masterAgentId, rawResultCount: rawCompanies.length, saved },
+      {
+        taskId: task.id,
+        masterAgentId: task.masterAgentId,
+        rawResultCount: rawCompanies.length,
+        saved,
+        droppedGeoMismatch,
+        requestedRegions,
+      },
       'discovery_saved_summary',
     );
 

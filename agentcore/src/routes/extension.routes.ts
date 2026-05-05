@@ -14,7 +14,7 @@ import { ValidationError, UnauthorizedError, NotFoundError } from '../utils/erro
 import { pubRedis } from '../queues/setup.js';
 import { env } from '../config/env.js';
 import { readLatest } from './extension-distribution.routes.js';
-import { sanitizePersonName } from '../services/extension-dispatcher.js';
+import { sanitizePersonName, EXTENSION_SITE_LIMITS } from '../services/extension-dispatcher.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import { dispatchJob } from '../services/queue.service.js';
 import { ensureDeal } from '../services/crm-activity.service.js';
@@ -239,6 +239,37 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           lastSeenAt: session.lastSeenAt,
           dailyTasksCount: session.dailyTasksCount ?? {},
           dailyResetAt: session.dailyResetAt,
+        },
+      };
+    });
+
+    // GET /api/extension/me/rate-limits
+    // Authoritative server-side counter snapshot — the extension calls this
+    // on WS reconnect to reconcile its chrome.storage rateLimiterState in
+    // case it missed a `rate_limits_purged` push while offline.
+    authScope.get('/me/rate-limits', async (request) => {
+      const [session] = await withTenant(request.tenantId, async (tx) => {
+        return tx
+          .select({
+            dailyTasksCount: extensionSessions.dailyTasksCount,
+            dailyResetAt: extensionSessions.dailyResetAt,
+          })
+          .from(extensionSessions)
+          .where(
+            and(
+              eq(extensionSessions.tenantId, request.tenantId),
+              eq(extensionSessions.userId, request.userId),
+              isNull(extensionSessions.revokedAt),
+            ),
+          )
+          .orderBy(desc(extensionSessions.createdAt))
+          .limit(1);
+      });
+      return {
+        data: {
+          dailyCounts: session?.dailyTasksCount ?? {},
+          dailyResetAt: session?.dailyResetAt ?? null,
+          caps: EXTENSION_SITE_LIMITS,
         },
       };
     });

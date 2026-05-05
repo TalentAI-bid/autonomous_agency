@@ -44,6 +44,7 @@ import opportunityRoutes from './routes/opportunity.routes.js';
 import agentRoomRoutes from './routes/agent-room.routes.js';
 import linkedinRoutes from './routes/linkedin.routes.js';
 import extensionRoutes from './routes/extension.routes.js';
+import adminExtensionRoutes from './routes/admin-extension.routes.js';
 import extensionDistributionRoutes from './routes/extension-distribution.routes.js';
 import productRoutes from './routes/product.routes.js';
 import workspaceRoutes from './routes/workspace.routes.js';
@@ -180,6 +181,7 @@ async function buildApp() {
   await fastify.register(agentRoomRoutes, { prefix: '/api/agent-room' });
   await fastify.register(linkedinRoutes, { prefix: '/api/linkedin' });
   await fastify.register(extensionRoutes, { prefix: '/api/extension' });
+  await fastify.register(adminExtensionRoutes, { prefix: '/api/admin/extension' });
   await fastify.register(productRoutes, { prefix: '/api/products' });
   await fastify.register(workspaceRoutes, { prefix: '/api/workspaces' });
   await fastify.register(teamRoutes, { prefix: '/api/team' });

@@ -1174,7 +1174,19 @@ async function handleCompanyTeamComplete(
             .where(and(...conds))
             .limit(1);
         });
-        if (existing) continue;
+        if (existing) {
+          logger.info(
+            {
+              taskId: task.id,
+              personLinkedinUrl: person.linkedinUrl,
+              masterAgentId: task.masterAgentId,
+              companyId: savedCompany.id,
+              existingContactId: existing.id,
+            },
+            'fetch_company_team: contact dedup matched — skipping insert',
+          );
+          continue;
+        }
       }
 
       const [inserted] = await withTenant(task.tenantId, async (tx) => {
@@ -1207,7 +1219,18 @@ async function handleCompanyTeamComplete(
         }
       }
     } catch (err) {
-      logger.debug({ err, person: person.name }, 'Failed to save LinkedIn person (non-fatal)');
+      logger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack?.split('\n').slice(0, 5).join('\n') : undefined,
+          personName: person.name,
+          personLinkedinUrl: person.linkedinUrl,
+          taskId: task.id,
+          masterAgentId: task.masterAgentId,
+          companyId: savedCompany.id,
+        },
+        'fetch_company_team: contact insert FAILED',
+      );
     }
   }
 

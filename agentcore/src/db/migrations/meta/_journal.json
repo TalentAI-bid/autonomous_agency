@@ -190,6 +190,13 @@
       "when": 1777929434738,
       "tag": "0026_soft_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1777974502931,
+      "tag": "0027_glossy_frog_thor",
+      "breakpoints": true
     }
   ]
 }

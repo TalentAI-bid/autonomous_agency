@@ -43,6 +43,12 @@ export const contacts = pgTable('contacts', {
   // the followup-scheduler skips the contact and the dashboard hides the
   // sequence buttons. Distinct from the per-sequence stopped_manual state.
   unsubscribed: boolean('unsubscribed').default(false).notNull(),
+  // The buyer-fit scorer picks ONE key person per company (the LLM-chosen
+  // decision-maker). That contact gets is_primary_contact=true; the existing
+  // top-3 LinkedIn-people contacts the team-fetch handler inserts keep the
+  // default false. Auto-outreach (when re-enabled) targets the primary;
+  // manual outreach defaults to it but the user can pick others.
+  isPrimaryContact: boolean('is_primary_contact').default(false).notNull(),
   // enrichmentRetryCount: integer('enrichment_retry_count').default(0), // Disabled — not migrated to production
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

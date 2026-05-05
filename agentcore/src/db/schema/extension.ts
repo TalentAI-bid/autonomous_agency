@@ -9,6 +9,10 @@ export const extensionSiteEnum = pgEnum('extension_site', [
 
 export const extensionTaskTypeEnum = pgEnum('extension_task_type', [
   'search_companies', 'fetch_company', 'search_businesses', 'fetch_business',
+  // Split fetch_company into two parallel adapters so a team-page failure
+  // doesn't block the company-info save (and vice versa). The legacy
+  // fetch_company type is kept for in-flight tasks during deploy.
+  'fetch_company_info', 'fetch_company_team',
 ]);
 
 export const extensionTaskStatusEnum = pgEnum('extension_task_status', [

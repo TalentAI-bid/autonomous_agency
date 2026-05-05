@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc, count, avg, gt, lt, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, desc, count, avg, gt, lt, inArray, isNull, sql, max } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents, pipelineErrors } from '../db/schema/index.js';
+import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents, pipelineErrors, conversations, conversationMessages } from '../db/schema/index.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -131,6 +131,48 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // DELETE /api/master-agents/:id
   fastify.delete<{ Params: { id: string } }>('/:id', async (request) => {
     const { id } = request.params;
+
+    // Surface deletion to any chat conversations linked to this agent BEFORE
+    // we delete the row. The FK is ON DELETE SET NULL so the conversation
+    // would otherwise silently lose its master_agent_id, leaving the chat
+    // showing a "Pipeline approved and launched!" message with no associated
+    // agent — which confused operators ("nothing happened after I clicked
+    // Create"). Now we append an `error`-type message + flip status so the
+    // chat UI shows the deletion explicitly.
+    try {
+      await withTenant(request.tenantId, async (tx) => {
+        const linkedConvos = await tx
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(and(
+            eq(conversations.masterAgentId, id),
+            eq(conversations.tenantId, request.tenantId),
+          ));
+
+        for (const convo of linkedConvos) {
+          const [maxRow] = await tx
+            .select({ maxOrder: max(conversationMessages.orderIndex) })
+            .from(conversationMessages)
+            .where(eq(conversationMessages.conversationId, convo.id));
+          await tx.insert(conversationMessages).values({
+            conversationId: convo.id,
+            role: 'assistant',
+            type: 'error',
+            content: 'Agent deleted. This pipeline is no longer active.',
+            orderIndex: (maxRow?.maxOrder ?? 0) + 1,
+          });
+          await tx.update(conversations)
+            .set({ status: 'abandoned', updatedAt: new Date() })
+            .where(eq(conversations.id, convo.id));
+        }
+      });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), agentId: id },
+        'Failed to annotate linked conversations on agent delete (non-fatal)',
+      );
+    }
+
     const result = await withTenant(request.tenantId, async (tx) => {
       return tx.delete(masterAgents)
         .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))

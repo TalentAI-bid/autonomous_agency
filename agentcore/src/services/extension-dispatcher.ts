@@ -1030,9 +1030,9 @@ async function handleCompanyTeamComplete(
     }
     const nameParts = cleanName.split(/\s+/);
     const pFirstName = nameParts[0] || '';
-    const pLastName = nameParts.slice(1).join(' ') || '';
-    if (!pFirstName || !pLastName) continue;
-    if (/^(view|profile)$/i.test(pFirstName) || /\b(view|profile)\b/i.test(pLastName)) {
+    const pLastName = nameParts.slice(1).join(' ');
+    if (!pFirstName) continue;
+    if (/^(view|profile)$/i.test(pFirstName) || (pLastName && /\b(view|profile)\b/i.test(pLastName))) {
       logger.debug({ pFirstName, pLastName }, 'Skipping person — name parts contain view/profile junk');
       continue;
     }
@@ -1040,11 +1040,17 @@ async function handleCompanyTeamComplete(
     try {
       if (person.linkedinUrl) {
         const [existing] = await withTenant(task.tenantId, async (tx) => {
+          const conds = [
+            eq(contacts.tenantId, task.tenantId),
+            eq(contacts.linkedinUrl, person.linkedinUrl),
+          ];
+          if (task.masterAgentId) {
+            conds.push(eq(contacts.masterAgentId, task.masterAgentId));
+            conds.push(eq(contacts.companyId, savedCompany.id));
+          }
           return tx.select({ id: contacts.id }).from(contacts)
-            .where(and(
-              eq(contacts.tenantId, task.tenantId),
-              eq(contacts.linkedinUrl, person.linkedinUrl),
-            )).limit(1);
+            .where(and(...conds))
+            .limit(1);
         });
         if (existing) continue;
       }
@@ -1052,6 +1058,7 @@ async function handleCompanyTeamComplete(
       const [inserted] = await withTenant(task.tenantId, async (tx) => {
         return tx.insert(contacts).values({
           tenantId: task.tenantId,
+          masterAgentId: task.masterAgentId ?? undefined,
           firstName: pFirstName,
           lastName: pLastName,
           title: sanitizeTitle(person.title),
@@ -1098,10 +1105,23 @@ async function handleCompanyTeamComplete(
     }
   }
 
-  logger.info(
-    { taskId: task.id, companyId: savedCompany.id, peopleScraped: rawPeople.length, contactsSaved: savedCount },
-    'fetch_company_team complete',
-  );
+  if (rawPeople.length > 0 && savedCount === 0) {
+    logger.warn(
+      {
+        taskId: task.id,
+        companyId: savedCompany.id,
+        peopleScraped: rawPeople.length,
+        contactsSaved: savedCount,
+        sampleNames: rawPeople.slice(0, 3).map((p) => p.name),
+      },
+      'fetch_company_team: scraped people but saved 0 contacts (silent drop — investigate sanitizer or dedup)',
+    );
+  } else {
+    logger.info(
+      { taskId: task.id, companyId: savedCompany.id, peopleScraped: rawPeople.length, contactsSaved: savedCount },
+      'fetch_company_team complete',
+    );
+  }
   return { extracted: rawPeople.length, saved: savedCount };
 }
 

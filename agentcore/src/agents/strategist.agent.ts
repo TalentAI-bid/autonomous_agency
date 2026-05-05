@@ -58,6 +58,36 @@ const COUNTRY_NAMES_IN_KEYWORDS_BANLIST = [
   'ireland', 'spain', 'italy', 'poland', 'lithuania', 'sweden', 'denmark',
   'norway', 'finland', 'portugal', 'austria', 'switzerland', 'luxembourg',
   'eu', 'europe', 'european union', 'united states', 'usa', 'us', 'canada',
+  // MENA + region groups (Round 8)
+  'united arab emirates', 'uae', 'saudi arabia', 'egypt', 'jordan', 'qatar',
+  'kuwait', 'bahrain', 'morocco',
+  'mena', 'middle east', 'gcc', 'north america',
+];
+
+// User's broad market-level inputs the strategist must EXPAND into specific
+// sub-categories (e.g. "fintech" → "payment infrastructure"). If a broad term
+// reaches the search step verbatim, the strategist hasn't done its job.
+// Whole-keyword match (lowercased + trimmed).
+const UNEXPANDED_BROAD_TERMS = [
+  'fintech', 'ai', 'artificial intelligence', 'machine learning',
+  'healthtech', 'health tech', 'health-tech',
+  'saas', 'b2b', 'b2b saas', 'b2c',
+  'tech', 'software', 'startup', 'technology',
+  'ecommerce', 'e-commerce',
+  'marketing', 'sales', 'hr',
+];
+
+// Phrases empirically shown to return zero LinkedIn results. Substring match
+// against the keyword's lowercase form (so "AI-powered fintech" trips
+// "ai-powered" even though it's part of a larger keyword).
+const BANNED_PHRASES = [
+  'hiring developers', 'hiring engineers', 'hiring software',
+  'looking for talent', 'looking for engineers',
+  'need engineers', 'need developers',
+  'gdpr compliant', 'gdpr compliance', 'hipaa compliant',
+  'ai-powered', 'ai powered', 'best-in-class', 'industry leading',
+  'scaling team', 'growing team',
+  'building the next generation', 'next generation of',
 ];
 
 export function validateStrategistOutput(strategy: SalesStrategy): { valid: boolean; errors: string[] } {
@@ -110,6 +140,38 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
           }
         }
       }
+
+      // Round 8 — broad-term rejection: the strategist must expand the
+      // user's broad input into specific sub-categories. Whole-keyword
+      // match against the lowercased + trimmed form.
+      for (const kw of kws) {
+        const lower = kw.trim().toLowerCase();
+        if (UNEXPANDED_BROAD_TERMS.includes(lower)) {
+          errors.push(
+            `step ${step.id} broad_term_in_keywords ("${kw}" is the user's broad input — strategist must expand to a specific sub-category, e.g. "payment infrastructure" instead of "fintech", "MLOps" instead of "AI")`,
+          );
+        }
+      }
+
+      // Round 8 — banned-phrase rejection (substring match).
+      for (const kw of kws) {
+        const lower = kw.toLowerCase();
+        for (const banned of BANNED_PHRASES) {
+          if (lower.includes(banned)) {
+            errors.push(
+              `step ${step.id} banned_phrase_in_keywords ("${kw}" contains "${banned}" — empirically returns zero LinkedIn results, use sub-category nouns only)`,
+            );
+            break;
+          }
+        }
+      }
+
+      // Round 8 — max 2 keywords per step (sub-category + optional synonym).
+      if (kws.length > 2) {
+        errors.push(
+          `step ${step.id} too_many_keywords (${kws.length}) — max 2 (sub-category + optional synonym), split into separate steps`,
+        );
+      }
     }
 
     if (isAnalysisStep) {
@@ -118,6 +180,31 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
     }
     if (step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING') {
       if (!params?.instruction) errors.push(`step ${step.id} missing params.instruction`);
+    }
+  }
+
+  // Round 8 — geography consistency across search steps. Warn-only; the
+  // strategist should reuse the same regions array on every search step,
+  // but a deliberate per-step variation is allowed.
+  if (liSearchSteps.length >= 2) {
+    const firstRegions = JSON.stringify(
+      ((liSearchSteps[0]?.params as PipelineStepParams | undefined)?.geographyFilter?.regions ?? [])
+        .slice()
+        .sort(),
+    );
+    const allSame = liSearchSteps.every(
+      (s) =>
+        JSON.stringify(
+          ((s.params as PipelineStepParams | undefined)?.geographyFilter?.regions ?? [])
+            .slice()
+            .sort(),
+        ) === firstRegions,
+    );
+    if (!allSame) {
+      logger.warn(
+        { steps: liSearchSteps.length },
+        'strategist: search steps have different geographyFilter.regions — may miss companies that LinkedIn matches across the full geography',
+      );
     }
   }
 
@@ -496,6 +583,21 @@ export class StrategistAgent extends BaseAgent {
     if (firstCheck.errors.some((e) => e.includes('groundingRequired') || e.includes('outputContract') || e.includes('instruction'))) {
       fixHints.push(
         'Each LLM_ANALYSIS / SCORING / CRAWL4AI step needs groundingRequired:true, outputContract (with forbiddenPhrases), and instruction. See the GROUNDED-OR-NOTHING section.',
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('broad_term_in_keywords'))) {
+      fixHints.push(
+        'Expand the user\'s broad market input ("fintech", "AI", "healthtech", "B2B SaaS", "ecommerce") into SPECIFIC sub-categories that companies use to describe themselves. "fintech" → ["payment infrastructure"], ["neobank"], ["embedded finance"]. "AI" → ["MLOps"], ["computer vision platform"]. ONE sub-category per step. The user\'s broad term must NEVER appear in searchKeywords.',
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('banned_phrase_in_keywords'))) {
+      fixHints.push(
+        'Remove urgency / stage / marketing phrases ("hiring developers", "GDPR compliant", "AI-powered", "scaling team", "Series A") from searchKeywords. These return zero LinkedIn results. Use sub-category NOUNS only ("payment infrastructure", "neobank", "MLOps").',
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('too_many_keywords'))) {
+      fixHints.push(
+        'Each search step has AT MOST 2 keywords: the sub-category name plus one optional synonym (e.g. ["neobank","digital bank"]). If you have more sub-categories, split them across SEPARATE search steps. Stacking 3+ keywords returns zero results.',
       );
     }
     const retryMessages = [

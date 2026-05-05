@@ -32,6 +32,22 @@ let currentStatus = 'idle';
 // per-task delays + batch cooldown are actually honored.
 let taskQueueTail = Promise.resolve();
 
+// Post-task pacing — pause between consecutive dispatches so we avoid
+// burning through LinkedIn's per-minute ceiling. Tuned per task type:
+// search results render slower than detail pages, team scrapes need extra
+// recovery before the next page load.
+const TASK_DELAYS_MS = {
+  search_companies: 8000,
+  fetch_company_info: 5000,
+  fetch_company_team: 6000,
+  fetch_company: 5000,
+  default: 4000,
+};
+function taskJitter(ms, fraction = 0.3) {
+  return Math.max(0, Math.round(ms + (Math.random() * 2 - 1) * fraction * ms));
+}
+function taskSleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
 // ─── LinkedIn geo-code map ─────────────────────────────────────────────────
 // LinkedIn's `companyHqGeo` URL parameter expects numeric geo IDs, not free
 // text. If we don't map, LinkedIn silently ignores the filter and returns
@@ -387,6 +403,12 @@ async function processTask(msg) {
     currentTask = null;
     currentMasterAgentName = null;
     broadcast('current_task', null);
+
+    // Post-task pace — sleep between consecutive dispatches so the
+    // single-flight queue spreads load over time. Per task type, with
+    // ±30% jitter to avoid a regular pattern.
+    const delayMs = TASK_DELAYS_MS[taskType] ?? TASK_DELAYS_MS.default;
+    await taskSleep(taskJitter(delayMs));
   }
 }
 

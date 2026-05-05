@@ -8,17 +8,55 @@ import {
   type SellerProfile,
   type ScrapedCompany,
   type FitScoreVerdict,
+  type FitScoreSignals,
 } from '../prompts/buyer-fit-score.prompt.js';
 import logger from '../utils/logger.js';
 
-const VALID_VERDICTS = new Set(['accept', 'reject', 'review']);
+// ─── Continuous fit-score validation + aggregation ─────────────────────────
 
-function isValidVerdict(v: unknown): v is FitScoreVerdict {
+interface RawComponentScore {
+  score: number | null;
+  reasoning: string;
+}
+
+interface RawLLMResponse {
+  component_scores: {
+    is_real_business: RawComponentScore;
+    icp_match: RawComponentScore;
+    buyer_signal_strength: RawComponentScore;
+    decision_maker_reachable: RawComponentScore;
+  };
+  key_person: FitScoreVerdict['key_person'];
+  key_person_problem: FitScoreVerdict['key_person_problem'];
+  signals: FitScoreSignals;
+  fit_summary: string;
+}
+
+function isFiniteScoreOrNull(v: unknown): v is number | null {
+  return v === null || (typeof v === 'number' && Number.isFinite(v));
+}
+
+function isFiniteScore(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isValidLLMResponse(v: unknown): v is RawLLMResponse {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
-  if (typeof o.verdict !== 'string' || !VALID_VERDICTS.has(o.verdict)) return false;
-  if (typeof o.fit_score !== 'number' || !Number.isFinite(o.fit_score)) return false;
-  if (typeof o.fit_score_explanation !== 'string') return false;
+  const cs = o.component_scores as Record<string, RawComponentScore> | undefined;
+  if (!cs) return false;
+  const required = ['is_real_business', 'icp_match', 'buyer_signal_strength', 'decision_maker_reachable'] as const;
+  for (const k of required) {
+    const c = cs[k];
+    if (!c || typeof c !== 'object') return false;
+    if (typeof c.reasoning !== 'string') return false;
+    if (k === 'decision_maker_reachable') {
+      if (!isFiniteScoreOrNull(c.score)) return false;
+    } else {
+      if (!isFiniteScore(c.score)) return false;
+    }
+  }
+  if (typeof o.fit_summary !== 'string' || !o.fit_summary) return false;
   if (!o.signals || typeof o.signals !== 'object') return false;
   const s = o.signals as Record<string, unknown>;
   for (const k of ['hiring_signals', 'funding_signals', 'growth_signals', 'tech_signals', 'pain_hypotheses']) {
@@ -27,6 +65,78 @@ function isValidVerdict(v: unknown): v is FitScoreVerdict {
   if (o.key_person !== null && (typeof o.key_person !== 'object' || Array.isArray(o.key_person))) return false;
   return true;
 }
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/**
+ * Compute the aggregate buyer_fit_score from the four components.
+ * - decision_maker_reachable.score === null  →  redistribute its 10% across
+ *   the other three components proportionally (40/30/20 → 40/0.9, 30/0.9, 20/0.9).
+ * - decision_maker_reachable.score numeric   →  weighted sum at 40/30/20/10.
+ *
+ * Returns { score, dataCompleteness } so the caller can stamp the verdict.
+ */
+export function computeBuyerFitScore(components: RawLLMResponse['component_scores']): { score: number; dataCompleteness: 'partial' | 'full' } {
+  const real = clamp(components.is_real_business.score ?? 0, 0, 100);
+  const icp = clamp(components.icp_match.score ?? 0, 0, 100);
+  const sig = clamp(components.buyer_signal_strength.score ?? 0, 0, 100);
+  const dmr = components.decision_maker_reachable.score;
+
+  if (dmr === null) {
+    const score = Math.round((real * 0.40 + icp * 0.30 + sig * 0.20) / 0.90);
+    return { score, dataCompleteness: 'partial' };
+  }
+  const dmrClamped = clamp(dmr, 0, 100);
+  const score = Math.round(real * 0.40 + icp * 0.30 + sig * 0.20 + dmrClamped * 0.10);
+  return { score, dataCompleteness: 'full' };
+}
+
+// ─── Citation grounding (drop hallucinated signals) ─────────────────────────
+
+function buildInputCorpus(scraped: ScrapedCompany): string {
+  const parts: string[] = [];
+  if (scraped.description) parts.push(scraped.description);
+  if (scraped.specialties?.length) parts.push(scraped.specialties.join(' '));
+  if (scraped.rawMeta?.length) parts.push(scraped.rawMeta.join(' '));
+  if (scraped.openPositions?.length) {
+    for (const p of scraped.openPositions) {
+      if (p?.title) parts.push(p.title);
+      if (p?.description) parts.push(p.description);
+    }
+  }
+  return parts.filter(Boolean).join(' ').toLowerCase();
+}
+
+function dropUngroundedSignals(signals: FitScoreSignals, scraped: ScrapedCompany): { cleaned: FitScoreSignals; droppedCount: number } {
+  const corpus = buildInputCorpus(scraped);
+  if (!corpus) {
+    // Nothing to verify against — pass-through. (Description-less company.)
+    return { cleaned: signals, droppedCount: 0 };
+  }
+  let dropped = 0;
+  const filterArr = <T extends { citation?: string }>(arr: T[] | undefined): T[] =>
+    (arr ?? []).filter((s) => {
+      if (!s?.citation) { dropped++; return false; }
+      if (corpus.includes(s.citation.toLowerCase())) return true;
+      dropped++;
+      return false;
+    });
+  return {
+    cleaned: {
+      hiring_signals: filterArr(signals.hiring_signals),
+      funding_signals: filterArr(signals.funding_signals),
+      growth_signals: filterArr(signals.growth_signals),
+      tech_signals: filterArr(signals.tech_signals),
+      // pain_hypotheses use stated_fact, not citation — keep as-is for now.
+      pain_hypotheses: signals.pain_hypotheses ?? [],
+    },
+    droppedCount: dropped,
+  };
+}
+
+// ─── Seller profile derivation (unchanged from prior task) ──────────────────
 
 function getSalesContext(masterAgent: MasterAgent): Record<string, unknown> | null {
   const cfg = (masterAgent.config ?? {}) as Record<string, unknown>;
@@ -122,7 +232,7 @@ export function deriveSellerProfile(masterAgent: MasterAgent): SellerProfile {
   return profile;
 }
 
-function buildScrapedCompany(company: typeof companies.$inferSelect): ScrapedCompany {
+export function buildScrapedCompany(company: typeof companies.$inferSelect): ScrapedCompany {
   const raw = (company.rawData ?? {}) as Record<string, unknown>;
   const get = <T>(key: string): T | undefined => raw[key] as T | undefined;
 
@@ -178,6 +288,13 @@ function buildScrapedCompany(company: typeof companies.$inferSelect): ScrapedCom
   };
 }
 
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Score one company. Never rejects — every company gets a continuous
+ * buyer_fit_score (0-100) plus a 4-component breakdown. Persists to
+ * companies.rawData.fitScore. Old rawData.triage is left untouched for audit.
+ */
 export async function scoreCompany(params: {
   tenantId: string;
   companyId: string;
@@ -186,7 +303,6 @@ export async function scoreCompany(params: {
 }): Promise<FitScoreVerdict | null> {
   const { tenantId, companyId, masterAgentId, force = false } = params;
 
-  // 1. Load company + master agent in a tenant-scoped transaction.
   const loaded = await withTenant(tenantId, async (tx) => {
     const [company] = await tx.select().from(companies)
       .where(and(eq(companies.tenantId, tenantId), eq(companies.id, companyId)))
@@ -206,18 +322,16 @@ export async function scoreCompany(params: {
     return null;
   }
 
-  // 2. Idempotency — return cached verdict unless force.
+  // Idempotency — return cached verdict unless force.
   const existingRaw = (loaded.company.rawData ?? {}) as Record<string, unknown>;
-  const existingTriage = existingRaw.triage as FitScoreVerdict | undefined;
-  if (existingTriage && !force) {
-    return existingTriage;
+  const existingFit = existingRaw.fitScore as FitScoreVerdict | undefined;
+  if (existingFit && !force) {
+    return existingFit;
   }
 
-  // 3. Build prompts.
   const seller = deriveSellerProfile(loaded.agent);
   const scraped = buildScrapedCompany(loaded.company);
 
-  // 4. Call LLM (outside transaction — network I/O).
   let parsed: unknown;
   try {
     parsed = await extractJSON<unknown>(
@@ -234,28 +348,63 @@ export async function scoreCompany(params: {
     return null;
   }
 
-  if (!isValidVerdict(parsed)) {
-    logger.warn({ companyId, parsed }, 'scoreCompany: invalid verdict shape from LLM');
+  if (!isValidLLMResponse(parsed)) {
+    logger.warn({ companyId, parsed }, 'scoreCompany: invalid response shape from LLM');
     return null;
   }
 
+  // Drop any signal whose citation is not a substring of the scraped input.
+  const { cleaned: cleanedSignals, droppedCount } = dropUngroundedSignals(parsed.signals, scraped);
+  if (droppedCount > 0) {
+    logger.info({ companyId, droppedCount }, 'scoreCompany: dropped ungrounded signals');
+  }
+
+  // If signals are empty after grounding check, cap buyer_signal_strength ≤ 30.
+  const totalSignals =
+    cleanedSignals.hiring_signals.length +
+    cleanedSignals.funding_signals.length +
+    cleanedSignals.growth_signals.length +
+    cleanedSignals.tech_signals.length;
+  const components = { ...parsed.component_scores };
+  if (totalSignals === 0 && (components.buyer_signal_strength.score ?? 0) > 30) {
+    components.buyer_signal_strength = {
+      score: 30,
+      reasoning: components.buyer_signal_strength.reasoning + ' (capped at 30 — no grounded signals)',
+    };
+  }
+
+  const { score, dataCompleteness } = computeBuyerFitScore(components);
+
+  // Build the verdict. The component types match RawComponentScore for the
+  // optional case (decision_maker_reachable can carry null score); for the
+  // three required components we coerce to non-null.
   const verdict: FitScoreVerdict = {
-    ...parsed,
-    triaged_at: new Date().toISOString(),
+    buyer_fit_score: score,
+    component_scores: {
+      is_real_business: { score: components.is_real_business.score ?? 0, reasoning: components.is_real_business.reasoning },
+      icp_match: { score: components.icp_match.score ?? 0, reasoning: components.icp_match.reasoning },
+      buyer_signal_strength: { score: components.buyer_signal_strength.score ?? 0, reasoning: components.buyer_signal_strength.reasoning },
+      decision_maker_reachable: { score: components.decision_maker_reachable.score, reasoning: components.decision_maker_reachable.reasoning },
+    },
+    key_person: parsed.key_person,
+    key_person_problem: parsed.key_person_problem,
+    signals: cleanedSignals,
+    fit_summary: parsed.fit_summary,
+    scored_at: new Date().toISOString(),
     model_used: SMART_MODEL,
+    data_completeness: dataCompleteness,
   };
 
-  // 5. Persist verdict (merge into rawData).
   await withTenant(tenantId, async (tx) => {
     await tx.update(companies).set({
-      rawData: { ...existingRaw, triage: verdict },
+      rawData: { ...existingRaw, fitScore: verdict },
       updatedAt: new Date(),
     }).where(and(eq(companies.tenantId, tenantId), eq(companies.id, companyId)));
   });
 
   logger.info(
-    { companyId, name: loaded.company.name, verdict: verdict.verdict, fit_score: verdict.fit_score },
-    'company triaged',
+    { companyId, name: loaded.company.name, score, dataCompleteness, droppedSignals: droppedCount },
+    'company scored',
   );
 
   return verdict;
@@ -267,10 +416,16 @@ export async function batchScoreCompanies(params: {
   companyIds?: string[];
   force?: boolean;
   concurrency?: number;
-}): Promise<{ triaged: number; accepted: number; rejected: number; reviewed: number; errors: number }> {
+}): Promise<{
+  scored: number;
+  errors: number;
+  distribution: Record<'80-100' | '60-79' | '40-59' | '20-39' | '0-19', number>;
+  avgScore: number;
+  fullDataCount: number;
+  partialDataCount: number;
+}> {
   const { tenantId, masterAgentId, companyIds, force = false, concurrency = 3 } = params;
 
-  // Resolve target list.
   let targets: string[];
   if (companyIds && companyIds.length) {
     targets = companyIds;
@@ -281,14 +436,21 @@ export async function batchScoreCompanies(params: {
         : and(
             eq(companies.tenantId, tenantId),
             eq(companies.masterAgentId, masterAgentId),
-            sql`(${companies.rawData} -> 'triage') IS NULL`,
+            sql`(${companies.rawData} -> 'fitScore') IS NULL`,
           );
       return tx.select({ id: companies.id }).from(companies).where(filter);
     });
     targets = rows.map((r) => r.id);
   }
 
-  const counts = { triaged: 0, accepted: 0, rejected: 0, reviewed: 0, errors: 0 };
+  const counts: { scored: number; errors: number; sum: number; full: number; partial: number; dist: Record<'80-100' | '60-79' | '40-59' | '20-39' | '0-19', number> } = {
+    scored: 0,
+    errors: 0,
+    sum: 0,
+    full: 0,
+    partial: 0,
+    dist: { '80-100': 0, '60-79': 0, '40-59': 0, '20-39': 0, '0-19': 0 },
+  };
   const chunkSize = Math.max(1, concurrency);
 
   for (let i = 0; i < targets.length; i += chunkSize) {
@@ -301,16 +463,34 @@ export async function batchScoreCompanies(params: {
         counts.errors += 1;
         continue;
       }
-      counts.triaged += 1;
-      if (r.value.verdict === 'accept') counts.accepted += 1;
-      else if (r.value.verdict === 'reject') counts.rejected += 1;
-      else counts.reviewed += 1;
+      counts.scored += 1;
+      counts.sum += r.value.buyer_fit_score;
+      if (r.value.data_completeness === 'full') counts.full += 1;
+      else counts.partial += 1;
+      const s = r.value.buyer_fit_score;
+      if (s >= 80) counts.dist['80-100'] += 1;
+      else if (s >= 60) counts.dist['60-79'] += 1;
+      else if (s >= 40) counts.dist['40-59'] += 1;
+      else if (s >= 20) counts.dist['20-39'] += 1;
+      else counts.dist['0-19'] += 1;
     }
     logger.info(
-      { masterAgentId, processed: Math.min(i + chunkSize, targets.length), total: targets.length, ...counts },
+      { masterAgentId, processed: Math.min(i + chunkSize, targets.length), total: targets.length, scored: counts.scored, errors: counts.errors },
       'batchScoreCompanies progress',
     );
   }
 
-  return counts;
+  const avgScore = counts.scored > 0 ? Math.round(counts.sum / counts.scored) : 0;
+  logger.info(
+    { masterAgentId, scored: counts.scored, distribution: counts.dist, avgScore, fullDataCount: counts.full, partialDataCount: counts.partial },
+    'fit score batch complete',
+  );
+  return {
+    scored: counts.scored,
+    errors: counts.errors,
+    distribution: counts.dist,
+    avgScore,
+    fullDataCount: counts.full,
+    partialDataCount: counts.partial,
+  };
 }

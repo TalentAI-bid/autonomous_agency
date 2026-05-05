@@ -15,7 +15,7 @@ const batchBodySchema = z.object({
 export default async function fitScoreRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
 
-  // POST /api/triage/companies/:id  — re-triage a single company
+  // POST /api/fit-score/companies/:id — re-score a single company
   fastify.post<{ Params: { id: string } }>('/companies/:id', async (request) => {
     const { id } = request.params;
     const parsed = scoreOneBodySchema.safeParse(request.body ?? {});
@@ -46,7 +46,7 @@ export default async function fitScoreRoutes(fastify: FastifyInstance) {
     return { data: { verdict } };
   });
 
-  // POST /api/triage/agents/:masterAgentId/batch  — triage all (or selected) companies for an agent
+  // POST /api/fit-score/agents/:masterAgentId/batch — score all (or selected) companies for an agent
   // (Fastify default request timeout is 0/none; this endpoint can run long.)
   fastify.post<{ Params: { masterAgentId: string } }>(
     '/agents/:masterAgentId/batch',
@@ -75,7 +75,7 @@ export default async function fitScoreRoutes(fastify: FastifyInstance) {
     },
   );
 
-  // GET /api/triage/agents/:masterAgentId/stats  — verdict counts + rejection-reason breakdown
+  // GET /api/fit-score/agents/:masterAgentId/stats — score-band distribution + averages
   fastify.get<{ Params: { masterAgentId: string } }>('/agents/:masterAgentId/stats', async (request) => {
     const { masterAgentId } = request.params;
 
@@ -90,57 +90,57 @@ export default async function fitScoreRoutes(fastify: FastifyInstance) {
     const stats = await withTenant(request.tenantId, async (tx) => {
       const totalsResult = await tx.execute<{
         total: string;
-        triaged: string;
-        accepted: string;
-        rejected: string;
-        reviewed: string;
+        scored: string;
+        unscored: string;
+        full: string;
+        partial: string;
+        avg_score: string;
+        band_80_100: string;
+        band_60_79: string;
+        band_40_59: string;
+        band_20_39: string;
+        band_0_19: string;
       }>(sql`
         SELECT
           COUNT(*)::text AS total,
-          COUNT(${companies.rawData} -> 'triage')::text AS triaged,
-          COUNT(*) FILTER (WHERE ${companies.rawData} -> 'triage' ->> 'verdict' = 'accept')::text AS accepted,
-          COUNT(*) FILTER (WHERE ${companies.rawData} -> 'triage' ->> 'verdict' = 'reject')::text AS rejected,
-          COUNT(*) FILTER (WHERE ${companies.rawData} -> 'triage' ->> 'verdict' = 'review')::text AS reviewed
+          COUNT(${companies.rawData} -> 'fitScore')::text AS scored,
+          (COUNT(*) - COUNT(${companies.rawData} -> 'fitScore'))::text AS unscored,
+          COUNT(*) FILTER (WHERE ${companies.rawData} -> 'fitScore' ->> 'data_completeness' = 'full')::text AS full,
+          COUNT(*) FILTER (WHERE ${companies.rawData} -> 'fitScore' ->> 'data_completeness' = 'partial')::text AS partial,
+          COALESCE(ROUND(AVG((${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int)), 0)::text AS avg_score,
+          COUNT(*) FILTER (WHERE (${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int >= 80)::text AS band_80_100,
+          COUNT(*) FILTER (WHERE (${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int BETWEEN 60 AND 79)::text AS band_60_79,
+          COUNT(*) FILTER (WHERE (${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int BETWEEN 40 AND 59)::text AS band_40_59,
+          COUNT(*) FILTER (WHERE (${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int BETWEEN 20 AND 39)::text AS band_20_39,
+          COUNT(*) FILTER (WHERE (${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int BETWEEN 0 AND 19)::text AS band_0_19
         FROM ${companies}
         WHERE ${companies.tenantId} = ${request.tenantId}
           AND ${companies.masterAgentId} = ${masterAgentId}
       `);
 
-      const reasonsResult = await tx.execute<{ rejection_reason: string | null; n: string }>(sql`
-        SELECT
-          ${companies.rawData} -> 'triage' ->> 'rejection_reason' AS rejection_reason,
-          COUNT(*)::text AS n
-        FROM ${companies}
-        WHERE ${companies.tenantId} = ${request.tenantId}
-          AND ${companies.masterAgentId} = ${masterAgentId}
-          AND ${companies.rawData} -> 'triage' ->> 'verdict' = 'reject'
-        GROUP BY 1
-      `);
-
-      return {
-        totals: totalsResult.rows?.[0],
-        reasons: reasonsResult.rows ?? [],
-      };
+      return totalsResult.rows?.[0] ?? null;
     });
 
-    const t = stats.totals ?? { total: '0', triaged: '0', accepted: '0', rejected: '0', reviewed: '0' };
-    const total = Number(t.total ?? 0);
-    const triaged = Number(t.triaged ?? 0);
-    const by_rejection_reason: Record<string, number> = {};
-    for (const r of stats.reasons) {
-      const key = r.rejection_reason ?? 'unspecified';
-      by_rejection_reason[key] = Number(r.n ?? 0);
-    }
+    const t = stats ?? {
+      total: '0', scored: '0', unscored: '0', full: '0', partial: '0', avg_score: '0',
+      band_80_100: '0', band_60_79: '0', band_40_59: '0', band_20_39: '0', band_0_19: '0',
+    };
 
     return {
       data: {
-        total,
-        triaged,
-        untriaged: Math.max(0, total - triaged),
-        accepted: Number(t.accepted ?? 0),
-        rejected: Number(t.rejected ?? 0),
-        reviewed: Number(t.reviewed ?? 0),
-        by_rejection_reason,
+        total: Number(t.total ?? 0),
+        scored: Number(t.scored ?? 0),
+        unscored: Number(t.unscored ?? 0),
+        avgScore: Number(t.avg_score ?? 0),
+        fullDataCount: Number(t.full ?? 0),
+        partialDataCount: Number(t.partial ?? 0),
+        distribution: {
+          '80-100': Number(t.band_80_100 ?? 0),
+          '60-79': Number(t.band_60_79 ?? 0),
+          '40-59': Number(t.band_40_59 ?? 0),
+          '20-39': Number(t.band_20_39 ?? 0),
+          '0-19': Number(t.band_0_19 ?? 0),
+        },
       },
     };
   });

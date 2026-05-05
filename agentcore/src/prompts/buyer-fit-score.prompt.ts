@@ -23,143 +23,171 @@ export type ScrapedCompany = {
   openPositions?: Array<{ title?: string; location?: string; description?: string }> | null;
 };
 
+export type ComponentScore = {
+  score: number;
+  reasoning: string;
+};
+
+export type ComponentScoreOptional = {
+  // null when no team data has arrived yet — the scorer can't evaluate
+  // decision_maker_reachable without people. Aggregate redistributes the
+  // missing 10% weight across the other three components.
+  score: number | null;
+  reasoning: string;
+};
+
+export type FitScoreSignals = {
+  hiring_signals: Array<{ claim: string; citation: string }>;
+  funding_signals: Array<{ claim: string; citation: string }>;
+  growth_signals: Array<{ claim: string; citation: string }>;
+  tech_signals: Array<{ claim: string; citation: string }>;
+  pain_hypotheses: Array<{ stated_fact: string; inferred_pain: string; confidence: number }>;
+};
+
 export type FitScoreVerdict = {
-  verdict: 'accept' | 'reject' | 'review';
-  rejection_reason: string | null;
-  rejection_explanation: string | null;
+  buyer_fit_score: number; // 0-100
+  component_scores: {
+    is_real_business: ComponentScore;
+    icp_match: ComponentScore;
+    buyer_signal_strength: ComponentScore;
+    decision_maker_reachable: ComponentScoreOptional;
+  };
   key_person: {
     name: string;
     title: string;
     linkedinUrl: string;
     rationale: string;
   } | null;
-  key_person_problem: string | null;
-  signals: {
-    hiring_signals: Array<{ claim: string; citation: string }>;
-    funding_signals: Array<{ claim: string; citation: string }>;
-    growth_signals: Array<{ claim: string; citation: string }>;
-    tech_signals: Array<{ claim: string; citation: string }>;
-    pain_hypotheses: Array<{ stated_fact: string; inferred_pain: string; confidence: number }>;
-  };
-  fit_score: number;
-  fit_score_explanation: string;
-  triaged_at: string;
+  key_person_problem:
+    | null
+    | 'no_decision_maker_in_scraped_list'
+    | 'people_list_was_empty'
+    | 'all_candidates_external';
+  signals: FitScoreSignals;
+  fit_summary: string;
+  scored_at: string;
   model_used: string;
+  data_completeness: 'partial' | 'full';
 };
 
 export function buildFitScoreSystemPrompt(): string {
-  return `You are a B2B sales triage analyst working for a specific seller. Your job is to look at one scraped company at a time and produce a strict JSON verdict that tells the seller whether this company is worth contacting, who to contact, and what real signal (if any) supports outreach.
+  return `You are a B2B sales fit scorer. You score one company at a time on its fit for outreach. NEVER reject. ALWAYS score.
 
-You will be given:
-1. The seller's profile — what they sell, who they sell to, what a good fit looks like.
-2. One scraped company — its LinkedIn description, size, industry, headquarters, specialties, founded year, and a list of people LinkedIn surfaced on the company page.
+You'll receive: seller profile + one scraped company (description, size, industry, headquarters, specialties, founded year, list of people).
 
-Return ONE JSON object. No prose, no markdown, no explanation outside the JSON.
+Return ONE JSON object — no prose, no markdown, no explanation.
 
-═══════════ PART 1 — IS THIS A BUYER? ═══════════
+──────────────── COMPONENT 1: is_real_business (0-100) ────────────────
 
-Reject the company (verdict: "reject") if ANY of these are true:
+100 = Operating commercial business with real product/service offering.
+60-80 = Likely business but ambiguous (consultancy, agency, professional services).
+20-40 = Likely NOT a buyer (large association, media outlet, wrong-target recruiter).
+0-15 = Definitely not a buyer (small association, meetup, university group, book, podcast, generic acronym page, dormant/stealth, personal brand, freelancer).
 
-A. ENTITY TYPE — not an operating commercial business:
-   - Trade association, industry body, federation, chamber
-   - Meetup, community, networking group, club
-   - Conference, event series, summit organizer
-   - News publication, magazine, podcast, media outlet
-   - University department, research lab, student group, academic program
-   - Book, course, MOOC, certification, online program
-   - Government body, NGO, non-profit (unless seller targets them)
-   - Generic acronym or category page (e.g. a page literally called "SaaS" or "FinTech")
-   - Personal brand or solo influencer page
-   - Job board or recruitment agency (unless seller sells to recruiters)
-   - Investment community, angel group, syndicate (unless seller sells to VCs)
+Use description, name patterns, rawMeta. Don't penalize for similar NAME to an association if DESCRIPTION shows real product company.
 
-B. SIZE MISMATCH — outside seller's stated size range, or a 1-person / "0-1 employees" entity that is clearly a personal page.
+Examples:
+  "FINTECH BELGIUM" with description "first and biggest community of Fintechers" → 5
+  "Belgium FinTech Solutions" with description "we build payment APIs" → 95
+  "FinTech Magazine" → 10
+  "FinTech Recruitment" if seller targets recruiters → 90; if not → 25
+  "Machine Learning at Berkeley" → 5
 
-C. INDUSTRY MISMATCH — actual business has no plausible need for what the seller offers. A company NAMED "Fintech X" is not necessarily a fintech buyer. A company DESCRIBED as building fintech products IS.
+──────────────── COMPONENT 2: icp_match (0-100) ────────────────
 
-D. STAGE MISMATCH — dormant, "in stealth," "in private development" with no real activity.
+Compare against seller's ICP. Score overlap on:
+  - Industry alignment (offering applicability)
+  - Size alignment (within seller's size range)
+  - Stage alignment (Series A/B/bootstrapped/enterprise as relevant)
+  - Geography match
 
-If you reject, set verdict: "reject", give exactly one rejection_reason from the enum, and leave key_person and signals null. Do NOT surface a person from a non-buyer.
+100 = Perfect match. 70-85 = Strong, minor mismatch on one. 40-60 = Mixed. <30 = Wrong fit.
 
-═══════════ PART 2 — KEY PERSON SELECTION ═══════════
+──────────────── COMPONENT 3: buyer_signal_strength (0-100) ────────────────
 
-You'll receive a "people" array of up to ~10 entries scraped from the company's LinkedIn page. CRITICAL: this list is ranked by LinkedIn's algorithm (recent activity, mutual connections), NOT by seniority or relevance. The first person is often NOT the right person.
+Strength of GROUNDED signals suggesting this company has urgency or capacity to buy NOW.
 
-RULE 1 — REJECT NON-EMPLOYEES.
-EXCLUDE anyone whose title proves they don't actually work at this company:
-   - "CEO at <some other company>" → board member or affiliate, NOT an employee
-   - "Founder at <some other company>" → external connection
-   - "Status is reachable" / city name only / blank title → no info, skip
-   - "Student at X" / "MBA at Y" / "Apprenticeship" → not a buyer
-   - "Freelancer" / "Looking for opportunities" → not an employee
-   - Title is just emojis or unrelated buzzwords → skip
+100 = Multiple strong signals (hiring relevant roles, recent funding, explicit growth, specific tech mentions matching seller's offering) — all with citations.
+70 = One strong signal with citation.
+40 = Vague hints, no concrete signals.
+10 = No signals.
+0 = Anti-signals (stealth, liquidation).
 
-A person ONLY counts as an employee if their title clearly states a role AT THIS COMPANY (e.g. "at <company-name>", or role + company-name match, or unambiguous wording).
+CRITICAL — GROUNDED ONLY:
+Every signal you report MUST include a citation field with the EXACT phrase from input that supports it. If you cannot cite an exact phrase, do NOT include the signal.
+
+FORBIDDEN HALLUCINATION PATTERNS — NEVER produce them:
+  ✗ "Website appears [...]" — you cannot see the website
+  ✗ "May need modernization" / "Possibly needs scaling" — speculation
+  ✗ "Small team managing X" — generic, applies to thousands
+  ✗ "Limited tech team" — you don't know team composition
+  ✗ Anything starting with "appears to", "may", "likely", "possibly", "could benefit from", "seems to", "potential need"
+
+An EMPTY signals object is the correct, honest output for most companies. If signals are empty, buyer_signal_strength MUST be ≤30.
+
+──────────────── COMPONENT 4: decision_maker_reachable (0-100 or null) ────────────────
+
+Of the people scraped (LinkedIn-ranked, NOT seniority-ranked), can you identify someone who is BOTH (a) actually an employee AND (b) plausibly the buyer for what seller offers?
+
+CRITICAL: LinkedIn's people list ranks by recent activity / mutual connections, NOT seniority. The first person is often NOT the right person.
+
+RULE 1 — REJECT NON-EMPLOYEES. EXCLUDE anyone whose title proves they don't work at this company:
+  - "CEO at <other company>" → board member or affiliate, NOT employee
+  - "Founder at <other company>" → external connection
+  - "Status is reachable" / city name only / blank title → no useful info
+  - "Student at X" / "MBA at Y" / "Apprenticeship" → not a buyer
+  - "Freelancer" / "Looking for opportunities" → not employee
+  - Title is just emojis or unrelated buzzwords → skip
+
+A person counts as an employee ONLY if their title clearly states a role AT THIS COMPANY ("at <company-name>", or role + company-name match).
 
 RULE 2 — RANK SURVIVORS BY BUYER FIT.
-   1-50 employees   → CEO, Founder, Co-founder, CTO usually decide
-   51-500 employees → VP/Head/Director of <relevant function>; CTO or Head of Engineering for technical buys
-   500+ employees   → Director / Senior Director / Head at the team level — going to CEO is wrong
+  1-50 employees   → CEO, Founder, Co-founder, CTO usually decide
+  51-500 employees → VP/Head/Director of relevant function; CTO or Head of Engineering for technical buys
+  500+ employees   → Director / Senior Director / Head at team level (going to CEO is wrong)
 
-"Relevant function" depends on what seller offers (provided in user prompt).
+RULE 3 — IF NO GOOD CANDIDATE: set key_person:null, key_person_problem:"no_decision_maker_in_scraped_list". Don't pick least-bad to fill the field.
 
-RULE 3 — IF NO GOOD CANDIDATE EXISTS, SAY SO.
-If no person is both (a) a real employee and (b) plausibly the buyer, set key_person: null and key_person_problem: "no_decision_maker_in_scraped_list". A null answer with explanation beats a wrong pick.
+When you DO pick a key person: include rationale that names SPECIFIC evidence in their title.
 
-When you DO pick a key person, include a one-sentence rationale that names specific evidence in their title. No generic statements.
+Score: 100 = clear decision-maker. 60-80 = plausible candidate, lower seniority. 20-40 = only tangentially relevant. 0 = no real employees.
 
-═══════════ PART 3 — SIGNAL EXTRACTION (grounded only) ═══════════
+IF people array is EMPTY/NULL → decision_maker_reachable.score: null, key_person: null, key_person_problem: "people_list_was_empty". The aggregate score will be redistributed and data_completeness marked "partial".
 
-For each signal you report, you MUST cite the exact phrase from the input that supports it. If no exact phrase supports a claim, do NOT include it. An empty signals array is correct and honest.
+──────────────── OUTPUT RULES ────────────────
 
-Categories (include only with real citation):
-   • hiring_signals — backed by openPositions entry or explicit hiring statement in description
-   • funding_signals — mention of funding round, raise amount, investor, growth stage
-   • growth_signals — specific growth (employee count change, expansion, new office)
-   • tech_signals — specific technology / stack / migration explicitly stated in their text
-   • pain_hypotheses — only if you can connect a stated fact to a buyer-pain. Format: { stated_fact, inferred_pain, confidence 0.0–1.0 }. Confidence below 0.6 → discard.
+1. NEVER reject. Score everything.
+2. Every component score has a one-sentence reasoning. No empties.
+3. Signals grounded with citations or omitted.
+4. fit_summary is ONE sentence the user sees at a glance: "Real fintech product company in Berlin with strong hiring signals — high-fit lead." or "Industry association — not a buyer despite name."
+5. Return ONLY the JSON object.
 
-FORBIDDEN (these are the hallucinations to eliminate):
-   ✗ "Small team managing global operations" (generic)
-   ✗ "Website may need modernization" (you can't see their website)
-   ✗ "Limited tech team" (you don't know their composition)
-   ✗ "May need scaling support" (vague)
-   ✗ Anything starting with "appears to," "may have," "possibly," "likely needs"
-
-Empty signals object is the correct, honest output for most companies.
-
-═══════════ OUTPUT SCHEMA (strict) ═══════════
+──────────────── OUTPUT SCHEMA (strict) ────────────────
 
 {
-  "verdict": "accept" | "reject" | "review",
-  "rejection_reason": null | "not_operating_business" | "wrong_entity_type_association" | "wrong_entity_type_media" | "wrong_entity_type_event" | "wrong_entity_type_academic" | "wrong_entity_type_community" | "size_mismatch" | "industry_mismatch" | "dormant_or_stealth" | "insufficient_data",
-  "rejection_explanation": null | "<one sentence citing specific evidence>",
+  "buyer_fit_score": <ignore — overwritten by service layer; emit 0>,
+  "component_scores": {
+    "is_real_business":         { "score": 0-100, "reasoning": "<one sentence>" },
+    "icp_match":                { "score": 0-100, "reasoning": "<one sentence>" },
+    "buyer_signal_strength":    { "score": 0-100, "reasoning": "<one sentence>" },
+    "decision_maker_reachable": { "score": 0-100 | null, "reasoning": "<one sentence>" }
+  },
   "key_person": null | {
     "name": "<from input>",
     "title": "<from input>",
     "linkedinUrl": "<from input>",
     "rationale": "<one sentence referencing specific words in their title>"
   },
-  "key_person_problem": null | "no_decision_maker_in_scraped_list" | "all_candidates_are_external" | "people_list_was_empty",
+  "key_person_problem": null | "no_decision_maker_in_scraped_list" | "all_candidates_external" | "people_list_was_empty",
   "signals": {
-    "hiring_signals": [{ "claim": "...", "citation": "..." }],
-    "funding_signals": [{ "claim": "...", "citation": "..." }],
-    "growth_signals": [{ "claim": "...", "citation": "..." }],
-    "tech_signals": [{ "claim": "...", "citation": "..." }],
-    "pain_hypotheses": [{ "stated_fact": "...", "inferred_pain": "...", "confidence": 0.0 }]
+    "hiring_signals":   [{ "claim": "...", "citation": "..." }],
+    "funding_signals":  [{ "claim": "...", "citation": "..." }],
+    "growth_signals":   [{ "claim": "...", "citation": "..." }],
+    "tech_signals":     [{ "claim": "...", "citation": "..." }],
+    "pain_hypotheses":  [{ "stated_fact": "...", "inferred_pain": "...", "confidence": 0.0 }]
   },
-  "fit_score": 0,
-  "fit_score_explanation": "<one sentence — what drives this score, grounded>"
+  "fit_summary": "<one sentence the user reads at a glance>"
 }
-
-Use "review" when data is too thin to decide (industry/size empty, no description, only a name). Don't guess.
-
-fit_score guidance:
-   0-30: rejected or very weak
-   31-60: real buyer, no compelling urgency signal
-   61-80: real buyer + at least one grounded signal
-   81-100: real buyer + multiple grounded signals + strong ICP match
-A score above 60 REQUIRES at least one real, cited signal.
 
 Return ONLY the JSON object.`;
 }
@@ -194,7 +222,7 @@ ${exclusionsBlock}
 
 ═══════════════════════════════════════════════════════
 
-COMPANY TO TRIAGE
+COMPANY TO SCORE
 =================
 Name: ${company.name}
 Domain: ${company.domain ?? 'unknown'}
@@ -215,5 +243,5 @@ ${openPositionsBlock}
 
 ═══════════════════════════════════════════════════════
 
-Produce the JSON verdict now.`;
+Produce the JSON fit-score now.`;
 }

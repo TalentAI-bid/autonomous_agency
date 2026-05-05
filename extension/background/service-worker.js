@@ -347,6 +347,14 @@ async function processTask(msg) {
 
 function buildUrl(site, type, params) {
   if (site === 'linkedin' && type === 'search_companies') {
+    // Server is now the single source of truth for the search URL — when
+    // params.searchUrl is provided by agentcore (built via the
+    // linkedin-url.service with companyHqGeo + companySize facets), use it
+    // as-is. The fall-through below is a backward-compat path for any
+    // extension_tasks rows enqueued by an older agentcore.
+    if (typeof params.searchUrl === 'string' && params.searchUrl.startsWith('https://www.linkedin.com/')) {
+      return params.searchUrl;
+    }
     const keywords = encodeURIComponent(params.industry || '');
     const locLower = (params.location || '').toLowerCase().trim();
     const geoCode = LINKEDIN_GEO_CODES[locLower];

@@ -13,6 +13,7 @@ import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.j
 import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import { env } from '../config/env.js';
 import * as agentSelectorPrompt from '../prompts/agent-selector.prompt.js';
+import { buildLinkedInCompanySearchURL } from '../services/linkedin-url.service.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
@@ -621,23 +622,62 @@ export class MasterAgent extends BaseAgent {
                     continue;
                   }
 
+                  // ── New contract path (PART 2/3): the strategist emitted
+                  // searchKeywords + geographyFilter + sizeFilter on the step.
+                  // Build ONE searchUrl per step via the LinkedIn URL builder
+                  // and enqueue a single task. The extension navigates straight
+                  // to that URL.
+                  const stepKeywords = (step.params?.searchKeywords as string[] | undefined);
+                  const stepGeoFilter = (step.params?.geographyFilter as { regions?: string[] } | undefined);
+                  const stepSizeFilter = (step.params?.sizeFilter as { min?: number; max?: number } | undefined);
+                  if (Array.isArray(stepKeywords) && stepKeywords.length > 0 && stepGeoFilter?.regions?.length) {
+                    const searchUrl = buildLinkedInCompanySearchURL({
+                      searchKeywords: stepKeywords,
+                      geographyFilter: { regions: stepGeoFilter.regions },
+                      sizeFilter:
+                        typeof stepSizeFilter?.min === 'number' && typeof stepSizeFilter?.max === 'number'
+                          ? { min: stepSizeFilter.min, max: stepSizeFilter.max }
+                          : undefined,
+                    });
+                    await enqueueExtensionTask({
+                      tenantId: this.tenantId,
+                      masterAgentId,
+                      site: 'linkedin',
+                      type: step.action as 'search_companies' | 'fetch_company',
+                      params: {
+                        ...(step.params ?? {}),
+                        searchUrl,
+                        limit: (step.params?.limit as number) ?? 20,
+                      },
+                      priority: 7,
+                    });
+                    extensionTasksDispatched++;
+                    logger.info(
+                      { masterAgentId, stepId: step.id, action: step.action, searchUrl, queryRationale: step.params?.queryRationale },
+                      'Pipeline step dispatched (LINKEDIN_EXTENSION via searchUrl)',
+                    );
+                    continue;
+                  }
+
+                  // ── Legacy fan-out: term × location. We still synthesise a
+                  // searchUrl per pair so the extension uses the geo-URN facet
+                  // (companyHqGeo) instead of folding location into keywords.
                   for (const term of searchTerms) {
                     for (const loc of locs) {
+                      const searchUrl = buildLinkedInCompanySearchURL({
+                        searchKeywords: [term],
+                        geographyFilter: { regions: [loc] },
+                      });
                       await enqueueExtensionTask({
                         tenantId: this.tenantId,
                         masterAgentId,
                         site: 'linkedin',
-                        // step.action is e.g. 'search_companies' — the strategist
-                        // generates the right action name per strategy.
                         type: step.action as 'search_companies' | 'fetch_company',
-                        // Spread step.params for forward compatibility (the
-                        // strategist may emit a structured `searchUrl` that the
-                        // extension uses as-is). Legacy negativeKeywords /
-                        // requiredAttributes fields ride along but are now
-                        // INERT — no pre-save filter reads them. Filtering is
-                        // LLM-driven via the buyer-fit scorer.
                         params: {
                           ...(step.params ?? {}),
+                          searchUrl,
+                          // Legacy industry/location kept for any consumer that
+                          // still reads them (extension fallback path).
                           industry: term,
                           location: loc,
                           limit: (step.params?.limit as number) ?? 20,
@@ -649,7 +689,7 @@ export class MasterAgent extends BaseAgent {
                   }
                   logger.info(
                     { masterAgentId, stepId: step.id, action: step.action, dispatched: searchTerms.length * locs.length },
-                    'Pipeline step dispatched (LINKEDIN_EXTENSION)',
+                    'Pipeline step dispatched (LINKEDIN_EXTENSION legacy fan-out)',
                   );
                   continue;
                 }

@@ -4,6 +4,7 @@ import { eq, and, desc, lt, lte, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies } from '../db/schema/index.js';
 import { dispatchJob } from '../services/queue.service.js';
+import { enqueueExtensionTask } from '../services/extension-dispatcher.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 const createCompanySchema = z.object({
@@ -167,5 +168,58 @@ export default async function companyRoutes(fastify: FastifyInstance) {
     }
 
     return { total: stuckCompanies.length, dispatched };
+  });
+
+  // ─── Manual refetch endpoints (parallel-fetch refactor) ─────────────────
+  // POST /api/companies/:id/refetch-info  — re-enqueue fetch_company_info
+  // POST /api/companies/:id/refetch-team  — re-enqueue fetch_company_team
+  // The dashboard surfaces these on the company detail panel so the user
+  // can manually retry one half of the parallel fetch without re-running
+  // the whole discovery.
+
+  async function loadCompanyForRefetch(tenantId: string, id: string) {
+    const [company] = await withTenant(tenantId, async (tx) => {
+      return tx.select({
+        id: companies.id,
+        masterAgentId: companies.masterAgentId,
+        linkedinUrl: companies.linkedinUrl,
+      })
+        .from(companies)
+        .where(and(eq(companies.tenantId, tenantId), eq(companies.id, id)))
+        .limit(1);
+    });
+    if (!company) throw new NotFoundError('Company', id);
+    if (!company.linkedinUrl) {
+      throw new ValidationError('Company has no linkedinUrl — cannot refetch from LinkedIn.');
+    }
+    return company;
+  }
+
+  fastify.post<{ Params: { id: string } }>('/:id/refetch-info', async (request) => {
+    const { id } = request.params;
+    const company = await loadCompanyForRefetch(request.tenantId, id);
+    await enqueueExtensionTask({
+      tenantId: request.tenantId,
+      masterAgentId: company.masterAgentId ?? undefined,
+      site: 'linkedin',
+      type: 'fetch_company_info',
+      params: { linkedinUrl: company.linkedinUrl, companyId: company.id },
+      priority: 5,
+    });
+    return { data: { enqueued: true, companyId: company.id, type: 'fetch_company_info' } };
+  });
+
+  fastify.post<{ Params: { id: string } }>('/:id/refetch-team', async (request) => {
+    const { id } = request.params;
+    const company = await loadCompanyForRefetch(request.tenantId, id);
+    await enqueueExtensionTask({
+      tenantId: request.tenantId,
+      masterAgentId: company.masterAgentId ?? undefined,
+      site: 'linkedin',
+      type: 'fetch_company_team',
+      params: { linkedinUrl: company.linkedinUrl, companyId: company.id },
+      priority: 5,
+    });
+    return { data: { enqueued: true, companyId: company.id, type: 'fetch_company_team' } };
   });
 }

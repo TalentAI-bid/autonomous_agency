@@ -630,11 +630,12 @@ export class MasterAgent extends BaseAgent {
                         // step.action is e.g. 'search_companies' — the strategist
                         // generates the right action name per strategy.
                         type: step.action as 'search_companies' | 'fetch_company',
-                        // Spread step.params first so the strategist's
-                        // negativeKeywords + requiredAttributes ride along
-                        // into extension_tasks.params for both client-side
-                        // (extension) and server-side (extension-dispatcher
-                        // pre-save filter) consumption.
+                        // Spread step.params for forward compatibility (the
+                        // strategist may emit a structured `searchUrl` that the
+                        // extension uses as-is). Legacy negativeKeywords /
+                        // requiredAttributes fields ride along but are now
+                        // INERT — no pre-save filter reads them. Filtering is
+                        // LLM-driven via the buyer-fit scorer.
                         params: {
                           ...(step.params ?? {}),
                           industry: term,

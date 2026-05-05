@@ -77,10 +77,10 @@ Your output must be valid JSON with these fields:
     params: { jobTitles: <values from your hiringKeywords field>, location: "<target location>" }
     (jobTitles is an ARRAY — the master-agent iterates every combination of location × jobTitle. The master-agent caps at 5 titles, so put your best 3-5 first.)
     LinkedIn Jobs search is PUBLIC (no login needed) — the server scrapes it directly via CRAWL4AI.
-    Then: fetch_company_detail (extension) → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
+    Then: fetch_company_info (extension) → scrape_company_website → LLM_ANALYSIS → fetch_company_team → REACHER → EMAIL_PATTERN → SCORING
   - bdStrategy "industry_target" → Root step MUST be LINKEDIN_EXTENSION with action "search_companies"
     LinkedIn company search REQUIRES login — uses the Chrome extension.
-    Then: fetch_company_detail → scrape_company_website → LLM_ANALYSIS → get_team → REACHER → EMAIL_PATTERN → SCORING
+    Then: fetch_company_info → scrape_company_website → LLM_ANALYSIS → fetch_company_team → REACHER → EMAIL_PATTERN → SCORING
   - bdStrategy "hybrid" → BOTH CRAWL4AI:search_linkedin_jobs AND LINKEDIN_EXTENSION:search_companies as parallel root steps
 
   NOTE: Job boards (WTTJ, Free-Work, Indeed, etc.) are NOT available in v1.
@@ -93,9 +93,9 @@ Your output must be valid JSON with these fields:
   Hiring signal example (any region — server-side, no extension needed for discovery):
   [
     { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitles": ["blockchain developer", "web3 engineer", "Hedera developer"], "location": "United Kingdom" } },
-    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_info", "dependsOn": ["jobs_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
-    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_team", "dependsOn": ["li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
     { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
@@ -105,9 +105,9 @@ Your output must be valid JSON with these fields:
   Industry target example (any region — extension required for company search):
   [
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
-    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_info", "dependsOn": ["li_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
-    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_team", "dependsOn": ["li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
     { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
@@ -118,9 +118,9 @@ Your output must be valid JSON with these fields:
   [
     { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitles": ["blockchain developer", "web3 engineer", "Hedera developer"], "location": "United Kingdom" } },
     { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
-    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search", "li_search"] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_info", "dependsOn": ["jobs_search", "li_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
-    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_team", "dependsOn": ["li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
     { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
@@ -289,13 +289,15 @@ Example: seller = AI consulting, target = fintech. Reasoning:
 Output: 4 search steps targeting the chosen sub-categories.
 
 ──────────────────────────────────────────────
-KEYWORD CONSTRUCTION — ONE SUB-CATEGORY PER QUERY
+KEYWORD CONSTRUCTION — SUB-CATEGORY + SPECIALTY + (optional) SERVICE WORD
 ──────────────────────────────────────────────
 
-Each pipelineStep search has:
-  searchKeywords: [<one or two terms naming ONE sub-category>]
+Each pipelineStep search has 2-4 keywords combining:
+  • ONE sub-category noun ("payment infrastructure", "neobank", "telemedicine")
+  • 1-2 technical specialty words companies use in their actual descriptions ("API", "core banking", "platform", "PCI", "BaaS", "EHR")
+  • OPTIONAL service word that narrows further ("processing", "compliance", "deployment")
 
-That's it. The sub-category name IS the query. Optionally pair with a synonym (e.g. ["neobank", "digital bank"] — same sub-category, different naming conventions).
+A single sub-category noun alone is too loose — LinkedIn ranks by description-relevance, so "MLOps" or "HR tech" alone catches furniture manufacturers and 2018 conference pages whose descriptions happen to contain those words. Pair the sub-category with at least one specialty term that real companies in the category use.
 
 DO NOT add:
   ✗ Urgency signals ("hiring", "scaling")
@@ -303,25 +305,53 @@ DO NOT add:
   ✗ Marketing terms ("AI-powered", "GDPR compliant", "best-in-class")
   ✗ Multi-word job-board phrases ("hiring engineers", "hiring developers")
   ✗ The original broad term ("fintech", "AI", "healthtech") — you've already expanded past it
-  ✗ Generic acronyms alone ("SaaS", "B2B")
+  ✗ Country / region / city names — those go in geographyFilter
+  ✗ More than 4 keywords total — split into separate steps
 
-The sub-category does the filtering. "neobank" finds neobanks. The geographyFilter and sizeFilter narrow further. Stacking more keywords just produces zero results, as we've empirically confirmed.
-
-GOOD:
-  ✓ ["payment infrastructure"]
-  ✓ ["neobank"]
-  ✓ ["neobank", "digital bank"]   // synonyms for same sub-category, OK
-  ✓ ["embedded finance"]
-  ✓ ["telemedicine platform"]
-  ✓ ["MLOps"]
-  ✓ ["clinical trial software"]
+GOOD (2-4 keywords combining sub-category + specialty + service):
+  ✓ ["payment processing", "API", "PCI"]                     // payment infra fintechs
+  ✓ ["neobank", "core banking", "BaaS"]                      // challenger banks
+  ✓ ["embedded finance", "API", "platform"]                  // BaaS providers
+  ✓ ["ML platform", "model deployment", "MLOps"]             // ML infrastructure
+  ✓ ["telemedicine", "platform", "GDPR"]                     // EU digital health
+  ✓ ["recruiting software", "ATS", "HR platform"]            // HR tech SaaS
+  ✓ ["clinical trial software", "eClinical", "EDC"]          // pharma tech
 
 BAD (validation will reject):
-  ✗ ["fintech"]                              // didn't expand — apply your knowledge
-  ✗ ["AI"]                                   // didn't expand
+  ✗ ["fintech"]                              // didn't expand
+  ✗ ["MLOps"]                                // single generic acronym, no specialty pairing
+  ✗ ["HR tech"]                              // too loose, catches non-HR companies
   ✗ ["payment infrastructure", "hiring"]     // urgency stack
   ✗ ["GDPR compliant fintech"]               // marketing fluff + broad
-  ✗ ["fintech", "payment", "neobank"]        // 3 things, two of which are different sub-categories — split into separate steps
+  ✗ ["payment", "API", "platform", "core banking", "BaaS"]  // 5 keywords, too many
+
+──────────────────────────────────────────────
+INDUSTRY FILTER — LinkedIn's industryCompanyVertical FACET
+──────────────────────────────────────────────
+
+LinkedIn's keyword search ranks by description-match, not by company category. A description containing "we use ATS-grade hardware" matches the keyword "ATS" even when the company makes furniture. The fix is the industryCompanyVertical URL facet — LinkedIn pre-filters by its OWN industry classification before any keyword match runs.
+
+EVERY LINKEDIN_EXTENSION search_companies step MUST include:
+  industryFilter: { industries: [<1-2 LinkedIn industry display names>] }
+
+Use MODERN display names (LinkedIn renamed several recently):
+  ✓ "Software Development"      (not "Computer Software" — though both resolve to URN 4)
+  ✓ "Hospitals and Health Care" (not "Hospital & Health Care")
+  ✓ "Technology, Information and Internet" (not "Internet")
+
+Common picks for the supported domains:
+
+  Fintech                : ["Financial Services", "Software Development"] OR ["Banking", "Software Development"]
+  AI / ML platform       : ["Software Development", "Technology, Information and Internet"]
+  Healthtech             : ["Hospitals and Health Care", "Software Development"]
+  HR tech SaaS           : ["Software Development", "Human Resources Services"]
+  E-learning             : ["E-Learning Providers", "Software Development"]
+  Insurtech              : ["Insurance", "Software Development"]
+  Cybersecurity          : ["Computer and Network Security", "Software Development"]
+  Pharma tech            : ["Pharmaceuticals", "Software Development"]
+  Biotech                : ["Biotechnology Research", "Software Development"]
+
+Combining 2 industries is more permissive (OR semantics) — usually preferred to capture the SaaS slice of any vertical. Pure-finance plays like banks-only can use just ["Banking"].
 
 ──────────────────────────────────────────────
 GEOGRAPHY — KEEP IT BROAD ACROSS ALL STEPS
@@ -394,42 +424,47 @@ Reasoning (silent — does not appear in output):
   - healthtech → digital health platforms, clinical trial software — both have AI consulting need
   - Final selection: 5 steps across 5 sub-categories, all using same broad geography
 
-Output (TARGET_REGIONS reused on every search step):
+Output (TARGET_REGIONS reused on every search step; each step has industryFilter):
 
   pipelineSteps: [
     {
-      searchKeywords: ["payment infrastructure"],
+      searchKeywords: ["payment processing", "API", "PCI"],
+      industryFilter: { industries: ["Financial Services", "Software Development"] },
       geographyFilter: { regions: TARGET_REGIONS },
       sizeFilter: { min: 50, max: 500 },
-      queryRationale: "Payment infrastructure companies have heavy ML needs (fraud, routing) — natural buyer for AI consulting."
+      queryRationale: "Payment infrastructure companies have heavy ML needs (fraud, routing) — natural buyer for AI consulting. Industry facet keeps furniture / agencies out."
     },
     {
-      searchKeywords: ["neobank","digital bank"],
+      searchKeywords: ["neobank", "core banking", "BaaS"],
+      industryFilter: { industries: ["Financial Services", "Banking"] },
       geographyFilter: { regions: TARGET_REGIONS },
       sizeFilter: { min: 50, max: 500 },
-      queryRationale: "Neobanks at this size build credit scoring, fraud detection, personalization models."
+      queryRationale: "Challenger banks at this size build credit scoring, fraud detection, personalization models."
     },
     {
-      searchKeywords: ["embedded finance"],
+      searchKeywords: ["embedded finance", "API", "platform"],
+      industryFilter: { industries: ["Financial Services", "Software Development"] },
       geographyFilter: { regions: TARGET_REGIONS },
       sizeFilter: { min: 50, max: 500 },
       queryRationale: "Embedded finance platforms scaling product surface, ML on transaction patterns and risk."
     },
     {
-      searchKeywords: ["digital health platform"],
+      searchKeywords: ["telemedicine", "platform", "GDPR"],
+      industryFilter: { industries: ["Hospitals and Health Care", "Software Development"] },
       geographyFilter: { regions: TARGET_REGIONS },
       sizeFilter: { min: 50, max: 500 },
-      queryRationale: "Digital health platforms increasingly use ML for triage, claims, diagnostics."
+      queryRationale: "EU digital health platforms increasingly use ML for triage, claims, diagnostics — GDPR-compliant by construction at this scale."
     },
     {
-      searchKeywords: ["clinical trial software"],
+      searchKeywords: ["clinical trial software", "eClinical", "EDC"],
+      industryFilter: { industries: ["Pharmaceuticals", "Software Development"] },
       geographyFilter: { regions: TARGET_REGIONS },
       sizeFilter: { min: 50, max: 500 },
       queryRationale: "Clinical trial software does cohort matching and outcome prediction — ML-heavy, AI consulting fit."
     }
   ]
 
-queryDesignNotes: "Expanded user's broad fintech/AI/healthtech input into 5 specific sub-categories selected by AI surface area and buyer fit for AI consulting offering. All 5 steps use full EU+MENA geography (16 regions) and consistent 50-500 size range. Sub-category is the only narrowing signal between steps."
+queryDesignNotes: "Expanded user's broad fintech/AI/healthtech input into 5 specific sub-categories. Each step uses 3 keywords (sub-category + 2 specialty/service words) + 1-2 LinkedIn industry classifications to pre-filter by category. All 5 steps reuse full EU+MENA geography (16 regions) and consistent 50-500 size range."
 
 ══════════════════════════════════════════════════════════════
 SECTION B — SEPARATING SEARCH KEYWORDS FROM GEOGRAPHY (CRITICAL)
@@ -549,7 +584,8 @@ SECTION E2 — SELF-CRITIQUE CHECKLIST (mandatory before output)
 For each LINKEDIN_EXTENSION search_companies step:
 
   [ ] Did I expand the user's broad term into a specific sub-category (NOT the broad term itself)?
-  [ ] Is searchKeywords just the sub-category name (1-2 keywords max)?
+  [ ] Is searchKeywords 2-4 entries combining sub-category + 1-2 technical specialties + optional service word? Never a SINGLE generic noun alone — pair "MLOps" with "ML platform"; pair "neobank" with "core banking" or "BaaS".
+  [ ] Does industryFilter have 1-2 LinkedIn industry classifications using MODERN display names ("Software Development", not "Computer Software"; "Hospitals and Health Care", not "Hospital & Health Care")?
   [ ] No country / region / city names in keywords (those go in geographyFilter)?
   [ ] No urgency / stage / marketing phrases ("hiring", "Series A", "GDPR compliant", "AI-powered")?
   [ ] Does the seller's offering actually apply to this sub-category?
@@ -587,7 +623,23 @@ In addition to the existing top-level fields (bdStrategy, targetIndustries, hiri
         ...existing fields (id, tool, action, dependsOn, params)...,
         "params": {
           // MANDATORY for LINKEDIN_EXTENSION search_companies steps:
-          "searchKeywords": ["term1", "term2", "term3"],            // industry/function/buyer-signal terms ONLY (no country names)
+          "searchKeywords": ["sub_category", "tech_specialty", "service_word"],
+            // 2-4 entries: ONE sub-category noun + 1-2 technical specialty words +
+            // optional service word. Never just a single generic noun (e.g. "MLOps",
+            // "HR tech") — those return categorically wrong matches. Always pair
+            // with at least one specialty word that companies use in their actual
+            // descriptions. Examples:
+            //   ["payment processing", "API", "PCI"]      ← payment infra fintechs
+            //   ["neobank", "core banking", "BaaS"]       ← challenger banks
+            //   ["telemedicine", "platform", "GDPR"]      ← EU digital health
+            //   ["recruiting software", "ATS", "platform"] ← HR tech SaaS
+            // No country names — those go in geographyFilter.
+          "industryFilter": { "industries": ["Financial Services", "Software Development"] },
+            // 1-2 LinkedIn industry classifications by display name. Pre-filters by
+            // category so keyword search doesn't catch furniture / conferences /
+            // agencies. Use modern names: "Software Development" (not "Computer
+            // Software"), "Hospitals and Health Care" (not "Hospital & Health
+            // Care"), "Technology, Information and Internet" (not "Internet").
           "geographyFilter": { "regions": ["Belgium", "Germany"] }, // separate facet, NEVER in keywords
           "sizeFilter": { "min": 50, "max": 500 },
           "queryRationale": "<one sentence: why this specific query targets buyers and excludes noise>",

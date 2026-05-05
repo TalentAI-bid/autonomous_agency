@@ -42,6 +42,20 @@ export async function processFitScoreJob(job: Job<FitScoreJobData>): Promise<{ o
   }
   const { company } = ctx;
 
+  // Orphan-team observability: a company more than 5 minutes old that still
+  // has no teamFetchedAt likely had its fetch_company_team task fail silently
+  // (extension disconnected, rate limit hit, scrape returned empty). Surface
+  // it so we can investigate; don't block scoring (fit-score works on
+  // partial data).
+  const teamFetchedAt = (company.rawData as { teamFetchedAt?: string } | null)?.teamFetchedAt;
+  const ageMs = Date.now() - new Date(company.createdAt).getTime();
+  if (!teamFetchedAt && Number.isFinite(ageMs) && ageMs > 5 * 60_000) {
+    logger.warn(
+      { companyId, companyName: company.name, ageMinutes: Math.round(ageMs / 60_000) },
+      'company has no team data after 5 minutes — team task may have failed silently',
+    );
+  }
+
   // Debounce: skip if scored within the last DEBOUNCE_WINDOW_MS.
   if (reason !== 'manual_rescore') {
     const lastScored = (company.rawData as { fitScore?: { scored_at?: string } } | null)?.fitScore?.scored_at;
@@ -73,7 +87,7 @@ export async function processFitScoreJob(job: Job<FitScoreJobData>): Promise<{ o
   if (verdict.key_person?.linkedinUrl) {
     try {
       await withTenant(tenantId, async (tx) => {
-        const [existing] = await tx.select({ id: contacts.id })
+        const [existing] = await tx.select({ id: contacts.id, masterAgentId: contacts.masterAgentId })
           .from(contacts)
           .where(and(
             eq(contacts.tenantId, tenantId),
@@ -82,10 +96,17 @@ export async function processFitScoreJob(job: Job<FitScoreJobData>): Promise<{ o
           .limit(1);
 
         if (existing) {
-          await tx.update(contacts).set({
+          // Backfill masterAgentId only if the existing row is unattributed.
+          // Don't overwrite a non-null masterAgentId — that contact already
+          // belongs to another agent's pipeline.
+          const updates: Record<string, unknown> = {
             isPrimaryContact: true,
             updatedAt: new Date(),
-          }).where(eq(contacts.id, existing.id));
+          };
+          if (!existing.masterAgentId && company.masterAgentId) {
+            updates.masterAgentId = company.masterAgentId;
+          }
+          await tx.update(contacts).set(updates).where(eq(contacts.id, existing.id));
         } else {
           // The LLM picked a person who isn't yet a saved contact (perhaps
           // because they weren't in the top-3 the team handler inserted).
@@ -96,6 +117,7 @@ export async function processFitScoreJob(job: Job<FitScoreJobData>): Promise<{ o
           const lastName = parts.slice(1).join(' ') || '';
           await tx.insert(contacts).values({
             tenantId,
+            masterAgentId: company.masterAgentId ?? undefined,
             firstName,
             lastName,
             title: verdict.key_person!.title,

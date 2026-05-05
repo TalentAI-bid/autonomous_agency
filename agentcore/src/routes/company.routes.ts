@@ -28,10 +28,10 @@ export default async function companyRoutes(fastify: FastifyInstance) {
 
   // GET /api/companies
   fastify.get<{
-    Querystring: { cursor?: string; limit?: string; search?: string; industry?: string; masterAgentId?: string; includeIncomplete?: string; hideRejected?: string; sortBy?: string };
+    Querystring: { cursor?: string; limit?: string; search?: string; industry?: string; masterAgentId?: string; includeIncomplete?: string; sortBy?: string };
   }>('/', async (request) => {
     const limit = Math.min(parseInt(request.query.limit || '100', 10), 100);
-    const { cursor, search, industry, masterAgentId, includeIncomplete, hideRejected, sortBy } = request.query;
+    const { cursor, search, industry, masterAgentId, includeIncomplete, sortBy } = request.query;
     const sortByFitScore = sortBy === 'fit_score';
 
     const results = await withTenant(request.tenantId, async (tx) => {
@@ -39,9 +39,7 @@ export default async function companyRoutes(fastify: FastifyInstance) {
       if (includeIncomplete !== 'true') {
         conditions.push(sql`COALESCE(${companies.dataCompleteness}, 0) >= 10`);
       }
-      if (hideRejected === 'true') {
-        conditions.push(sql`COALESCE(${companies.rawData} -> 'triage' ->> 'verdict', '') <> 'reject'`);
-      }
+      // No more reject-filter — every company is shown, sorted by score.
       if (industry) conditions.push(eq(companies.industry, industry));
       if (masterAgentId) conditions.push(eq(companies.masterAgentId, masterAgentId));
       if (search) {
@@ -58,8 +56,14 @@ export default async function companyRoutes(fastify: FastifyInstance) {
           throw new ValidationError('Invalid cursor');
         }
       }
+      // Sort by the new fitScore.buyer_fit_score; the legacy triage.fit_score
+      // is COALESCE-d in as a fallback so migrated rows still rank correctly
+      // until they're re-scored.
       const orderBy = sortByFitScore
-        ? [sql`(${companies.rawData} -> 'triage' ->> 'fit_score')::numeric DESC NULLS LAST`, desc(companies.createdAt)]
+        ? [sql`COALESCE(
+              (${companies.rawData} -> 'fitScore' ->> 'buyer_fit_score')::int,
+              (${companies.rawData} -> 'triage' ->> 'fit_score')::int
+            ) DESC NULLS LAST`, desc(companies.createdAt)]
         : [desc(companies.createdAt)];
       return tx.select().from(companies)
         .where(and(...conditions))

@@ -119,16 +119,24 @@ export interface PainPoint {
 }
 
 export interface CompanyFitScoreVerdict {
-  verdict: 'accept' | 'reject' | 'review';
-  rejection_reason: string | null;
-  rejection_explanation: string | null;
+  buyer_fit_score: number;
+  component_scores: {
+    is_real_business: { score: number; reasoning: string };
+    icp_match: { score: number; reasoning: string };
+    buyer_signal_strength: { score: number; reasoning: string };
+    decision_maker_reachable: { score: number | null; reasoning: string };
+  };
   key_person: {
     name: string;
     title: string;
     linkedinUrl: string;
     rationale: string;
   } | null;
-  key_person_problem: string | null;
+  key_person_problem:
+    | null
+    | 'no_decision_maker_in_scraped_list'
+    | 'people_list_was_empty'
+    | 'all_candidates_external';
   signals: {
     hiring_signals: Array<{ claim: string; citation: string }>;
     funding_signals: Array<{ claim: string; citation: string }>;
@@ -136,10 +144,20 @@ export interface CompanyFitScoreVerdict {
     tech_signals: Array<{ claim: string; citation: string }>;
     pain_hypotheses: Array<{ stated_fact: string; inferred_pain: string; confidence: number }>;
   };
-  fit_score: number;
-  fit_score_explanation: string;
-  triaged_at: string;
+  fit_summary: string;
+  scored_at: string;
   model_used: string;
+  data_completeness: 'partial' | 'full';
+}
+
+// Legacy verdict shape — preserved on rawData.triage for any companies whose
+// score was migrated from the old binary verdict (accept/reject/review). New
+// scoring writes to rawData.fitScore using CompanyFitScoreVerdict above.
+export interface LegacyTriageVerdict {
+  verdict: 'accept' | 'reject' | 'review';
+  fit_score: number;
+  fit_score_explanation?: string;
+  triaged_at?: string;
 }
 
 export interface Company {
@@ -158,7 +176,12 @@ export interface Company {
   painPoints?: PainPoint[];
   websiteStatus?: string;
   seoScore?: number;
-  rawData?: Record<string, unknown> & { triage?: CompanyFitScoreVerdict };
+  rawData?: Record<string, unknown> & {
+    fitScore?: CompanyFitScoreVerdict;
+    triage?: LegacyTriageVerdict;
+    infoFetchedAt?: string;
+    teamFetchedAt?: string;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -610,7 +633,6 @@ export interface CompanyFilters {
   masterAgentId?: string;
   cursor?: string;
   limit?: number;
-  hideRejected?: boolean;
   sortBy?: 'createdAt' | 'fit_score';
 }
 

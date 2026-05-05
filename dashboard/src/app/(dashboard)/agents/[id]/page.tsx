@@ -62,17 +62,15 @@ export default function AgentDetailPage() {
   const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 100 });
   const { data: stats } = useAgentStats(id);
   const { data: emails } = useAgentEmails(id);
-  // Companies tab state — toggles for the data-completeness filter (default
-  // hides zero/low-completeness stubs) and the triage-reject filter (default
-  // hides rejects). Cursor stack supports paging back/forward.
+  // Companies tab state — only toggle now is the data-completeness filter
+  // (default hides zero/low-completeness stubs). Nothing is hidden by score
+  // anymore; companies sort by buyer_fit_score and the user scrolls.
   const [showOnlyWithData, setShowOnlyWithData] = useState(true);
-  const [showRejected, setShowRejected] = useState(false);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null]);
   const currentCursor = cursorStack[cursorStack.length - 1] ?? null;
   const { data: companiesData } = useAgentCompanies(id, {
     includeIncomplete: !showOnlyWithData,
     cursor: currentCursor,
-    hideRejected: !showRejected,
     sortBy: 'fit_score',
   });
   const { data: documentsData } = useAgentDocuments(id);
@@ -430,16 +428,6 @@ export default function AgentDetailPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setShowRejected((v) => !v);
-                  setCursorStack([null]);
-                }}
-                className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
-              >
-                {showRejected ? 'Hide rejected' : 'Show rejected'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
                   setShowOnlyWithData((v) => !v);
                   setCursorStack([null]);
                 }}
@@ -466,7 +454,9 @@ export default function AgentDetailPage() {
                   const openJob = typeof raw.openJob === 'string' ? raw.openJob : '';
                   const jobUrl = typeof raw.jobUrl === 'string' ? raw.jobUrl : '';
                   const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
-                  const triage = (raw.triage as CompanyFitScoreVerdict | undefined);
+                  // Prefer the new continuous fitScore; fall back to nothing
+                  // for unscored companies (they're still shown — never hidden).
+                  const fitScore = (raw.fitScore as CompanyFitScoreVerdict | undefined);
 
                   return (
                     <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">
@@ -480,10 +470,10 @@ export default function AgentDetailPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <FitScoreBadge score={triage?.fit_score} explanation={triage?.fit_score_explanation} />
-                            {triage?.verdict === 'reject' && (
-                              <Badge variant="outline" className="text-xs text-red-400 border-red-500/30">
-                                {triage.rejection_reason ?? 'reject'}
+                            <FitScoreBadge score={fitScore?.buyer_fit_score} explanation={fitScore?.fit_summary} />
+                            {fitScore?.data_completeness === 'partial' && (
+                              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/40">
+                                partial
                               </Badge>
                             )}
                             {company.funding && (

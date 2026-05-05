@@ -125,17 +125,15 @@ export function useAgentCompanies(
   options: {
     includeIncomplete?: boolean;
     cursor?: string | null;
-    hideRejected?: boolean;
     sortBy?: 'createdAt' | 'fit_score';
   } = {},
 ) {
-  const { includeIncomplete = false, cursor, hideRejected = false, sortBy } = options;
+  const { includeIncomplete = false, cursor, sortBy } = options;
   return useQuery({
-    queryKey: ['agents', id, 'companies', { includeIncomplete, cursor: cursor ?? null, hideRejected, sortBy: sortBy ?? null }],
+    queryKey: ['agents', id, 'companies', { includeIncomplete, cursor: cursor ?? null, sortBy: sortBy ?? null }],
     queryFn: () => apiGetPaginated<Company>(`/master-agents/${id}/companies`, {
       ...(includeIncomplete ? { includeIncomplete: 'true' } : {}),
       ...(cursor ? { cursor } : {}),
-      ...(hideRejected ? { hideRejected: 'true' } : {}),
       ...(sortBy ? { sortBy } : {}),
     }),
     enabled: !!id,

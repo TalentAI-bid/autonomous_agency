@@ -81,7 +81,11 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const deep = (company.rawData ?? {}) as CompanyDeepData;
-  const triage = (company.rawData as { triage?: CompanyFitScoreVerdict } | undefined)?.triage;
+  // Prefer the new continuous fit-score (rawData.fitScore). Fall back to a
+  // legacy triage row only if migration synthesized a fitScore from the old
+  // verdict — the migration writes both shapes so reading fitScore is safe
+  // for migrated rows too.
+  const fitScore = (company.rawData as { fitScore?: CompanyFitScoreVerdict } | undefined)?.fitScore;
 
   const painPointIcon = (type: string) => {
     switch (type) {
@@ -141,7 +145,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* Triage panel — always rendered (offers a "Triage now" button when no verdict yet) */}
-      <FitScorePanel companyId={company.id} triage={triage} />
+      <FitScorePanel companyId={company.id} triage={fitScore} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Basic Info */}

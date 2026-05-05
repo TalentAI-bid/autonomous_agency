@@ -152,7 +152,24 @@ export interface PipelineStepParams {
   // Free-form params still allowed (industries, location, jobTitles, etc.)
   [key: string]: unknown;
 
-  // Mandatory for LINKEDIN_EXTENSION + CRAWL4AI discovery steps
+  // Mandatory for LINKEDIN_EXTENSION search_companies steps (new contract).
+  // searchKeywords match name/description/specialties; geographyFilter is the
+  // companyHqGeo facet; sizeFilter is the companySize facet. Geography NEVER
+  // belongs in searchKeywords — that's the bug this contract fixes.
+  searchKeywords?: string[];
+  geographyFilter?: { regions: string[] };
+  sizeFilter?: { min: number; max: number };
+  queryRationale?: string;
+
+  // Server-built LinkedIn search URL (master-agent dispatcher synthesises
+  // this from searchKeywords + geographyFilter + sizeFilter via
+  // services/linkedin-url.service). When present, the extension navigates
+  // straight to it and skips its own URL construction.
+  searchUrl?: string;
+
+  // Legacy / inert (kept on the type for backwards-compat with older saved
+  // strategies — the pre-save filter has been removed and these are no
+  // longer read by anyone).
   negativeKeywords?: string[];
   requiredAttributes?: {
     minSize: number;

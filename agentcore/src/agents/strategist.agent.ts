@@ -485,11 +485,31 @@ export class StrategistAgent extends BaseAgent {
       return { strategy: savedStrategy, status: 'reused' };
     }
 
-    // Call LLM for strategy. Wrap in retry + deterministic fallback so the
-    // strategist always returns a usable SalesStrategy, even when the LLM is
-    // flaky. When userExplicitBdStrategy is set, it's passed as a hard
-    // constraint to the prompt so the LLM generates the matching keyword set.
+    // Call LLM for strategy. Round 8 contract: returns null when validation
+    // failed twice (and there was no LLM transport-level safe deterministic
+    // fallback). On null, we try last-known-good before failing loud.
     const strategy = await this.generateStrategyWithFallback(ctx, mission, masterAgentId, userExplicitBdStrategy);
+
+    if (!strategy) {
+      // Round 8 — fail-loud path. Try last-known-good before giving up.
+      const lkg = await this.loadLastKnownGoodStrategy(masterAgentId);
+      if (lkg) {
+        logger.warn(
+          { masterAgentId },
+          'StrategistAgent: reusing last-known-good strategy after validation failure',
+        );
+        lkg._source = 'fallback_reused';
+        await this.clearCurrentAction();
+        return { strategy: lkg, status: 'fallback_reused' };
+      }
+      // No backup — surface to dashboard, do not enqueue search tasks.
+      logger.error(
+        { masterAgentId },
+        'StrategistAgent: validation failed twice and no last-known-good available — failing loud',
+      );
+      await this.clearCurrentAction();
+      return { strategy: null, status: 'failed', error: 'strategy_generation_failed' };
+    }
 
     if (userExplicitBdStrategy) {
       // User locked the choice in chat. Force the bdStrategy regardless of
@@ -531,6 +551,9 @@ export class StrategistAgent extends BaseAgent {
       if (!this.pipelineStepsMatchStrategy(strategy.pipelineSteps, userExplicitBdStrategy)) {
         const before = strategy.pipelineSteps?.map(s => `${s.tool}:${s.action}`) ?? [];
         strategy.pipelineSteps = this.buildDeterministicPipelineSteps(userExplicitBdStrategy);
+        // Round 8 — tag provenance so dashboard debugging can distinguish
+        // deterministic-fallback strategies from LLM-generated.
+        strategy._source = 'deterministic';
         logger.warn(
           {
             masterAgentId,
@@ -580,16 +603,29 @@ export class StrategistAgent extends BaseAgent {
       }
     }
 
-    // Save to masterAgent.config.salesStrategy
+    // Save to masterAgent.config.salesStrategy. Round 8 — backup-on-save:
+    // copy the existing strategy to config.salesStrategyPrevious first,
+    // so the next failed-LLM-validation can fall back to it via
+    // loadLastKnownGoodStrategy. Single JSONB column, no migration.
     await withTenant(this.tenantId, async (tx) => {
       const [agent] = await tx.select().from(masterAgents)
         .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
         .limit(1);
       if (agent) {
         const currentConfig = (agent.config as Record<string, unknown>) ?? {};
+        const previousStrategy = currentConfig.salesStrategy as SalesStrategy | undefined;
+        const newConfig: Record<string, unknown> = {
+          ...currentConfig,
+          salesStrategy: strategy,
+        };
+        // Only back up the prior strategy if it has pipelineSteps (i.e. it
+        // was a real generation, not a half-written placeholder).
+        if (previousStrategy?.pipelineSteps?.length) {
+          newConfig.salesStrategyPrevious = previousStrategy;
+        }
         await tx.update(masterAgents)
           .set({
-            config: { ...currentConfig, salesStrategy: strategy },
+            config: newConfig,
             updatedAt: new Date(),
           })
           .where(eq(masterAgents.id, masterAgentId));
@@ -619,18 +655,47 @@ export class StrategistAgent extends BaseAgent {
   }
 
   /**
+   * Round 8 — load the most recent successful strategy as a last-known-good
+   * fallback. Populated by backup-on-save in executeInitialStrategy.
+   * Returns null when there is no prior strategy (fresh agent, or first
+   * generation also failed validation).
+   */
+  private async loadLastKnownGoodStrategy(masterAgentId: string): Promise<SalesStrategy | null> {
+    try {
+      const [agent] = await withTenant(this.tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
+          .limit(1);
+      });
+      const cfg = (agent?.config as Record<string, unknown> | null) ?? {};
+      const lkg = cfg.salesStrategyPrevious as SalesStrategy | undefined;
+      if (lkg?.pipelineSteps?.length) return lkg;
+      return null;
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'StrategistAgent: loadLastKnownGoodStrategy failed');
+      return null;
+    }
+  }
+
+  /**
    * Run extractJSON with a single retry on JSON-parse failure, validate the
    * structured contract (idealCustomerShape + per-step grounding params), and
-   * re-prompt the LLM ONCE if validation fails. Final safety net: deterministic
-   * strategy with defaults filled in. Never throws — the master-agent
-   * discovery gate depends on ALWAYS having a strategist-produced bdStrategy.
+   * re-prompt the LLM ONCE if validation fails.
+   *
+   * Returns:
+   *   - SalesStrategy on success (LLM produced a valid strategy, possibly on retry)
+   *   - SalesStrategy with _source='deterministic' if extractJSON itself
+   *     never returned parseable JSON (LLM transport-level failure — different
+   *     from validation failure, deterministic skeleton is safe)
+   *   - null if validation failed twice — caller must reuse last-known-good or
+   *     surface a strategy_generation_failed error to the dashboard
    */
   private async generateStrategyWithFallback(
     ctx: PipelineContext,
     mission: string | undefined,
     masterAgentId: string,
     forcedBdStrategy?: SalesStrategy['bdStrategy'],
-  ): Promise<SalesStrategy> {
+  ): Promise<SalesStrategy | null> {
     const baseMessages = [
       { role: 'system' as const, content: buildInitialStrategySystemPrompt(forcedBdStrategy) },
       { role: 'user' as const, content: buildInitialStrategyUserPrompt(ctx, mission) },
@@ -658,7 +723,13 @@ export class StrategistAgent extends BaseAgent {
         { err: firstErr, masterAgentId, missionExcerpt: (mission ?? '').slice(0, 200) },
         'StrategistAgent: all extractJSON attempts failed — using deterministic fallback strategy',
       );
-      return fillStrategyDefaults(this.buildDeterministicStrategy(mission));
+      // LLM transport-level failure (different from validation failure).
+      // Deterministic skeleton is safe — no broad-term keywords, just bdStrategy
+      // + empty pipeline-step params. Tag with _source so dashboard debugging
+      // can distinguish from LLM-generated strategies.
+      const det = fillStrategyDefaults(this.buildDeterministicStrategy(mission));
+      det._source = 'deterministic';
+      return det;
     }
 
     // Schema-level validation. If invalid, log and re-prompt ONCE with errors.
@@ -746,15 +817,20 @@ export class StrategistAgent extends BaseAgent {
       logger.warn({ err, masterAgentId }, 'StrategistAgent: re-prompt extractJSON failed');
     }
 
+    // Round 8 — fail loud on double-validation-failure. Don't fabricate a
+    // strategy via fillStrategyDefaults — that masked LLM regressions and
+    // produced searches the user didn't notice were broken. Instead: log
+    // the error with full context and return null. The caller decides
+    // whether to reuse last-known-good or surface a dashboard error.
     if (retried) {
       const secondCheck = validateStrategistOutput(retried);
       if (secondCheck.valid) {
         logger.info({ masterAgentId }, 'StrategistAgent: re-prompt produced valid strategy');
         return retried;
       }
-      logger.warn(
-        { masterAgentId, errors: secondCheck.errors },
-        'StrategistAgent: re-prompt still invalid — falling back to defaults',
+      logger.error(
+        { masterAgentId, attempt1Errors: firstCheck.errors, attempt2Errors: secondCheck.errors },
+        'StrategistAgent: validation failed twice — refusing to fabricate strategy',
       );
       try {
         await withTenant(this.tenantId, async (tx) => {
@@ -762,20 +838,48 @@ export class StrategistAgent extends BaseAgent {
             tenantId: this.tenantId,
             masterAgentId,
             agentType: 'strategist',
-            action: 'validation_failed',
+            action: 'strategy_generation_failed',
             status: 'failed',
-            details: { attempt: 'retry', errors: secondCheck.errors },
+            details: {
+              attempt1Errors: firstCheck.errors,
+              attempt2Errors: secondCheck.errors,
+              missionExcerpt: (mission ?? '').slice(0, 200),
+              llmOutputExcerpt: JSON.stringify(retried).slice(0, 1000),
+            },
           });
         });
       } catch (err) {
-        logger.debug({ err }, 'Strategist: failed to log retry validation_failed (non-fatal)');
+        logger.debug({ err }, 'Strategist: failed to log strategy_generation_failed (non-fatal)');
       }
-      // Take the retried strategy (closer to LLM intent) and fill missing pieces.
-      return fillStrategyDefaults(retried);
+      return null;
     }
 
-    // Both LLM passes failed validation; patch the first response with defaults.
-    return fillStrategyDefaults(strategy);
+    // Re-prompt extractJSON failed entirely (LLM transport problem). Same
+    // policy as above: log loud, return null, let caller fall back to
+    // last-known-good or fail loud.
+    logger.error(
+      { masterAgentId, attempt1Errors: firstCheck.errors },
+      'StrategistAgent: re-prompt extractJSON failed and first attempt invalid — refusing to fabricate strategy',
+    );
+    try {
+      await withTenant(this.tenantId, async (tx) => {
+        await tx.insert(agentActivityLog).values({
+          tenantId: this.tenantId,
+          masterAgentId,
+          agentType: 'strategist',
+          action: 'strategy_generation_failed',
+          status: 'failed',
+          details: {
+            attempt1Errors: firstCheck.errors,
+            reason: 'reprompt_extractjson_failed',
+            missionExcerpt: (mission ?? '').slice(0, 200),
+          },
+        });
+      });
+    } catch (err) {
+      logger.debug({ err }, 'Strategist: failed to log strategy_generation_failed (non-fatal)');
+    }
+    return null;
   }
 
   /**

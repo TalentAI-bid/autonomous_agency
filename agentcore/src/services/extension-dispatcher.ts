@@ -12,7 +12,13 @@ import { logPipelineError } from '../utils/pipeline-error.js';
 // ─── Rate limits (server-authoritative; client mirrors these) ──────────────
 
 export type ExtensionSite = 'linkedin' | 'gmaps' | 'crunchbase';
-export type ExtensionTaskType = 'search_companies' | 'fetch_company' | 'search_businesses' | 'fetch_business';
+export type ExtensionTaskType =
+  | 'search_companies'
+  | 'fetch_company'
+  | 'fetch_company_info'
+  | 'fetch_company_team'
+  | 'search_businesses'
+  | 'fetch_business';
 
 export const EXTENSION_SITE_LIMITS = {
   linkedin: {
@@ -22,6 +28,11 @@ export const EXTENSION_SITE_LIMITS = {
     // after long runs hit LinkedIn 429s on 58-company chains.
     search_companies: { dailyCap: 10, minDelayMs: 4000 },
     fetch_company: { dailyCap: 100, minDelayMs: 8000 },
+    // Split adapters get the same cap each — together they double the rate
+    // of LinkedIn page hits per company. minDelayMs stays at 8s per call so
+    // the per-tab pacing matches the legacy combined adapter.
+    fetch_company_info: { dailyCap: 100, minDelayMs: 8000 },
+    fetch_company_team: { dailyCap: 100, minDelayMs: 8000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },

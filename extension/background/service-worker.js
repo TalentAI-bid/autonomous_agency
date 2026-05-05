@@ -53,10 +53,15 @@ const LINKEDIN_GEO_CODES = {
 
 // ─── Adapter registry (files injected for each {site, type}) ───────────────
 const ADAPTER_FILES = {
-  'linkedin:search_companies':  ['lib/scraper-utils.js', 'content/linkedin/search-companies.js'],
-  'linkedin:fetch_company':     ['lib/scraper-utils.js', 'content/linkedin/fetch-company.js'],
-  'gmaps:search_businesses':    ['lib/scraper-utils.js', 'content/gmaps/search-businesses.js'],
-  'gmaps:fetch_business':       ['lib/scraper-utils.js', 'content/gmaps/fetch-business.js'],
+  'linkedin:search_companies':   ['lib/scraper-utils.js', 'content/linkedin/search-companies.js'],
+  'linkedin:fetch_company':      ['lib/scraper-utils.js', 'content/linkedin/fetch-company.js'],
+  // Parallel-fetch split — info loads /about, team loads /people. They run
+  // as independent extension_tasks rows so one failure doesn't block the
+  // other. Legacy fetch_company stays for already-queued rows.
+  'linkedin:fetch_company_info': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-info.js'],
+  'linkedin:fetch_company_team': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-team.js'],
+  'gmaps:search_businesses':     ['lib/scraper-utils.js', 'content/gmaps/search-businesses.js'],
+  'gmaps:fetch_business':        ['lib/scraper-utils.js', 'content/gmaps/fetch-business.js'],
   'crunchbase:search_companies': ['lib/scraper-utils.js', 'content/crunchbase/search-companies.js'],
   'crunchbase:fetch_company':    ['lib/scraper-utils.js', 'content/crunchbase/fetch-company.js'],
 };
@@ -368,6 +373,17 @@ function buildUrl(site, type, params) {
   }
   if (site === 'linkedin' && type === 'fetch_company') {
     return params.linkedinUrl;
+  }
+  if (site === 'linkedin' && type === 'fetch_company_info') {
+    // Force /about/ so the adapter lands on the about page directly.
+    const base = (params.linkedinUrl || '').replace(/\/?$/, '/');
+    return base.includes('/about/') ? base : base + 'about/';
+  }
+  if (site === 'linkedin' && type === 'fetch_company_team') {
+    // /people/ shows the in-app team listing; the adapter further clicks
+    // through to /search/results/people/?currentCompany=... when needed.
+    const base = (params.linkedinUrl || '').replace(/\/?$/, '/');
+    return base.includes('/people/') ? base : base + 'people/';
   }
   if (site === 'gmaps' && type === 'search_businesses') {
     const q = encodeURIComponent([params.query, params.location].filter(Boolean).join(' '));

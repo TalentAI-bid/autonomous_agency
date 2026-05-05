@@ -175,6 +175,13 @@ export interface PipelineStepParams {
   geographyFilter?: { regions: string[] };
   sizeFilter?: { min: number; max: number };
   queryRationale?: string;
+  // Round 11 — LinkedIn industry-classification facet. Each entry is the
+  // industry's display name ("Financial Services", "Software Development",
+  // "Hospitals and Health Care"). Resolved to LinkedIn's numeric URN at URL
+  // build time. Pre-filters by category so keyword search doesn't catch
+  // furniture / conferences / agencies whose descriptions happen to contain
+  // sub-category keywords.
+  industryFilter?: { industries: string[] };
 
   // Server-built LinkedIn search URL (master-agent dispatcher synthesises
   // this from searchKeywords + geographyFilter + sizeFilter via

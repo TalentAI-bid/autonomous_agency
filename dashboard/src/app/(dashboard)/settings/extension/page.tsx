@@ -18,8 +18,9 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { apiGet, apiPost } from '@/lib/api';
-import { Chrome, Copy, KeyRound, Trash2, Plug, PlugZap, AlertTriangle } from 'lucide-react';
+import { Chrome, Copy, KeyRound, Trash2, Plug, PlugZap, AlertTriangle, RotateCcw } from 'lucide-react';
 
 type ExtensionStatus = {
   hasKey: boolean;
@@ -57,6 +58,7 @@ const CAPS: Record<string, number> = {
 export default function ExtensionSettingsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const statusQ = useQuery<ExtensionStatus>({
     queryKey: ['ext-status'],
@@ -86,6 +88,15 @@ export default function ExtensionSettingsPage() {
       qc.invalidateQueries({ queryKey: ['ext-status'] });
     },
     onError: () => toast({ title: 'Failed to revoke', variant: 'destructive' }),
+  });
+
+  const resetRateLimits = useMutation<{ sessionsReset: number }>({
+    mutationFn: () => apiPost<{ sessionsReset: number }>('/admin/extension/reset-rate-limits', { userId: user?.id }),
+    onSuccess: (data) => {
+      toast({ title: `Rate limits reset (${data.sessionsReset} session${data.sessionsReset === 1 ? '' : 's'})` });
+      qc.invalidateQueries({ queryKey: ['ext-status'] });
+    },
+    onError: () => toast({ title: 'Failed to reset rate limits', variant: 'destructive' }),
   });
 
   const [shownKey, setShownKey] = React.useState<string | null>(null);
@@ -173,7 +184,18 @@ export default function ExtensionSettingsPage() {
       {/* Usage */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Today's usage</CardTitle>
+          <CardTitle className="flex items-center justify-between text-base">
+            <span>Today's usage</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => resetRateLimits.mutate()}
+              disabled={resetRateLimits.isPending || !status?.hasKey || !user?.id}
+              title="Clear today's daily counters and tell the extension to reset its mirror"
+            >
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Reset Now
+            </Button>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid sm:grid-cols-2 gap-3">

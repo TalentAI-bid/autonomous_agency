@@ -19,6 +19,14 @@ export function buildLinkedInCompanySearchURL(params: BuildCompanySearchURLParam
   }
 
   if (params.geographyFilter?.regions?.length) {
+    for (const region of params.geographyFilter.regions) {
+      if (UNVERIFIED_REGIONS.has(region.trim().toLowerCase())) {
+        logger.warn(
+          { region },
+          'linkedin-url: region URN not yet verified — search will fall back to keyword-only filter for this region',
+        );
+      }
+    }
     const urns = params.geographyFilter.regions
       .map((region) => resolveGeoUrn(region))
       .filter((u): u is string => Boolean(u));
@@ -75,11 +83,50 @@ const GEO_URN_MAP: Record<string, string> = {
   usa: '103644278',
   us: '103644278',
   canada: '101174742',
+  // MENA — verified URNs only. Jordan + Bahrain held in UNVERIFIED_REGIONS
+  // until manually confirmed against LinkedIn search results.
+  'united arab emirates': '104305776',
+  uae: '104305776',
+  'saudi arabia': '100459316',
+  egypt: '106155005',
+  qatar: '104170880',
+  kuwait: '103317225',
+  morocco: '102787409',
 };
+
+// Regions the strategist may emit that don't yet have a verified geo URN.
+// resolveGeoUrn returns null for these; the URL builder logs a loud warn so
+// production telemetry surfaces the gap until they're confirmed and added
+// to GEO_URN_MAP above.
+const UNVERIFIED_REGIONS = new Set<string>(['jordan', 'bahrain']);
 
 export function resolveGeoUrn(region: string): string | null {
   return GEO_URN_MAP[region.trim().toLowerCase()] ?? null;
 }
+
+// Region libraries — the strategist prompt teaches the LLM to emit the
+// matching string array directly into geographyFilter.regions. We don't
+// auto-resolve a library name server-side; explicit string arrays keep the
+// JSON output traceable. Jordan + Bahrain (MENA) and Iceland (Nordics) /
+// Austria + Switzerland (DACH) are deferred until URNs are verified.
+export const REGION_LIBRARIES = {
+  eu: [
+    'United Kingdom', 'Germany', 'France', 'Netherlands', 'Sweden',
+    'Ireland', 'Spain', 'Italy', 'Poland', 'Belgium',
+  ],
+  mena: [
+    'United Arab Emirates', 'Saudi Arabia', 'Egypt', 'Qatar', 'Kuwait', 'Morocco',
+  ],
+  north_america: ['United States', 'Canada'],
+  nordics: ['Sweden', 'Denmark', 'Norway', 'Finland'],
+  dach: ['Germany'],
+} as const;
+
+export const GLOBAL_REGIONS: readonly string[] = [
+  ...REGION_LIBRARIES.eu,
+  ...REGION_LIBRARIES.mena,
+  ...REGION_LIBRARIES.north_america,
+];
 
 // LinkedIn company size facet codes. The bucket overlaps the requested range
 // when its [bucketMin, bucketMax] interval intersects [reqMin, reqMax].

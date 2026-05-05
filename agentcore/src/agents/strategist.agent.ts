@@ -50,6 +50,16 @@ const DEFAULT_ICS = (): NonNullable<SalesStrategy['idealCustomerShape']> => ({
   buyerFunctions: ['CEO', 'CTO', 'Founder'],
 });
 
+// Country / region names that MUST NOT appear inside searchKeywords. The
+// strategist puts geography in geographyFilter.regions instead. Substring
+// match is case-insensitive against each keyword.
+const COUNTRY_NAMES_IN_KEYWORDS_BANLIST = [
+  'belgium', 'netherlands', 'france', 'germany', 'uk', 'united kingdom',
+  'ireland', 'spain', 'italy', 'poland', 'lithuania', 'sweden', 'denmark',
+  'norway', 'finland', 'portugal', 'austria', 'switzerland', 'luxembourg',
+  'eu', 'europe', 'european union', 'united states', 'usa', 'us', 'canada',
+];
+
 export function validateStrategistOutput(strategy: SalesStrategy): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
@@ -59,15 +69,49 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
   if (!strategy.idealCustomerShape?.antiSignals?.length) errors.push('idealCustomerShape.antiSignals empty');
   if (!strategy.queryDesignNotes) errors.push('missing queryDesignNotes');
 
+  // Minimum 3 LINKEDIN_EXTENSION search_companies steps (per the new
+  // strategist contract — query variety beats query volume).
+  const liSearchSteps = (strategy.pipelineSteps ?? []).filter(
+    (s) => s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies',
+  );
+  if (liSearchSteps.length < 3) {
+    errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+  }
+
   for (const step of strategy.pipelineSteps ?? []) {
-    const isDiscoveryStep = step.tool === 'LINKEDIN_EXTENSION' || step.tool === 'CRAWL4AI';
+    const isLinkedInSearch = step.tool === 'LINKEDIN_EXTENSION' && step.action === 'search_companies';
     const isAnalysisStep = step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING' || step.tool === 'CRAWL4AI';
     const params = step.params as PipelineStepParams | undefined;
 
-    if (isDiscoveryStep) {
-      if (!params?.negativeKeywords?.length) errors.push(`step ${step.id} missing params.negativeKeywords`);
-      if (!params?.requiredAttributes) errors.push(`step ${step.id} missing params.requiredAttributes`);
+    if (isLinkedInSearch) {
+      // New contract: searchKeywords + geographyFilter + queryRationale.
+      if (!params?.searchKeywords?.length) {
+        errors.push(`step ${step.id} missing params.searchKeywords`);
+      }
+      if (!params?.geographyFilter || !Array.isArray(params.geographyFilter.regions) || params.geographyFilter.regions.length === 0) {
+        errors.push(`step ${step.id} missing params.geographyFilter.regions`);
+      }
+      if (!params?.queryRationale) {
+        errors.push(`step ${step.id} missing params.queryRationale`);
+      }
+
+      // geography_in_keywords — substring match each keyword against the
+      // banlist. The most common LLM mistake is "fintech Belgium" instead
+      // of separating into keywords + geographyFilter.
+      const kws = (params?.searchKeywords ?? []) as string[];
+      for (const kw of kws) {
+        const lower = kw.toLowerCase();
+        for (const banned of COUNTRY_NAMES_IN_KEYWORDS_BANLIST) {
+          // Word-boundary match to avoid e.g. "us" matching "Tussle".
+          const pattern = new RegExp(`(^|[^a-z])${banned.replace(/\s/g, '\\s')}([^a-z]|$)`, 'i');
+          if (pattern.test(lower)) {
+            errors.push(`step ${step.id} geography_in_keywords ("${kw}" contains "${banned}" — move to geographyFilter)`);
+            break;
+          }
+        }
+      }
     }
+
     if (isAnalysisStep) {
       if (!params?.groundingRequired) errors.push(`step ${step.id} missing params.groundingRequired`);
       if (!params?.outputContract) errors.push(`step ${step.id} missing params.outputContract`);
@@ -110,10 +154,33 @@ export function fillStrategyDefaults(strategy: SalesStrategy): SalesStrategy {
 
   for (const step of strategy.pipelineSteps ?? []) {
     const params = (step.params ?? {}) as PipelineStepParams;
+    const isLinkedInSearch = step.tool === 'LINKEDIN_EXTENSION' && step.action === 'search_companies';
     const isDiscoveryStep = step.tool === 'LINKEDIN_EXTENSION' || step.tool === 'CRAWL4AI';
     const isAnalysisStep = step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING' || step.tool === 'CRAWL4AI';
 
+    if (isLinkedInSearch) {
+      // New contract — fall back to seller's idealCustomerShape when the LLM
+      // didn't emit per-step searchKeywords / geographyFilter / sizeFilter.
+      if (!params.searchKeywords?.length) {
+        const fallback = strategy.targetIndustries?.length
+          ? strategy.targetIndustries.slice(0, 4)
+          : ['B2B SaaS'];
+        params.searchKeywords = fallback;
+      }
+      if (!params.geographyFilter || !Array.isArray(params.geographyFilter.regions) || params.geographyFilter.regions.length === 0) {
+        params.geographyFilter = {
+          regions: ics.geographicScope?.length ? [...ics.geographicScope] : ['Global'],
+        };
+      }
+      if (!params.sizeFilter) {
+        params.sizeFilter = { min: ics.sizeRange.min, max: ics.sizeRange.max };
+      }
+      if (!params.queryRationale) {
+        params.queryRationale = 'Auto-filled rationale: targeting ICP-shaped companies in the configured geography and size range.';
+      }
+    }
     if (isDiscoveryStep) {
+      // Legacy fields are still emitted for old consumers but inert.
       if (!params.negativeKeywords?.length) params.negativeKeywords = [...DEFAULT_NEGATIVE_KEYWORDS];
       if (!params.requiredAttributes) params.requiredAttributes = requiredAttributes;
     }
@@ -407,15 +474,39 @@ export class StrategistAgent extends BaseAgent {
       logger.debug({ err }, 'Strategist: failed to log validation_failed (non-fatal)');
     }
 
+    // Build a targeted retry message — call out specific common failures
+    // explicitly so the LLM has a direct fix, not just a list of errors.
+    const errorJoined = firstCheck.errors.join('; ');
+    const fixHints: string[] = [];
+    if (firstCheck.errors.some((e) => e.includes('geography_in_keywords'))) {
+      fixHints.push(
+        'Move every country / region / city name OUT of searchKeywords and INTO geographyFilter.regions. searchKeywords describe what the company DOES (e.g. "payment infrastructure"), not where it is.',
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('too_few_search_steps'))) {
+      fixHints.push(
+        'Generate 3-5 LINKEDIN_EXTENSION search_companies steps with DIFFERENT angles (different keyword combinations, different geographies, different ICP slices). Query variety beats query volume.',
+      );
+    }
+    if (firstCheck.errors.some((e) => /missing params\.(searchKeywords|geographyFilter|queryRationale)/.test(e))) {
+      fixHints.push(
+        'Each LINKEDIN_EXTENSION search_companies step MUST have: searchKeywords (array of behavior/function terms, no geography), geographyFilter.regions (array of country/region names), sizeFilter.{min,max}, and queryRationale (one sentence).',
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('groundingRequired') || e.includes('outputContract') || e.includes('instruction'))) {
+      fixHints.push(
+        'Each LLM_ANALYSIS / SCORING / CRAWL4AI step needs groundingRequired:true, outputContract (with forbiddenPhrases), and instruction. See the GROUNDED-OR-NOTHING section.',
+      );
+    }
     const retryMessages = [
       ...baseMessages,
       { role: 'assistant' as const, content: JSON.stringify(strategy) },
       {
         role: 'user' as const,
         content:
-          'Your previous strategy was missing the following required fields: ' +
-          firstCheck.errors.join('; ') +
-          '. Re-emit the COMPLETE strategy with these fields filled in. Same JSON format.',
+          `Your previous strategy had these issues: ${errorJoined}. ` +
+          (fixHints.length ? `Fix specifically: ${fixHints.join(' ')} ` : '') +
+          'Re-emit the COMPLETE strategy. Same JSON format.',
       },
     ];
 

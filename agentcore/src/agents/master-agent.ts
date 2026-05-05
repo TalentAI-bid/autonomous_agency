@@ -624,6 +624,38 @@ export class MasterAgent extends BaseAgent {
               let crawlIsFirstCall = true;
 
               for (const step of pipelineSteps) {
+                // Skip steps that fillStrategyDefaults marked inactive (e.g. search steps
+                // without keywords that we refuse to auto-fill with broad terms).
+                if ((step as any).inactive) {
+                  logger.info(
+                    { stepId: step.id, tool: step.tool, action: step.action },
+                    'master-agent: skipping inactive step',
+                  );
+                  continue;
+                }
+
+                // Defensive translator for legacy action names. The strategist
+                // and chat-agent prompts used to demonstrate `fetch_company_detail`
+                // and `get_team`, neither of which exist in the
+                // extension_task_type enum. The prompts are now corrected, but
+                // already-saved strategies on production master_agents may
+                // still carry these stale names. Translate before dispatch so
+                // the enum INSERT doesn't crash on `invalid input value`.
+                if (step.tool === 'LINKEDIN_EXTENSION') {
+                  const ACTION_ALIASES: Record<string, string> = {
+                    fetch_company_detail: 'fetch_company_info',
+                    get_team: 'fetch_company_team',
+                  };
+                  const aliased = ACTION_ALIASES[step.action];
+                  if (aliased) {
+                    logger.info(
+                      { masterAgentId, stepId: step.id, was: step.action, now: aliased },
+                      'master-agent: translating legacy LINKEDIN_EXTENSION action name',
+                    );
+                    step.action = aliased;
+                  }
+                }
+
                 logger.info(
                   { masterAgentId, stepId: step.id, tool: step.tool, action: step.action },
                   'Executing pipeline step',
@@ -677,6 +709,7 @@ export class MasterAgent extends BaseAgent {
                   const stepKeywords = (step.params?.searchKeywords as string[] | undefined);
                   const stepGeoFilter = (step.params?.geographyFilter as { regions?: string[] } | undefined);
                   const stepSizeFilter = (step.params?.sizeFilter as { min?: number; max?: number } | undefined);
+                  const stepIndustryFilter = (step.params?.industryFilter as { industries?: string[] } | undefined);
                   if (Array.isArray(stepKeywords) && stepKeywords.length > 0 && stepGeoFilter?.regions?.length) {
                     const searchUrl = buildLinkedInCompanySearchURL({
                       searchKeywords: stepKeywords,
@@ -684,6 +717,10 @@ export class MasterAgent extends BaseAgent {
                       sizeFilter:
                         typeof stepSizeFilter?.min === 'number' && typeof stepSizeFilter?.max === 'number'
                           ? { min: stepSizeFilter.min, max: stepSizeFilter.max }
+                          : undefined,
+                      industryFilter:
+                        Array.isArray(stepIndustryFilter?.industries) && stepIndustryFilter.industries.length > 0
+                          ? { industries: stepIndustryFilter.industries }
                           : undefined,
                     });
                     await enqueueExtensionTask({

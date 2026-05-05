@@ -11,6 +11,7 @@ import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import { checkCrawl4aiHealth } from '../tools/crawl4ai.tool.js';
 import { startFollowupSendWorker } from '../workers/followup-send.worker.js';
 import { startFollowupSchedulerWorker, ensureFollowupSchedulerRepeatable } from '../workers/followup-scheduler.worker.js';
+import { startFitScoreWorker } from '../workers/fit-score.worker.js';
 import logger from '../utils/logger.js';
 
 /** Active workers registry */
@@ -252,6 +253,7 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
       try {
         startFollowupSchedulerWorker();
         startFollowupSendWorker();
+        startFitScoreWorker();
         await ensureFollowupSchedulerRepeatable();
       } catch (err) {
         logger.error({ err }, 'Failed to start followup workers (sequence sends will not run)');

@@ -5,7 +5,7 @@ import type { ExtensionTask } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
-import { scoreCompany } from './buyer-fit-score.service.js';
+import { enqueueFitScore } from '../queues/fit-score-queues.js';
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
@@ -951,18 +951,19 @@ async function handleCompanyInfoComplete(
     source: 'linkedin_extension_info',
   });
 
-  // Trigger fit scorer (synchronous for now; commit 11 swaps to enqueue).
+  // Trigger fit scorer asynchronously. The worker debounces within 30s so a
+  // sibling team_arrived event fired moments later won't double-score.
   if (task.masterAgentId) {
     try {
-      await scoreCompany({
+      await enqueueFitScore({
         tenantId: task.tenantId,
         companyId: savedCompany.id,
-        masterAgentId: task.masterAgentId,
+        reason: 'info_arrived',
       });
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
-        'fit-score after info_arrived failed (non-fatal)',
+        'enqueueFitScore after info_arrived failed (non-fatal)',
       );
     }
   }
@@ -1081,18 +1082,18 @@ async function handleCompanyTeamComplete(
     }
   }
 
-  // Trigger fit scorer (synchronous for now; commit 11 swaps to enqueue).
+  // Trigger fit scorer asynchronously (debounced; see worker).
   if (task.masterAgentId) {
     try {
-      await scoreCompany({
+      await enqueueFitScore({
         tenantId: task.tenantId,
         companyId: savedCompany.id,
-        masterAgentId: task.masterAgentId,
+        reason: 'team_arrived',
       });
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
-        'fit-score after team_arrived failed (non-fatal)',
+        'enqueueFitScore after team_arrived failed (non-fatal)',
       );
     }
   }

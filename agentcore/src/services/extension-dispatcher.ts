@@ -606,21 +606,33 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     }
 
     if (pendingFetchTasks.length > 0) {
+      // Parallel fanout: per company URL, enqueue BOTH fetch_company_info
+      // (about page → industry/size/HQ/description) AND fetch_company_team
+      // (people page → people array). They run independently — one failing
+      // does not block the other. The fit-score worker re-runs whenever
+      // either completes so the score progressively refines.
       try {
-        await enqueueExtensionTaskBatch(
-          task.tenantId,
-          pendingFetchTasks.map((t) => ({
+        const fanoutTasks = pendingFetchTasks.flatMap((t) => [
+          {
             masterAgentId: task.masterAgentId ?? undefined,
-            site: 'linkedin',
-            type: 'fetch_company',
+            site: 'linkedin' as const,
+            type: 'fetch_company_info' as const,
             params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
             priority: 3,
-          })),
-        );
+          },
+          {
+            masterAgentId: task.masterAgentId ?? undefined,
+            site: 'linkedin' as const,
+            type: 'fetch_company_team' as const,
+            params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
+            priority: 3,
+          },
+        ]);
+        await enqueueExtensionTaskBatch(task.tenantId, fanoutTasks);
       } catch (err) {
         logger.warn(
           { err: err instanceof Error ? err.message : String(err), count: pendingFetchTasks.length, taskId: task.id },
-          'Batched fetch_company auto-chain enqueue failed (non-fatal)',
+          'Batched fetch_company info+team auto-chain enqueue failed (non-fatal)',
         );
       }
     }
@@ -633,130 +645,30 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     return { extracted: rawCompanies.length, saved };
   }
 
+  // ─── Parallel-fetch handlers (info + team) ──────────────────────────────
+  // The legacy fetch_company adapter is split into two parallel adapters.
+  // Each completion handler updates the same company row independently and
+  // triggers the fit-score scorer. The legacy fetch_company branch below
+  // stays as a backwards-compat shim for in-flight tasks during deploy.
+
+  if (site === 'linkedin' && type === 'fetch_company_info') {
+    return handleCompanyInfoComplete(task, result as Record<string, unknown>);
+  }
+
+  if (site === 'linkedin' && type === 'fetch_company_team') {
+    return handleCompanyTeamComplete(task, result as Record<string, unknown>);
+  }
+
   if (site === 'linkedin' && type === 'fetch_company') {
-    const c = result as Record<string, unknown>;
-    const name = String(c.name ?? '').trim();
-    if (!name) return { extracted: 0, saved: 0 };
-    const p = task.params as { linkedinUrl?: string; companyId?: string };
-    // When auto-queued by the search_companies branch, params.companyId is
-    // set — pass it through so the detail update targets the exact row
-    // rather than re-running fuzzy domain/name dedup. If absent (e.g.
-    // manual enqueue), saveOrUpdateCompanyStatic falls back to its usual
-    // id → domain → name match.
-    const savedCompany = await saveOrUpdateCompanyStatic(
-      task.tenantId,
-      {
-        id: p.companyId,
-        name,
-        domain: typeof c.website === 'string' ? extractDomain(c.website) : undefined,
-        industry: (c.industry as string) ?? undefined,
-        size: (c.size as string) ?? undefined,
-        linkedinUrl: (c.linkedinUrl as string) ?? p.linkedinUrl,
-        description: (c.description as string) ?? undefined,
-        rawData: { source: 'linkedin_extension_detail', ...c },
-      },
-      task.masterAgentId ?? undefined,
-    );
-
-    // Post-scrape triage (informational; never blocks downstream dispatch)
-    if (task.masterAgentId) {
-      try {
-        await scoreCompany({
-          tenantId: task.tenantId,
-          companyId: savedCompany.id,
-          masterAgentId: task.masterAgentId,
-        });
-      } catch (err) {
-        logger.warn(
-          { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
-          'company triage failed (non-fatal)',
-        );
-      }
-    }
-
-    // Dispatch enrichment now that we have the real domain from LinkedIn
-    await dispatchJob(task.tenantId, 'enrichment', {
-      companyId: savedCompany.id,
-      masterAgentId: task.masterAgentId ?? undefined,
-      source: 'linkedin_extension',
-    });
-
-    // Save the top 3 KEY persons from LinkedIn company /people/ tab.
-    // Rank by title before slicing: for a hiring-signal / outreach flow the
-    // useful contacts are decision-makers and recruiters (CEO, CTO, Founder,
-    // VP, Head of, HR/Talent/Recruiter, Director). Without ranking we keep
-    // whatever LinkedIn returned first in the DOM — usually a sea of
-    // engineers when the company is hiring engineering roles, none of whom
-    // can route the candidate. Cap at 3 to keep the per-contact email
-    // pattern probe (8 templates × Reacher) within the daily Reacher quota.
-    const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
-    const rankedPeople = rankPeopleByTitle(rawPeople);
-    for (const person of rankedPeople.slice(0, 3)) {
-      const cleanName = sanitizePersonName(person.name);
-      if (!cleanName) {
-        logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');
-        continue;
-      }
-      const nameParts = cleanName.split(/\s+/);
-      const pFirstName = nameParts[0] || '';
-      const pLastName = nameParts.slice(1).join(' ') || '';
-      if (!pFirstName || !pLastName) continue;
-      // Final guard: reject if either part still smells like LinkedIn a11y junk.
-      if (/^(view|profile)$/i.test(pFirstName) || /\b(view|profile)\b/i.test(pLastName)) {
-        logger.debug({ pFirstName, pLastName }, 'Skipping person — name parts contain view/profile junk');
-        continue;
-      }
-
-      try {
-        // Dedup by linkedinUrl
-        if (person.linkedinUrl) {
-          const [existing] = await withTenant(task.tenantId, async (tx) => {
-            return tx.select({ id: contacts.id }).from(contacts)
-              .where(and(
-                eq(contacts.tenantId, task.tenantId),
-                eq(contacts.linkedinUrl, person.linkedinUrl),
-              )).limit(1);
-          });
-          if (existing) continue;
-        }
-
-        const [inserted] = await withTenant(task.tenantId, async (tx) => {
-          return tx.insert(contacts).values({
-            tenantId: task.tenantId,
-            firstName: pFirstName,
-            lastName: pLastName,
-            title: sanitizeTitle(person.title),
-            linkedinUrl: person.linkedinUrl || undefined,
-            companyId: savedCompany.id,
-            companyName: name,
-            source: 'linkedin_profile',
-            rawData: { discoverySource: 'linkedin_extension_people', ...person },
-          }).returning({ id: contacts.id });
-        });
-
-        // Chain per-contact enrichment so findEmailByPattern + Reacher
-        // verification run for this person. Without this dispatch, the
-        // hiring-signal flow saves contacts that never get an email.
-        if (inserted && task.masterAgentId) {
-          try {
-            await dispatchJob(task.tenantId, 'enrichment', {
-              contactId: inserted.id,
-              masterAgentId: task.masterAgentId,
-              source: 'linkedin_extension_people',
-            });
-          } catch (err) {
-            logger.debug(
-              { err, contactId: inserted.id },
-              'Failed to dispatch per-contact enrichment (non-fatal)',
-            );
-          }
-        }
-      } catch (err) {
-        logger.debug({ err, person: person.name }, 'Failed to save LinkedIn person (non-fatal)');
-      }
-    }
-
-    return { extracted: 1, saved: 1 };
+    // Legacy combined adapter — feed both handlers from a single payload so
+    // tasks queued before the parallel split still get processed correctly.
+    const r = result as Record<string, unknown>;
+    const infoSummary = await handleCompanyInfoComplete(task, r);
+    const teamSummary = await handleCompanyTeamComplete(task, r);
+    return {
+      extracted: infoSummary.extracted + teamSummary.extracted,
+      saved: infoSummary.saved + teamSummary.saved,
+    };
   }
 
   if (site === 'gmaps') {
@@ -984,5 +896,211 @@ export async function isExtensionConnected(tenantId: string): Promise<boolean> {
     )
     .limit(1);
   return !!row;
+}
+
+// ─── Parallel-fetch completion handlers ─────────────────────────────────────
+//
+// These split the legacy fetch_company logic into two independent handlers:
+//
+//   handleCompanyInfoComplete:
+//     Merges about-page fields (industry, size, HQ, description, etc.) into
+//     the company row. Sets rawData.infoFetchedAt. Dispatches enrichment
+//     (we have the real domain). Triggers the fit scorer.
+//
+//   handleCompanyTeamComplete:
+//     Merges the people array into rawData.people. Sets rawData.teamFetchedAt.
+//     Inserts the top-3 ranked people as contacts (preserving existing
+//     outreach behaviour). Dispatches per-contact enrichment. Triggers the
+//     fit scorer.
+//
+// Each handler tolerates the other not having run yet — the fit scorer reads
+// data_completeness from whichever fetched-at flags are present.
+
+async function handleCompanyInfoComplete(
+  task: ExtensionTask,
+  c: Record<string, unknown>,
+): Promise<{ extracted: number; saved: number }> {
+  const name = String(c.name ?? '').trim();
+  const p = task.params as { linkedinUrl?: string; companyId?: string };
+  if (!name && !p.companyId) {
+    logger.debug({ taskId: task.id }, 'fetch_company_info: no name + no companyId, skipping');
+    return { extracted: 0, saved: 0 };
+  }
+
+  // Merge into companies row. saveOrUpdateCompanyStatic is id → domain → name
+  // so passing companyId from the auto-chain hits the exact row.
+  const savedCompany = await saveOrUpdateCompanyStatic(
+    task.tenantId,
+    {
+      id: p.companyId,
+      name: name || 'unknown',
+      domain: typeof c.website === 'string' ? extractDomain(c.website) : undefined,
+      industry: (c.industry as string) ?? undefined,
+      size: (c.size as string) ?? undefined,
+      linkedinUrl: (c.linkedinUrl as string) ?? p.linkedinUrl,
+      description: (c.description as string) ?? undefined,
+      rawData: { source: 'linkedin_extension_info', infoFetchedAt: new Date().toISOString(), ...c },
+    },
+    task.masterAgentId ?? undefined,
+  );
+
+  // Dispatch enrichment now that we have the real domain.
+  await dispatchJob(task.tenantId, 'enrichment', {
+    companyId: savedCompany.id,
+    masterAgentId: task.masterAgentId ?? undefined,
+    source: 'linkedin_extension_info',
+  });
+
+  // Trigger fit scorer (synchronous for now; commit 11 swaps to enqueue).
+  if (task.masterAgentId) {
+    try {
+      await scoreCompany({
+        tenantId: task.tenantId,
+        companyId: savedCompany.id,
+        masterAgentId: task.masterAgentId,
+      });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
+        'fit-score after info_arrived failed (non-fatal)',
+      );
+    }
+  }
+
+  logger.info(
+    { taskId: task.id, companyId: savedCompany.id, name: savedCompany.name },
+    'fetch_company_info complete',
+  );
+  return { extracted: 1, saved: 1 };
+}
+
+async function handleCompanyTeamComplete(
+  task: ExtensionTask,
+  c: Record<string, unknown>,
+): Promise<{ extracted: number; saved: number }> {
+  const p = task.params as { linkedinUrl?: string; companyId?: string };
+  const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
+
+  // Find the target company row. Direct-merge into rawData; we deliberately
+  // do NOT go through saveOrUpdateCompanyStatic because that helper requires
+  // a name and would clobber the company name if the team handler arrives
+  // without one.
+  const savedCompany = await withTenant(task.tenantId, async (tx) => {
+    let row: typeof companies.$inferSelect | undefined;
+    if (p.companyId) {
+      [row] = await tx.select().from(companies)
+        .where(and(eq(companies.tenantId, task.tenantId), eq(companies.id, p.companyId)))
+        .limit(1);
+    }
+    if (!row && p.linkedinUrl) {
+      [row] = await tx.select().from(companies)
+        .where(and(eq(companies.tenantId, task.tenantId), eq(companies.linkedinUrl, p.linkedinUrl)))
+        .limit(1);
+    }
+    if (!row) return null;
+
+    const existingRaw = (row.rawData ?? {}) as Record<string, unknown>;
+    const [updated] = await tx.update(companies).set({
+      rawData: {
+        ...existingRaw,
+        people: rawPeople,
+        teamFetchedAt: new Date().toISOString(),
+      },
+      updatedAt: new Date(),
+    }).where(eq(companies.id, row.id)).returning();
+    return updated;
+  });
+
+  if (!savedCompany) {
+    logger.warn({ taskId: task.id, companyId: p.companyId, linkedinUrl: p.linkedinUrl }, 'fetch_company_team: no target company row found');
+    return { extracted: rawPeople.length, saved: 0 };
+  }
+
+  // Save the top 3 KEY persons from LinkedIn — same logic as the legacy
+  // fetch_company branch. Preserved verbatim so existing outreach behaviour
+  // is unchanged.
+  const rankedPeople = rankPeopleByTitle(rawPeople);
+  let savedCount = 0;
+  for (const person of rankedPeople.slice(0, 3)) {
+    const cleanName = sanitizePersonName(person.name);
+    if (!cleanName) {
+      logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');
+      continue;
+    }
+    const nameParts = cleanName.split(/\s+/);
+    const pFirstName = nameParts[0] || '';
+    const pLastName = nameParts.slice(1).join(' ') || '';
+    if (!pFirstName || !pLastName) continue;
+    if (/^(view|profile)$/i.test(pFirstName) || /\b(view|profile)\b/i.test(pLastName)) {
+      logger.debug({ pFirstName, pLastName }, 'Skipping person — name parts contain view/profile junk');
+      continue;
+    }
+
+    try {
+      if (person.linkedinUrl) {
+        const [existing] = await withTenant(task.tenantId, async (tx) => {
+          return tx.select({ id: contacts.id }).from(contacts)
+            .where(and(
+              eq(contacts.tenantId, task.tenantId),
+              eq(contacts.linkedinUrl, person.linkedinUrl),
+            )).limit(1);
+        });
+        if (existing) continue;
+      }
+
+      const [inserted] = await withTenant(task.tenantId, async (tx) => {
+        return tx.insert(contacts).values({
+          tenantId: task.tenantId,
+          firstName: pFirstName,
+          lastName: pLastName,
+          title: sanitizeTitle(person.title),
+          linkedinUrl: person.linkedinUrl || undefined,
+          companyId: savedCompany.id,
+          companyName: savedCompany.name,
+          source: 'linkedin_profile',
+          rawData: { discoverySource: 'linkedin_extension_people', ...person },
+        }).returning({ id: contacts.id });
+      });
+
+      if (inserted) {
+        savedCount++;
+        if (task.masterAgentId) {
+          try {
+            await dispatchJob(task.tenantId, 'enrichment', {
+              contactId: inserted.id,
+              masterAgentId: task.masterAgentId,
+              source: 'linkedin_extension_people',
+            });
+          } catch (err) {
+            logger.debug({ err, contactId: inserted.id }, 'Failed to dispatch per-contact enrichment (non-fatal)');
+          }
+        }
+      }
+    } catch (err) {
+      logger.debug({ err, person: person.name }, 'Failed to save LinkedIn person (non-fatal)');
+    }
+  }
+
+  // Trigger fit scorer (synchronous for now; commit 11 swaps to enqueue).
+  if (task.masterAgentId) {
+    try {
+      await scoreCompany({
+        tenantId: task.tenantId,
+        companyId: savedCompany.id,
+        masterAgentId: task.masterAgentId,
+      });
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), companyId: savedCompany.id },
+        'fit-score after team_arrived failed (non-fatal)',
+      );
+    }
+  }
+
+  logger.info(
+    { taskId: task.id, companyId: savedCompany.id, peopleScraped: rawPeople.length, contactsSaved: savedCount },
+    'fetch_company_team complete',
+  );
+  return { extracted: rawPeople.length, saved: savedCount };
 }
 

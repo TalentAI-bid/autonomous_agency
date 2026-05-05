@@ -111,6 +111,14 @@ export function useWebSocket() {
       queryClient.invalidateQueries({ queryKey: ['strategy'] });
     });
 
+    // Buyer-fit score updated — fired on each data-arrival (info / team) +
+    // manual rescore. Invalidate every queries key that surfaces companies
+    // with their fitScore so the dashboard updates without a manual refresh.
+    wsManager.subscribe('fit_score_updated', () => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+    });
+
     // Opportunity events
     wsManager.subscribe('opportunity:discovered', () => {
       queryClient.invalidateQueries({ queryKey: ['opportunities'] });

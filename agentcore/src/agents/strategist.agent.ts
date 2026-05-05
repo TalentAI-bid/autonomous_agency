@@ -90,6 +90,79 @@ const BANNED_PHRASES = [
   'building the next generation', 'next generation of',
 ];
 
+/**
+ * Round 8 — detect legacy strategy shapes that should trigger an auto-regen
+ * the next time the master-agent loads. Returns the specific reason so the
+ * agent_activity_log row + provenance metadata are diagnosable later.
+ *
+ * Trigger reasons (any one is enough):
+ *   - missing_idealCustomerShape  — Round 7 contract field absent
+ *   - broad_term_in_keywords      — Round 8: user's broad input ("fintech") in searchKeywords
+ *   - banned_phrase_in_keywords   — Round 8: empirically-zero phrases ("hiring developers")
+ *   - country_in_keywords         — Round 8: region names that belong in geographyFilter
+ *
+ * Geography inconsistency across search steps is logged as a soft signal
+ * but does NOT trigger regen.
+ */
+type LegacyReason =
+  | 'missing_idealCustomerShape'
+  | 'broad_term_in_keywords'
+  | 'banned_phrase_in_keywords'
+  | 'country_in_keywords';
+
+export function detectLegacyShape(
+  saved: SalesStrategy | null,
+  masterAgentIdForLog?: string,
+): { legacy: boolean; reason: LegacyReason | null } {
+  if (!saved?.pipelineSteps?.length) return { legacy: false, reason: null };
+  if (!saved.idealCustomerShape) return { legacy: true, reason: 'missing_idealCustomerShape' };
+
+  const searchSteps = saved.pipelineSteps.filter(
+    (s) => s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies',
+  );
+
+  for (const step of searchSteps) {
+    const params = step.params as PipelineStepParams | undefined;
+    for (const kw of params?.searchKeywords ?? []) {
+      const lower = kw.trim().toLowerCase();
+      if (UNEXPANDED_BROAD_TERMS.includes(lower)) {
+        return { legacy: true, reason: 'broad_term_in_keywords' };
+      }
+      if (BANNED_PHRASES.some((p) => lower.includes(p))) {
+        return { legacy: true, reason: 'banned_phrase_in_keywords' };
+      }
+      if (COUNTRY_NAMES_IN_KEYWORDS_BANLIST.includes(lower)) {
+        return { legacy: true, reason: 'country_in_keywords' };
+      }
+    }
+  }
+
+  // Soft signal — log but don't trigger regen on geography inconsistency alone.
+  if (searchSteps.length >= 2) {
+    const firstRegions = JSON.stringify(
+      ((searchSteps[0]?.params as PipelineStepParams | undefined)?.geographyFilter?.regions ?? [])
+        .slice()
+        .sort(),
+    );
+    const allSame = searchSteps.every(
+      (s) =>
+        JSON.stringify(
+          ((s.params as PipelineStepParams | undefined)?.geographyFilter?.regions ?? [])
+            .slice()
+            .sort(),
+        ) === firstRegions,
+    );
+    if (!allSame) {
+      logger.info(
+        { masterAgentId: masterAgentIdForLog, steps: searchSteps.length },
+        'lazy_migration: geography inconsistent across search steps — soft signal only, not regenerating',
+      );
+    }
+  }
+
+  return { legacy: false, reason: null };
+}
+
 export function validateStrategistOutput(strategy: SalesStrategy): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
@@ -339,24 +412,62 @@ export class StrategistAgent extends BaseAgent {
     // sets `force: true` on the input.
     let force = input.force === true;
 
-    // PART 7 — lazy migration: existing strategies that pre-date the
-    // idealCustomerShape contract get auto-regenerated the first time they
-    // run. Without this, downstream validation would reject them.
-    const isLegacyShape = savedStrategy?.pipelineSteps?.length && !savedStrategy.idealCustomerShape;
-    if (isLegacyShape && !force) {
+    // PART 7 / Round 8 — lazy migration: existing strategies that pre-date
+    // the current contract get auto-regenerated. Detector returns the
+    // SPECIFIC reason so the agent_activity_log row is greppable and the
+    // regenerated strategy can be tagged with provenance metadata.
+    //
+    // Trigger reasons:
+    //   - missing_idealCustomerShape  (Round 7 contract)
+    //   - broad_term_in_keywords      (Round 8 — "fintech" etc. in searchKeywords)
+    //   - banned_phrase_in_keywords   (Round 8 — "hiring developers" etc.)
+    //   - country_in_keywords         (Round 8 — country names that should be in geographyFilter)
+    //
+    // Geography inconsistency is a soft signal: logged but does not trigger regen.
+    const detection = detectLegacyShape(savedStrategy ?? null, masterAgentId);
+    if (detection.legacy && !force) {
+      // Guardrail 1 — Redis lock per agent: dedupe concurrent regens
+      // (e.g. two dashboard tabs loading the same agent simultaneously).
+      const lockKey = `strategist:regen-lock:${masterAgentId}`;
+      const lockAcquired = await redis.set(lockKey, '1', 'EX', 60, 'NX');
+      if (!lockAcquired) {
+        logger.info(
+          { masterAgentId, reason: detection.reason },
+          'lazy_migration: regen already in flight for this agent — returning cached strategy',
+        );
+        await this.clearCurrentAction();
+        return { strategy: savedStrategy, status: 'reused' };
+      }
+
+      // Guardrail 2 — per-tenant throttle: cap regens at N per minute so a
+      // tenant with many agents can't trigger a thundering herd.
+      const maxPerMinute = Number(process.env.STRATEGIST_REGEN_MAX_PER_TENANT_PER_MIN ?? 3);
+      const throttleKey = `strategist:regen-throttle:${this.tenantId}`;
+      const count = await redis.incr(throttleKey);
+      if (count === 1) await redis.expire(throttleKey, 60);
+      if (count > maxPerMinute) {
+        logger.warn(
+          { tenantId: this.tenantId, count, maxPerMinute, reason: detection.reason },
+          'lazy_migration: throttled — returning cached strategy',
+        );
+        await this.clearCurrentAction();
+        return { strategy: savedStrategy, status: 'reused' };
+      }
+
       logger.info(
-        { masterAgentId },
-        'Strategist: saved strategy missing idealCustomerShape — forcing regeneration (lazy migration)',
+        { masterAgentId, reason: detection.reason },
+        'lazy_migration: legacy strategy detected — auto-regenerating',
       );
+      // Guardrail 3 — structured event so every auto-regen is greppable.
       try {
         await withTenant(this.tenantId, async (tx) => {
           await tx.insert(agentActivityLog).values({
             tenantId: this.tenantId,
             masterAgentId,
             agentType: 'strategist',
-            action: 'lazy_migration_idealCustomerShape',
+            action: 'legacy_strategy_auto_regenerated',
             status: 'started',
-            details: { reason: 'saved strategy lacks idealCustomerShape' },
+            details: { reason: detection.reason },
           });
         });
       } catch (err) {
@@ -432,7 +543,19 @@ export class StrategistAgent extends BaseAgent {
       }
 
       logger.info({ masterAgentId, bdStrategy: strategy.bdStrategy, stepCount: strategy.pipelineSteps?.length ?? 0 }, 'Strategist: applied user-locked bdStrategy');
-    } else {
+    } else if (detection.legacy && detection.reason) {
+      // Provenance metadata — tag regenerated strategies so future debugging
+      // can distinguish auto-migrated from freshly generated. Read-only field.
+      strategy._regeneratedFrom = `legacy_${detection.reason}`;
+      logger.info(
+        { masterAgentId, reason: detection.reason },
+        'lazy_migration: regenerated strategy tagged with provenance metadata',
+      );
+    }
+    // Below: existing safety net for non-locked strategies (LLM picks
+    // hiring_signal but mission says industry-only). Gated on userExplicitBdStrategy
+    // remaining unset so the lazy-migration provenance branch above can short-circuit.
+    if (!userExplicitBdStrategy) {
       // Safety net: the LLM occasionally picks bdStrategy='hiring_signal' for
       // industry-only missions when regional coverage is limited, which makes
       // master-agent dispatch take the wrong path. If the mission text has

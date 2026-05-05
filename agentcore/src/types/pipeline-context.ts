@@ -141,6 +141,21 @@ export interface SalesStrategy {
   }>;
 
   queryDesignNotes?: string;
+
+  /**
+   * Provenance metadata. Set by the strategist's lazy-migration path when an
+   * older strategy is auto-regenerated to match a tightened contract.
+   * Read-only — never write into prompt or scoring logic. Mostly for
+   * dashboard debugging and post-hoc audit.
+   */
+  _regeneratedFrom?: string;
+
+  /**
+   * Provenance metadata. Set on strategies built by the deterministic
+   * fallback path (chat-lock builder, post-LLM-failure backups) so future
+   * debugging can distinguish them from LLM-generated strategies.
+   */
+  _source?: string;
 }
 
 /**

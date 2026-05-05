@@ -9,6 +9,12 @@ interface BuildCompanySearchURLParams {
   searchKeywords: string[];
   geographyFilter?: { regions: string[] };
   sizeFilter?: { min: number; max: number };
+  // Round 11 — LinkedIn industry classification facet. Each entry is the
+  // industry's display name (e.g. "Financial Services", "Software Development").
+  // Resolves to LinkedIn's numeric URN via INDUSTRY_URN_MAP. When set, LinkedIn
+  // pre-filters by category, killing furniture / conference / agency leaks
+  // that pure keyword search produces.
+  industryFilter?: { industries: string[] };
 }
 
 export function buildLinkedInCompanySearchURL(params: BuildCompanySearchURLParams): string {
@@ -44,6 +50,23 @@ export function buildLinkedInCompanySearchURL(params: BuildCompanySearchURLParam
     const sizes = mapSizeToLinkedInRanges(params.sizeFilter.min, params.sizeFilter.max);
     if (sizes.length) {
       url.searchParams.set('companySize', JSON.stringify(sizes));
+    }
+  }
+
+  // Industry-classification facet. JSON-stringified URN array, identical
+  // shape to companyHqGeo. Resolved via INDUSTRY_URN_MAP — unresolved names
+  // fall through with a warn and the URL just omits the facet.
+  if (params.industryFilter?.industries?.length) {
+    const urns = params.industryFilter.industries
+      .map((i) => resolveIndustryUrn(i))
+      .filter((u): u is string => Boolean(u));
+    if (urns.length) {
+      url.searchParams.set('industryCompanyVertical', JSON.stringify(urns));
+    } else {
+      logger.warn(
+        { industries: params.industryFilter.industries },
+        'linkedin-url: no industry URNs resolved — search will run without industry facet',
+      );
     }
   }
 
@@ -102,6 +125,56 @@ const UNVERIFIED_REGIONS = new Set<string>(['jordan', 'bahrain']);
 
 export function resolveGeoUrn(region: string): string | null {
   return GEO_URN_MAP[region.trim().toLowerCase()] ?? null;
+}
+
+// LinkedIn industry-classification URNs (numeric strings). Map by the
+// industry's display name, lowercased. Modern + legacy names both map
+// (LinkedIn renamed several industries recently — "Computer Software" →
+// "Software Development", "Internet" → "Technology, Information and Internet",
+// etc.). Conservative coverage; expand iteratively as we hit unresolved
+// warns in production.
+const INDUSTRY_URN_MAP: Record<string, string> = {
+  // Finance
+  'financial services': '43',
+  'banking': '41',
+  'insurance': '42',
+  'capital markets': '129',
+  'investment management': '47',
+  'investment banking': '45',
+  'venture capital and private equity principals': '106',
+  // Tech (modern + legacy aliases pointing to the same URN)
+  'software development': '4',
+  'computer software': '4',
+  'it services and it consulting': '96',
+  'information technology and services': '96',
+  'technology, information and internet': '6',
+  'internet': '6',
+  'computer and network security': '118',
+  'computer & network security': '118',
+  'computer hardware': '3',
+  'data infrastructure and analytics': '2458',
+  // Healthcare
+  'hospitals and health care': '14',
+  'hospital & health care': '14',
+  'health, wellness and fitness': '124',
+  'wellness and fitness services': '124',
+  'pharmaceuticals': '15',
+  'biotechnology research': '12',
+  'biotechnology': '12',
+  'medical practices': '13',
+  'medical equipment manufacturing': '17',
+  // Adjacent (sometimes useful for B2B SaaS narrowed by function)
+  'staffing and recruiting': '104',
+  'human resources services': '137',
+  'human resources': '137',
+  'e-learning providers': '132',
+  'e-learning': '132',
+  'marketing and advertising': '80',
+  'advertising services': '80',
+};
+
+export function resolveIndustryUrn(name: string): string | null {
+  return INDUSTRY_URN_MAP[name.trim().toLowerCase()] ?? null;
 }
 
 // Region libraries — the strategist prompt teaches the LLM to emit the

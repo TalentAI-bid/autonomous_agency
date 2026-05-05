@@ -82,8 +82,32 @@ async function ensureConnected() {
     apiKey: session.apiKey,
     onStatus: (s) => setStatus(s),
     onMessage: (msg) => handleMessage(msg),
+    onOpen: () => { reconcileRateLimitsFromServer().catch(() => {}); },
   });
   ws.connect();
+}
+
+// Pulls authoritative server-side daily counters and overwrites the local
+// chrome.storage mirror. Best-effort: any failure (offline, server down,
+// auth expired) is logged at debug and ignored — the next reconnect retries.
+async function reconcileRateLimitsFromServer() {
+  try {
+    const res = await authedFetch('/api/extension/me/rate-limits');
+    if (!res.ok) {
+      console.debug('[TalentAI sw] rate-limit reconcile: http', res.status);
+      return;
+    }
+    const body = await res.json().catch(() => null);
+    const data = body?.data;
+    if (!data || typeof data !== 'object') return;
+    await rateLimiter.reconcileFromServer({
+      dailyCounts: data.dailyCounts ?? {},
+      dailyResetAt: data.dailyResetAt ?? null,
+    });
+    console.info('[TalentAI sw] rate-limit reconcile complete', { dailyCounts: data.dailyCounts });
+  } catch (err) {
+    console.debug('[TalentAI sw] rate-limit reconcile failed', err?.message ?? err);
+  }
 }
 
 function setStatus(status) {
@@ -124,6 +148,22 @@ async function handleMessage(msg) {
       currentTask = null;
       currentMasterAgentName = null;
       broadcast('current_task', null);
+    }
+    return;
+  }
+  if (msg.type === 'rate_limits_purged') {
+    // Server (or an admin via /api/admin/extension/reset-rate-limits) reset
+    // the daily counters. Clear our local mirror so the next dispatch isn't
+    // blocked by a stale cap. Also clear the consecutive-429 backoff state
+    // and the daily-block sentinel — those are separate, but a user-triggered
+    // reset is the right time to give the extension a clean slate.
+    try {
+      await rateLimiter.purgeDailyCounts(msg.taskTypes ?? null);
+      await chrome.storage.local.set({ consecutive429s: 0, dailyBlockUntil: null });
+      console.info('[TalentAI sw] rate_limits_purged from server', { taskTypes: msg.taskTypes ?? '<all>' });
+      broadcast('popup_update', { status: 'idle', message: 'Rate limits reset.' });
+    } catch (err) {
+      console.warn('[TalentAI sw] rate_limits_purged handler failed', err);
     }
     return;
   }

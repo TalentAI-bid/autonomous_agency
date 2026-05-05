@@ -145,6 +145,40 @@ export class RateLimiter {
     }
     return { usage, dailyResetAt: this.dailyResetAt };
   }
+
+  // Server-triggered purge — clears the in-memory + persisted daily counters
+  // for the listed taskTypes (or all when null/empty). Called from the
+  // service-worker on receipt of a `rate_limits_purged` WS push, and also
+  // on WS reconnect when reconciling against /api/extension/me/rate-limits.
+  async purgeDailyCounts(taskTypes) {
+    await this._loaded;
+    if (!taskTypes || taskTypes.length === 0) {
+      this.dailyCounts = {};
+      this.reservedCounts = {};
+    } else {
+      for (const k of taskTypes) {
+        delete this.dailyCounts[k];
+        delete this.reservedCounts[k];
+      }
+    }
+    this.dailyResetAt = Date.now();
+    await this._persist();
+  }
+
+  // Reconcile-from-server — overwrites local daily counts with the
+  // authoritative server values. Used on WS reconnect to recover from any
+  // missed `rate_limits_purged` push while the extension was offline.
+  async reconcileFromServer({ dailyCounts, dailyResetAt }) {
+    await this._loaded;
+    if (dailyCounts && typeof dailyCounts === 'object') {
+      this.dailyCounts = { ...dailyCounts };
+    }
+    if (dailyResetAt) {
+      const t = typeof dailyResetAt === 'number' ? dailyResetAt : new Date(dailyResetAt).getTime();
+      if (Number.isFinite(t)) this.dailyResetAt = t;
+    }
+    await this._persist();
+  }
 }
 
 export function randomDelay(baseMs, pct = 0.3) {

@@ -2,11 +2,12 @@
 // Used by the service worker to stay connected to the TalentAI backend.
 
 export class TalentAIWebSocket {
-  constructor({ serverUrl, apiKey, onMessage, onStatus }) {
+  constructor({ serverUrl, apiKey, onMessage, onStatus, onOpen }) {
     this.serverUrl = serverUrl;
     this.apiKey = apiKey;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
+    this.onOpen = onOpen;
     this.ws = null;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
@@ -35,6 +36,7 @@ export class TalentAIWebSocket {
         console.log('[TalentAI ws] open ok');
         this._emitStatus('connected');
         this._startHeartbeat();
+        try { this.onOpen?.(); } catch (err) { console.warn('[TalentAI ws] onOpen handler failed', err); }
       });
 
       this.ws.addEventListener('message', (ev) => {

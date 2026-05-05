@@ -52,11 +52,12 @@
       return { debug: { reason: 'rate_limited_429' } };
     }
 
-    // Scroll deep so LinkedIn lazy-loads more team cards before extraction.
-    for (let i = 0; i < 6; i++) {
-      window.scrollBy(0, 900);
-      await u.sleep(800);
-    }
+    // Pre-extraction settle + deep scroll so LinkedIn lazy-loads ALL team
+    // cards before we read the DOM. The previous 6×scrollBy(0,900) loop
+    // only advanced 5400px — many people pages are 8000px+ tall and we'd
+    // miss the bottom half of the listing.
+    await u.sleep(u.jitter(2500));
+    await u.scrollAndLoad({ scrolls: 8, scrollDelay: 2000, settleDelay: 3000 });
 
     const cards = document.querySelectorAll('div[data-chameleon-result-urn]');
     const seen = new Set();

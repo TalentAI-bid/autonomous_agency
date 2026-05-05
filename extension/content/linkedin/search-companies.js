@@ -84,7 +84,12 @@
       return { companies: [], debug: collectDebug({ reason: 'no_container_found' }) };
     }
 
-    await u.scrollToBottom({ steps: 5, delayMs: 900 });
+    // Pre-extraction settle: LinkedIn's search results lazy-load below the
+    // fold and even within the visible viewport (description previews,
+    // location subtitles). Sleep + scroll-to-bottom + return-to-top before
+    // extraction so the DOM is fully populated when we read it.
+    await u.sleep(u.jitter(3000));
+    await u.scrollAndLoad({ scrolls: 4, scrollDelay: 2000, settleDelay: 2000 });
 
     // Try every known card selector; first one with hits wins.
     const cardSelectors = [

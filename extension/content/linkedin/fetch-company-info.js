@@ -32,6 +32,13 @@
       u.waitForSelector('main', { timeout: 10000 }),
     ]);
 
+    // Pre-extraction settle. About-page descriptions are clipped and
+    // expanded by lazy "Show more" controls only after the user scrolls
+    // near them. The 14/16 empty-description rows on agent 4c232eb4-... in
+    // production correlate with skipping this step.
+    await u.sleep(u.jitter(2500));
+    await u.scrollAndLoad({ scrolls: 3, scrollDelay: 1500, settleDelay: 2000 });
+
     const RATE_LIMIT_INDICATORS = [
       "you've reached the",
       'you have reached the',

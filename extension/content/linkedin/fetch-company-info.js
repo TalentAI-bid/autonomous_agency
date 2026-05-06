@@ -13,6 +13,15 @@
 
   window.__talentaiRun = async function run(params) {
     console.log('[TalentAI cs] li/fetch-info start', { href: location.href, linkedinUrl: params?.linkedinUrl });
+    // Hostname guard: if the SW injected us onto a non-linkedin tab (e.g.
+    // chrome-extension:// page from a stale tab reuse), bail loudly instead
+    // of letting `location.href = currentUrl.origin + '/about/'` loop on
+    // the extension's own origin.
+    const host = location.hostname || '';
+    if (!/(^|\.)linkedin\.com$/i.test(host)) {
+      console.log('[TalentAI cs] li/fetch-info aborted_non_linkedin_host', { host, href: location.href });
+      return { debug: { reason: 'non_linkedin_host', host, href: location.href } };
+    }
     const currentUrl = new URL(location.href);
     if (!currentUrl.pathname.includes('/about')) {
       const aboutUrl = currentUrl.origin + currentUrl.pathname.replace(/\/?$/, '/about/');

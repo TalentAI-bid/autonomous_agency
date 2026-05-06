@@ -11,6 +11,14 @@
 
   window.__talentaiRun = async function run(params) {
     console.log('[TalentAI cs] li/fetch-team start', { href: location.href, linkedinUrl: params?.linkedinUrl });
+    // Hostname guard: if the SW injected us onto a non-linkedin tab (e.g.
+    // chrome-extension:// page from a stale tab reuse), bail loudly instead
+    // of looping on the wrong origin.
+    const host = location.hostname || '';
+    if (!/(^|\.)linkedin\.com$/i.test(host)) {
+      console.log('[TalentAI cs] li/fetch-team aborted_non_linkedin_host', { host, href: location.href });
+      return { debug: { reason: 'non_linkedin_host', host, href: location.href } };
+    }
 
     // We expect to land on /company/<slug>/. Navigate to the people search.
     const currentUrl = new URL(location.href);

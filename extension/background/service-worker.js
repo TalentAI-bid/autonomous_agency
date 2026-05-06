@@ -241,6 +241,29 @@ async function processTask(msg) {
     }
     console.log('[TalentAI sw] tab', { tabId: tab?.id, url: target, isDetailTask });
 
+    // Pre-inject hostname check: never inject an adapter onto a chrome-extension://
+    // (or any non-target-host) tab — that's how the chrome-extension://<id>/about/
+    // navigation loop happens. waitForTabAtUrl already ensures this, but assert
+    // it once more right before the inject in case the user manually navigated
+    // the tab during the wait, or the tab redirected post-complete.
+    const expectedHost = (() => {
+      try { return new URL(target).hostname; } catch (_) { return ''; }
+    })();
+    const liveTab = await chrome.tabs.get(tab.id).catch(() => null);
+    const liveHost = (() => {
+      try { return new URL(liveTab?.url || '').hostname; } catch (_) { return ''; }
+    })();
+    if (!expectedHost || liveHost !== expectedHost) {
+      console.log('[TalentAI sw] inject_aborted_wrong_host', { expectedHost, liveHost, liveUrl: liveTab?.url });
+      ws?.send({
+        type: 'task_result',
+        taskId,
+        status: 'failed',
+        error: `tab_not_on_expected_host:${liveHost || 'unknown'}`,
+      });
+      return;
+    }
+
     // Stash params for the injected adapter (via chrome.storage.session if available)
     const storageKey = `task_${taskId}`;
     await chrome.storage.session?.set({ [storageKey]: { taskId, params } }).catch(() => {});

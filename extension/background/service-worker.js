@@ -224,24 +224,18 @@ async function processTask(msg) {
   }
 
   let tab = null;
-  // Detail tasks open a fresh tab via chrome.tabs.create instead of
-  // mutating an existing tab. This avoids a race where waitForTabComplete
-  // resolves on the previous load's `complete` event and the adapter
-  // injects onto a stale page (e.g. a chrome-extension:// page → /about/
-  // navigation loop). fetch_company_info / fetch_company_team are the
-  // task types LinkedIn dispatch actually emits today; fetch_company is
-  // legacy + reserved for the gmaps/businesses path.
-  const isDetailTask =
-    taskType === 'fetch_company' ||
-    taskType === 'fetch_business' ||
-    taskType === 'fetch_company_info' ||
-    taskType === 'fetch_company_team';
+  // Only the legacy single-shot detail tasks open a brand-new tab and
+  // close it after. fetch_company_info / fetch_company_team go through
+  // the openOrFocusTab path so the LinkedIn session stays warm across
+  // many sequential fetches. The race that produced the chrome-extension
+  // /about/ loop is fixed inside waitForTabAtUrl below.
+  const isDetailTask = (taskType === 'fetch_company' || taskType === 'fetch_business');
   try {
     const target = buildUrl(site, taskType, params);
     if (isDetailTask) {
       // Detail pages open in a NEW tab to avoid navigating away from search results.
       tab = await chrome.tabs.create({ url: target, active: true });
-      await waitForTabComplete(tab.id);
+      await waitForTabAtUrl(tab.id, target);
     } else {
       tab = await openOrFocusTab(target, site);
     }
@@ -487,29 +481,49 @@ async function openOrFocusTab(url, site) {
     if (existing.length > 0) {
       const tab = existing[0];
       await chrome.tabs.update(tab.id, { url, active: true });
-      await waitForTabComplete(tab.id);
+      await waitForTabAtUrl(tab.id, url);
       return tab;
     }
   }
   const tab = await chrome.tabs.create({ url, active: true });
-  await waitForTabComplete(tab.id);
+  await waitForTabAtUrl(tab.id, url);
   return tab;
 }
 
-function waitForTabComplete(tabId, timeoutMs = 45_000) {
+// Wait until the tab is on the expected origin AND has status === 'complete'.
+// The previous `status === complete` only check could fire for the page that
+// was already loaded before chrome.tabs.update was issued, causing the
+// adapter to inject onto a stale / chrome-extension page. Matching by
+// hostname is enough — the content adapter handles path-level navigation
+// (e.g. company → /about/) itself.
+function waitForTabAtUrl(tabId, expectedUrl, timeoutMs = 45_000) {
+  let expectedHost = '';
+  try { expectedHost = new URL(expectedUrl).hostname; } catch (_) {}
+
   return new Promise((resolve) => {
-    const start = Date.now();
-    const listener = (updatedId, info) => {
-      if (updatedId === tabId && info.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+    let resolved = false;
+    const cleanup = () => chrome.tabs.onUpdated.removeListener(listener);
+    const finishOnce = () => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve();
+    };
+    const checkTab = (tab) => {
+      if (resolved || !tab || !tab.url) return;
+      let tabHost = '';
+      try { tabHost = new URL(tab.url).hostname; } catch (_) {}
+      if (tabHost === expectedHost && tab.status === 'complete') finishOnce();
+    };
+    const listener = (updatedId, _info, tab) => {
+      if (updatedId !== tabId) return;
+      checkTab(tab);
     };
     chrome.tabs.onUpdated.addListener(listener);
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, timeoutMs);
+    // Catch the case where the tab is already on the target origin (rare,
+    // but possible for back-to-back tasks that share the same hostname).
+    chrome.tabs.get(tabId).then(checkTab).catch(() => {});
+    setTimeout(finishOnce, timeoutMs);
   });
 }
 

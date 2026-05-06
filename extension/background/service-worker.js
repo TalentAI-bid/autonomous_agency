@@ -228,14 +228,15 @@ async function processTask(msg) {
   // close it after. fetch_company_info / fetch_company_team go through
   // the openOrFocusTab path so the LinkedIn session stays warm across
   // many sequential fetches. The race that produced the chrome-extension
-  // /about/ loop is fixed inside waitForTabAtUrl below.
+  // /about/ loop is fixed by the listener-before-update pattern in
+  // navigateExistingTab below.
   const isDetailTask = (taskType === 'fetch_company' || taskType === 'fetch_business');
   try {
     const target = buildUrl(site, taskType, params);
+    console.log('[TalentAI sw] navigate begin', { taskId, taskType, target, isDetailTask });
     if (isDetailTask) {
       // Detail pages open in a NEW tab to avoid navigating away from search results.
-      tab = await chrome.tabs.create({ url: target, active: true });
-      await waitForTabAtUrl(tab.id, target);
+      tab = await createAndWaitTab(target);
     } else {
       tab = await openOrFocusTab(target, site);
     }
@@ -243,9 +244,10 @@ async function processTask(msg) {
 
     // Pre-inject hostname check: never inject an adapter onto a chrome-extension://
     // (or any non-target-host) tab — that's how the chrome-extension://<id>/about/
-    // navigation loop happens. waitForTabAtUrl already ensures this, but assert
-    // it once more right before the inject in case the user manually navigated
-    // the tab during the wait, or the tab redirected post-complete.
+    // navigation loop happens. navigateExistingTab / createAndWaitTab already
+    // ensure this, but assert once more right before the inject in case the
+    // user manually navigated the tab during the wait or LinkedIn redirected
+    // post-complete.
     const expectedHost = (() => {
       try { return new URL(target).hostname; } catch (_) { return ''; }
     })();
@@ -503,50 +505,88 @@ async function openOrFocusTab(url, site) {
     const existing = await chrome.tabs.query({ url: hostMatch });
     if (existing.length > 0) {
       const tab = existing[0];
-      await chrome.tabs.update(tab.id, { url, active: true });
-      await waitForTabAtUrl(tab.id, url);
-      return tab;
+      console.log('[TalentAI sw] reusing tab', { tabId: tab.id, currentUrl: tab.url, target: url });
+      try {
+        await navigateExistingTab(tab.id, url);
+        return tab;
+      } catch (err) {
+        console.warn('[TalentAI sw] navigate existing failed, creating new', err?.message ?? err);
+      }
     }
   }
-  const tab = await chrome.tabs.create({ url, active: true });
-  await waitForTabAtUrl(tab.id, url);
-  return tab;
+  console.log('[TalentAI sw] opening new tab', { target: url });
+  return await createAndWaitTab(url);
 }
 
-// Wait until the tab is on the expected origin AND has status === 'complete'.
-// The previous `status === complete` only check could fire for the page that
-// was already loaded before chrome.tabs.update was issued, causing the
-// adapter to inject onto a stale / chrome-extension page. Matching by
-// hostname is enough — the content adapter handles path-level navigation
-// (e.g. company → /about/) itself.
-function waitForTabAtUrl(tabId, expectedUrl, timeoutMs = 45_000) {
+// Navigate an existing tab to a new URL. Listener is attached BEFORE the
+// chrome.tabs.update call so we can never miss the next `complete` event
+// (especially for cached pages that load instantly). Hostname-matched so
+// we don't resolve on the prior page's stale complete state.
+function navigateExistingTab(tabId, url, timeoutMs = 45_000) {
   let expectedHost = '';
-  try { expectedHost = new URL(expectedUrl).hostname; } catch (_) {}
+  try { expectedHost = new URL(url).hostname; } catch (_) {}
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let resolved = false;
     const cleanup = () => chrome.tabs.onUpdated.removeListener(listener);
-    const finishOnce = () => {
+    const finishOnce = (label) => {
       if (resolved) return;
       resolved = true;
       cleanup();
+      console.log('[TalentAI sw] navigateExistingTab done', { tabId, label });
       resolve();
     };
-    const checkTab = (tab) => {
-      if (resolved || !tab || !tab.url) return;
-      let tabHost = '';
-      try { tabHost = new URL(tab.url).hostname; } catch (_) {}
-      if (tabHost === expectedHost && tab.status === 'complete') finishOnce();
-    };
-    const listener = (updatedId, _info, tab) => {
-      if (updatedId !== tabId) return;
-      checkTab(tab);
+    const listener = (updatedId, info, tab) => {
+      if (updatedId !== tabId || resolved) return;
+      if (info.status !== 'complete' || !tab || !tab.url) return;
+      try {
+        if (new URL(tab.url).hostname === expectedHost) finishOnce('listener_complete');
+      } catch (_) {}
     };
     chrome.tabs.onUpdated.addListener(listener);
-    // Catch the case where the tab is already on the target origin (rare,
-    // but possible for back-to-back tasks that share the same hostname).
-    chrome.tabs.get(tabId).then(checkTab).catch(() => {});
-    setTimeout(finishOnce, timeoutMs);
+    setTimeout(() => finishOnce('timeout'), timeoutMs);
+
+    // Kick off navigation AFTER listener attached.
+    chrome.tabs.update(tabId, { url, active: true }).catch((err) => {
+      cleanup();
+      reject(err);
+    });
+  });
+}
+
+// Create a new tab on the URL and wait for its first `complete` event on
+// the expected hostname.
+function createAndWaitTab(url, timeoutMs = 45_000) {
+  let expectedHost = '';
+  try { expectedHost = new URL(url).hostname; } catch (_) {}
+
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    let createdTab = null;
+    const cleanup = () => chrome.tabs.onUpdated.removeListener(listener);
+    const finishOnce = (label) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      console.log('[TalentAI sw] createAndWaitTab done', { tabId: createdTab?.id, label });
+      resolve(createdTab);
+    };
+    const listener = (updatedId, info, tab) => {
+      if (!createdTab || updatedId !== createdTab.id || resolved) return;
+      if (info.status !== 'complete' || !tab || !tab.url) return;
+      try {
+        if (new URL(tab.url).hostname === expectedHost) finishOnce('listener_complete');
+      } catch (_) {}
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => finishOnce('timeout'), timeoutMs);
+
+    chrome.tabs.create({ url, active: true }).then((tab) => {
+      createdTab = tab;
+    }).catch((err) => {
+      cleanup();
+      reject(err);
+    });
   });
 }
 

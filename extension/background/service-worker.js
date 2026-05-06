@@ -224,7 +224,18 @@ async function processTask(msg) {
   }
 
   let tab = null;
-  const isDetailTask = (taskType === 'fetch_company' || taskType === 'fetch_business');
+  // Detail tasks open a fresh tab via chrome.tabs.create instead of
+  // mutating an existing tab. This avoids a race where waitForTabComplete
+  // resolves on the previous load's `complete` event and the adapter
+  // injects onto a stale page (e.g. a chrome-extension:// page → /about/
+  // navigation loop). fetch_company_info / fetch_company_team are the
+  // task types LinkedIn dispatch actually emits today; fetch_company is
+  // legacy + reserved for the gmaps/businesses path.
+  const isDetailTask =
+    taskType === 'fetch_company' ||
+    taskType === 'fetch_business' ||
+    taskType === 'fetch_company_info' ||
+    taskType === 'fetch_company_team';
   try {
     const target = buildUrl(site, taskType, params);
     if (isDetailTask) {

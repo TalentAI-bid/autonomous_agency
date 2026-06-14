@@ -1,8 +1,8 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
-import type { CrmStage, Deal, DealWithContact, CrmActivity, BoardColumn } from '@/types';
+import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from '@/lib/api';
+import type { CrmStage, Deal, DealWithContact, CrmActivity, BoardColumn, CadenceStrategy, FollowupCadence } from '@/types';
 
 // ── Stages ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,25 @@ export function useDeleteStage() {
   return useMutation({
     mutationFn: (id: string) => apiDelete<{ success: boolean }>(`/crm/stages/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['crm'] }),
+  });
+}
+
+// ── Follow-up cadence ─────────────────────────────────────────────────────────
+
+export function useFollowupCadence() {
+  return useQuery({
+    queryKey: ['crm', 'followup-cadence'],
+    queryFn: () => apiGet<FollowupCadence>('/crm/followup-cadence'),
+    staleTime: 60000,
+  });
+}
+
+export function useUpdateFollowupCadence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { strategy: CadenceStrategy }) =>
+      apiPut<FollowupCadence>('/crm/followup-cadence', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['crm', 'followup-cadence'] }),
   });
 }
 

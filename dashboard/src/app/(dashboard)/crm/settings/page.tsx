@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useCrmStages, useCreateStage, useUpdateStage, useDeleteStage } from '@/hooks/use-crm';
+import { useCrmStages, useCreateStage, useUpdateStage, useDeleteStage, useFollowupCadence, useUpdateFollowupCadence } from '@/hooks/use-crm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,16 +9,44 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Plus, Pencil, Trash2, Settings, Save, X } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, Settings, Save, X, BellRing, BellOff, Timer } from 'lucide-react';
 import Link from 'next/link';
-import type { CrmStage } from '@/types';
+import type { CrmStage, CadenceStrategy } from '@/types';
+
+const CADENCE_LABELS: Record<CadenceStrategy, string> = {
+  fast: 'Fast',
+  mid: 'Mid',
+  slow: 'Slow',
+};
 
 export default function CrmSettingsPage() {
   const { data: stages, isLoading } = useCrmStages();
   const createStage = useCreateStage();
   const updateStage = useUpdateStage();
   const deleteStage = useDeleteStage();
+  const { data: cadence } = useFollowupCadence();
+  const updateCadence = useUpdateFollowupCadence();
   const { toast } = useToast();
+
+  async function handleCadenceChange(strategy: CadenceStrategy) {
+    try {
+      await updateCadence.mutateAsync({ strategy });
+      toast({ title: `Follow-up cadence set to ${CADENCE_LABELS[strategy]}` });
+    } catch {
+      toast({ title: 'Failed to update cadence', variant: 'destructive' });
+    }
+  }
+
+  async function handleToggleFollowUp(stage: CrmStage) {
+    try {
+      await updateStage.mutateAsync({ id: stage.id, followUpEligible: !stage.followUpEligible });
+      toast({
+        title: `Follow-ups ${stage.followUpEligible ? 'disabled' : 'enabled'} for "${stage.name}"`,
+      });
+    } catch {
+      toast({ title: 'Failed to update stage', variant: 'destructive' });
+    }
+  }
 
   const [showAdd, setShowAdd] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -119,6 +147,44 @@ export default function CrmSettingsPage() {
           <Plus className="w-4 h-4 mr-2" /> Add Stage
         </Button>
       </div>
+
+      {/* Follow-up cadence */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Timer className="w-4 h-4" /> Follow-up cadence
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">
+            How long to wait between follow-up touches for leads sitting in a
+            follow-up-eligible stage. Due follow-ups show up in your Daily Queue
+            with a drafted message — nothing is sent automatically.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(['fast', 'mid', 'slow'] as CadenceStrategy[]).map((s) => {
+              const days = cadence?.intervals?.[s] ?? [];
+              const active = cadence?.strategy === s;
+              return (
+                <Button
+                  key={s}
+                  size="sm"
+                  variant={active ? 'default' : 'outline'}
+                  onClick={() => handleCadenceChange(s)}
+                  disabled={updateCadence.isPending || active}
+                >
+                  {CADENCE_LABELS[s]}
+                  {days.length > 0 && (
+                    <span className={`ml-1.5 text-xs ${active ? 'opacity-80' : 'text-muted-foreground'}`}>
+                      day {days.join(', ')}
+                    </span>
+                  )}
+                </Button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Add Stage Form */}
       {showAdd && (
@@ -249,11 +315,38 @@ export default function CrmSettingsPage() {
                       <span className="font-medium text-sm min-w-[120px]">{stage.name}</span>
                       <span className="text-xs text-muted-foreground min-w-[100px]">{stage.slug}</span>
                       <span className="text-xs text-muted-foreground w-12 text-center">#{stage.position}</span>
-                      <div className="flex gap-1 flex-1">
+                      <div className="flex gap-1 flex-1 items-center">
                         {stage.isDefault && <Badge variant="secondary" className="text-xs">Default</Badge>}
                         {stage.isWon && <Badge className="text-xs bg-green-600">Won</Badge>}
                         {stage.isLost && <Badge variant="destructive" className="text-xs">Lost</Badge>}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleFollowUp(stage)}
+                        disabled={stage.isWon || stage.isLost || updateStage.isPending}
+                        title={
+                          stage.isWon || stage.isLost
+                            ? 'Terminal stage — never follow up'
+                            : stage.followUpEligible
+                              ? 'Leads in this stage get follow-up reminders in the Daily Queue. Click to disable.'
+                              : 'No follow-up reminders for this stage. Click to enable.'
+                        }
+                        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors ${
+                          stage.isWon || stage.isLost
+                            ? 'opacity-40 cursor-not-allowed border-border text-muted-foreground'
+                            : stage.followUpEligible
+                              ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'border-border text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {stage.followUpEligible && !stage.isWon && !stage.isLost
+                          ? <BellRing className="w-3 h-3" />
+                          : <BellOff className="w-3 h-3" />}
+                        Follow-ups {stage.followUpEligible && !stage.isWon && !stage.isLost ? 'on' : 'off'}
+                        {stage.followUpClassifiedBy && !stage.isWon && !stage.isLost && (
+                          <span className="opacity-60">· {stage.followUpClassifiedBy === 'ai' ? 'AI' : 'manual'}</span>
+                        )}
+                      </button>
                       <div className="flex gap-1 shrink-0">
                         <Button size="icon" variant="ghost" onClick={() => startEdit(stage)}>
                           <Pencil className="w-3.5 h-3.5" />

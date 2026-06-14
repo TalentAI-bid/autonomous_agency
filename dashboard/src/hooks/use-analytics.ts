@@ -34,3 +34,19 @@ export function useDashboardAnalytics() {
     staleTime: 30000,
   });
 }
+
+export interface OutreachActivity {
+  emailsSent: number;
+  linkedinMessagesSent: number;
+  personsAddedWithNote: number;
+  connectionsAccepted: number;
+  responses: number;
+}
+
+export function useOutreachActivity() {
+  return useQuery({
+    queryKey: ['analytics', 'outreach-activity'],
+    queryFn: () => apiGet<OutreachActivity>('/analytics/outreach-activity'),
+    staleTime: 30000,
+  });
+}

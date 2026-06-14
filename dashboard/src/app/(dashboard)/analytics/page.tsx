@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '@/lib/api';
 import type { AnalyticsOverview } from '@/types';
 import { StatsGrid } from '@/components/analytics/stats-grid';
+import { OutreachActivityGrid } from '@/components/analytics/outreach-activity-grid';
 import { ConversionFunnel } from '@/components/analytics/conversion-funnel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -43,6 +44,11 @@ export default function AnalyticsPage() {
       ) : (
         <StatsGrid analytics={analytics} />
       )}
+
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground mb-3">Outreach activity</h2>
+        <OutreachActivityGrid />
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Funnel */}

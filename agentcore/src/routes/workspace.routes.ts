@@ -100,6 +100,23 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundError('Workspace', tenantId);
 
+    // Persist the choice as this user's default workspace. The dashboard rides
+    // its rebound session token, but the extension authenticates with a
+    // tenant-less JWT whose tenant is resolved from user_tenants.is_default
+    // (see middleware/auth.ts:resolveActiveTenant). Flipping is_default here is
+    // what makes the extension — and any other default-resolved write — follow
+    // the workspace the user just picked on the dashboard.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(userTenants)
+        .set({ isDefault: false })
+        .where(eq(userTenants.userId, request.userId));
+      await tx
+        .update(userTenants)
+        .set({ isDefault: true })
+        .where(and(eq(userTenants.userId, request.userId), eq(userTenants.tenantId, tenantId)));
+    });
+
     const token = await createSession({
       tenantId: tenant.id,
       userId: request.userId,

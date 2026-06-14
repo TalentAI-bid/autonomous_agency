@@ -7,7 +7,11 @@ export const ERROR_MESSAGES: Record<string, { message: string; retryable: boolea
   cloudflare_block:    { message: 'LinkedIn blocked the server. Retry in a few hours or use the extension.', retryable: true },
   crawl_timeout:       { message: 'Page took too long to load. The site may be slow or down.',               retryable: true },
   parse_failure:       { message: 'Could not extract data from the page. The page layout may have changed.', retryable: false },
-  linkedin_rate_limit: { message: 'LinkedIn rate limited the extension. Pausing for 1 hour.',                retryable: true },
+  // Default copy used when the dispatcher can't (or doesn't) compute a real
+  // reset timestamp. Prefer formatRateLimitMessage(nextResetAt) — that path
+  // tells operators when the cap actually clears instead of the old
+  // misleading "Pausing for 1 hour" string.
+  linkedin_rate_limit: { message: 'Daily LinkedIn search cap reached. Resets in ~24 hours.',                  retryable: true },
   linkedin_popup:      { message: 'LinkedIn showed a popup. Dismiss it in Chrome and click Resume.',         retryable: true },
   invalid_domain:      { message: "Company's website domain does not exist.",                                retryable: false },
   scrape_failed:       { message: 'Could not scrape the company website.',                                   retryable: true },
@@ -16,6 +20,17 @@ export const ERROR_MESSAGES: Record<string, { message: string; retryable: boolea
   opportunity_insert_failed: { message: 'A discovered hiring signal could not be saved as an opportunity. The company is still saved; the opportunities tab is missing this row.', retryable: false },
   wrong_tool:          { message: 'Discovery gate set bdStrategy=hiring_signal but the LinkedIn Jobs dispatch did not run in the same pass. This indicates a strategist/dispatch inconsistency — please retry the run.', retryable: true },
 };
+
+// Build an honest message for the linkedin_rate_limit error path. When the
+// dispatcher knows the session's dailyResetAt timestamp, this surfaces the
+// real reset time; otherwise it falls back to the generic ~24h copy. Use
+// from any code that calls logPipelineError({ errorType: 'linkedin_rate_limit', ... }).
+export function formatRateLimitMessage(nextResetAt: Date | null): string {
+  if (!nextResetAt) return 'Daily LinkedIn search cap reached. Resets in ~24 hours.';
+  const ms = nextResetAt.getTime() - Date.now();
+  const hours = Math.max(1, Math.round(ms / 3_600_000));
+  return `Daily LinkedIn search cap reached. Resets in approximately ${hours} hour${hours > 1 ? 's' : ''} (at ${nextResetAt.toISOString()}).`;
+}
 
 export interface LogPipelineErrorInput {
   tenantId: string;

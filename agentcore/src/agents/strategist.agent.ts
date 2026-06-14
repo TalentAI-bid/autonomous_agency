@@ -121,13 +121,13 @@ export function detectLegacyShape(
     (s) => s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies',
   );
 
+  // Round 12 — broad terms are now a first-class part of the contract
+  // (broad-quantity steps). Saved strategies containing broad terms are no
+  // longer legacy. Banned phrases + country names in keywords still are.
   for (const step of searchSteps) {
     const params = step.params as PipelineStepParams | undefined;
     for (const kw of params?.searchKeywords ?? []) {
       const lower = kw.trim().toLowerCase();
-      if (UNEXPANDED_BROAD_TERMS.includes(lower)) {
-        return { legacy: true, reason: 'broad_term_in_keywords' };
-      }
       if (BANNED_PHRASES.some((p) => lower.includes(p))) {
         return { legacy: true, reason: 'banned_phrase_in_keywords' };
       }
@@ -172,19 +172,88 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
   if (!strategy.idealCustomerShape?.antiSignals?.length) errors.push('idealCustomerShape.antiSignals empty');
   if (!strategy.queryDesignNotes) errors.push('missing queryDesignNotes');
 
-  // Minimum 3 LINKEDIN_EXTENSION search_companies steps (per the new
-  // strategist contract — query variety beats query volume).
+  // Root-step count requirements branch on bdStrategy. Each strategy has a
+  // DIFFERENT required root step per the prompt contract (strategist.prompt.ts:75):
+  //   - industry_target / undefined: ≥3 LINKEDIN_EXTENSION:search_companies (query variety beats volume)
+  //   - hiring_signal:                ≥1 CRAWL4AI:search_linkedin_jobs (LinkedIn Jobs is public, no extension)
+  //   - hybrid:                       both rules apply (parallel root steps)
   const liSearchSteps = (strategy.pipelineSteps ?? []).filter(
     (s) => s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies',
   );
-  if (liSearchSteps.length < 3) {
-    errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+  const jobsSearchSteps = (strategy.pipelineSteps ?? []).filter(
+    (s) => s.tool === 'CRAWL4AI' && s.action === 'search_linkedin_jobs',
+  );
+  const gmapsSearchSteps = (strategy.pipelineSteps ?? []).filter(
+    (s) => s.tool === 'GMAPS_EXTENSION' && s.action === 'search_businesses',
+  );
+  const bd = strategy.bdStrategy;
+  if (bd === 'hiring_signal') {
+    if (jobsSearchSteps.length < 1) {
+      errors.push(
+        `too_few_jobs_search_steps (have ${jobsSearchSteps.length}, need ≥1 CRAWL4AI:search_linkedin_jobs root step for bdStrategy='hiring_signal')`,
+      );
+    }
+  } else if (bd === 'local_business') {
+    // Local discovery is Maps-only: niche-query variety beats volume (the
+    // gmaps search cap is ~20/day, so 3-6 steps is the right shape).
+    if (gmapsSearchSteps.length < 3) {
+      errors.push(
+        `too_few_gmaps_search_steps (have ${gmapsSearchSteps.length}, need ≥3 GMAPS_EXTENSION:search_businesses root steps for bdStrategy='local_business')`,
+      );
+    }
+  } else if (bd === 'local_hybrid') {
+    if (gmapsSearchSteps.length < 2) {
+      errors.push(
+        `too_few_gmaps_search_steps (have ${gmapsSearchSteps.length}, need ≥2 GMAPS_EXTENSION:search_businesses root steps for bdStrategy='local_hybrid')`,
+      );
+    }
+    if (liSearchSteps.length < 3) {
+      errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+    }
+  } else if (bd === 'hybrid') {
+    if (jobsSearchSteps.length < 1) {
+      errors.push(
+        `too_few_jobs_search_steps (have ${jobsSearchSteps.length}, need ≥1 CRAWL4AI:search_linkedin_jobs root step for bdStrategy='hybrid')`,
+      );
+    }
+    if (liSearchSteps.length < 3) {
+      errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+    }
+  } else {
+    // industry_target (and default for unset bdStrategy — preserves legacy behavior).
+    if (liSearchSteps.length < 3) {
+      errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+    }
   }
 
   for (const step of strategy.pipelineSteps ?? []) {
     const isLinkedInSearch = step.tool === 'LINKEDIN_EXTENSION' && step.action === 'search_companies';
+    const isGmapsSearch = step.tool === 'GMAPS_EXTENSION' && step.action === 'search_businesses';
     const isAnalysisStep = step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING' || step.tool === 'CRAWL4AI';
     const params = step.params as PipelineStepParams | undefined;
+
+    if (isGmapsSearch) {
+      // Contract: query (niche only) + location (city/region) + queryRationale.
+      if (typeof params?.query !== 'string' || !params.query.trim()) {
+        errors.push(`step ${step.id} missing params.query`);
+      }
+      if (typeof params?.location !== 'string' || !params.location.trim()) {
+        errors.push(`step ${step.id} missing params.location`);
+      }
+      if (!params?.queryRationale) {
+        errors.push(`step ${step.id} missing params.queryRationale`);
+      }
+      // Geography belongs in params.location, never in query — same rule as
+      // the LinkedIn searchKeywords/geographyFilter separation.
+      const q = typeof params?.query === 'string' ? params.query.toLowerCase() : '';
+      for (const banned of COUNTRY_NAMES_IN_KEYWORDS_BANLIST) {
+        const pattern = new RegExp(`(^|[^a-z])${banned.replace(/\s/g, '\\s')}([^a-z]|$)`, 'i');
+        if (pattern.test(q)) {
+          errors.push(`step ${step.id} geography_in_query ("${params?.query}" contains "${banned}" — put the city/region in params.location)`);
+          break;
+        }
+      }
+    }
 
     if (isLinkedInSearch) {
       // New contract: searchKeywords + geographyFilter + queryRationale.
@@ -214,17 +283,9 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
         }
       }
 
-      // Round 8 — broad-term rejection: the strategist must expand the
-      // user's broad input into specific sub-categories. Whole-keyword
-      // match against the lowercased + trimmed form.
-      for (const kw of kws) {
-        const lower = kw.trim().toLowerCase();
-        if (UNEXPANDED_BROAD_TERMS.includes(lower)) {
-          errors.push(
-            `step ${step.id} broad_term_in_keywords ("${kw}" is the user's broad input — strategist must expand to a specific sub-category, e.g. "payment infrastructure" instead of "fintech", "MLOps" instead of "AI")`,
-          );
-        }
-      }
+      // Round 12 — broad terms ARE allowed (broad-quantity steps).
+      // No broad-term rejection at the per-step level. Mix shape (broad +
+      // narrow) is enforced by the prompt, not the validator.
 
       // Round 8 — banned-phrase rejection (substring match).
       for (const kw of kws) {
@@ -258,6 +319,48 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
     }
     if (step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING') {
       if (!params?.instruction) errors.push(`step ${step.id} missing params.instruction`);
+    }
+  }
+
+  // teamRoleKeywords — required when the pipeline includes fetch_company_team
+  // (the LinkedIn `/people/?keywords=<kw>` scrape). Each entry feeds one
+  // per-company task.
+  const fetchTeamSteps = (strategy.pipelineSteps ?? []).filter(
+    (s) => s.tool === 'LINKEDIN_EXTENSION' && s.action === 'fetch_company_team',
+  );
+  const rawTeamKw = (strategy as SalesStrategy & { teamRoleKeywords?: unknown }).teamRoleKeywords;
+  if (rawTeamKw !== undefined && rawTeamKw !== null) {
+    if (!Array.isArray(rawTeamKw)) {
+      errors.push('teamRoleKeywords must be a string[]');
+    } else {
+      if (rawTeamKw.length > 10) {
+        errors.push(`teamRoleKeywords too_many (${rawTeamKw.length}, max 10)`);
+      }
+      for (const kw of rawTeamKw) {
+        if (typeof kw !== 'string') {
+          errors.push('teamRoleKeywords contains non-string entry');
+          break;
+        }
+        const trimmed = kw.trim();
+        if (trimmed.length === 0) {
+          errors.push('teamRoleKeywords contains empty string');
+          break;
+        }
+        if (trimmed.length > 60) {
+          errors.push(`teamRoleKeywords entry too_long ("${trimmed.slice(0, 30)}…", max 60 chars)`);
+          break;
+        }
+      }
+    }
+  }
+  if (fetchTeamSteps.length > 0) {
+    const teamKw = Array.isArray(rawTeamKw)
+      ? rawTeamKw.filter((k): k is string => typeof k === 'string' && k.trim().length > 0)
+      : [];
+    if (teamKw.length === 0) {
+      errors.push(
+        'teamRoleKeywords empty — pipelineSteps include LINKEDIN_EXTENSION:fetch_company_team, so 3-6 decision-maker titles (e.g. ["CTO","VP Engineering","Founder"]) are required to drive `/people/?keywords=<kw>`',
+      );
     }
   }
 
@@ -418,7 +521,10 @@ export class StrategistAgent extends BaseAgent {
       mission = agent?.mission ?? undefined;
       const cfg = (agent?.config as Record<string, unknown> | null) ?? {};
       const explicit = cfg.userExplicitBdStrategy as string | undefined;
-      if (explicit === 'hiring_signal' || explicit === 'industry_target' || explicit === 'hybrid') {
+      if (
+        explicit === 'hiring_signal' || explicit === 'industry_target' || explicit === 'hybrid'
+        || explicit === 'local_business' || explicit === 'local_hybrid'
+      ) {
         userExplicitBdStrategy = explicit;
         logger.info({ masterAgentId, userExplicitBdStrategy }, 'Strategist: user-locked bdStrategy detected');
       }
@@ -535,9 +641,13 @@ export class StrategistAgent extends BaseAgent {
       // User locked the choice in chat. Force the bdStrategy regardless of
       // LLM output, and skip the legacy industry-mention safety-net.
       strategy.bdStrategy = userExplicitBdStrategy;
-      // Industry/hybrid paths require the extension. Force the flag so
+      // Industry/hybrid/local paths require the extension (LinkedIn and/or
+      // Google Maps scrapes both run through it). Force the flag so
       // master-agent's dispatch decision doesn't silently skip them.
-      if (userExplicitBdStrategy === 'industry_target' || userExplicitBdStrategy === 'hybrid') {
+      if (
+        userExplicitBdStrategy === 'industry_target' || userExplicitBdStrategy === 'hybrid'
+        || userExplicitBdStrategy === 'local_business' || userExplicitBdStrategy === 'local_hybrid'
+      ) {
         strategy.dataSourceStrategy = {
           ...(strategy.dataSourceStrategy ?? { primaryRegion: '', availableSources: [], expectedQuality: 'medium', userNotes: '' }),
           needsChromeExtension: true,
@@ -789,6 +899,11 @@ export class StrategistAgent extends BaseAgent {
         'Generate 3-5 LINKEDIN_EXTENSION search_companies steps with DIFFERENT angles (different keyword combinations, different geographies, different ICP slices). Query variety beats query volume.',
       );
     }
+    if (firstCheck.errors.some((e) => e.includes('too_few_jobs_search_steps'))) {
+      fixHints.push(
+        "Add a root CRAWL4AI step with action 'search_linkedin_jobs', dependsOn: [], and params { jobTitles: <3-5 role names from your hiringKeywords>, location: '<target country/region>' }. This is the discovery root for hiring_signal — the master-agent scrapes LinkedIn Jobs publicly (no Chrome extension needed). Do NOT add LINKEDIN_EXTENSION:search_companies steps for hiring_signal — those would contradict the user-locked strategy.",
+      );
+    }
     if (firstCheck.errors.some((e) => /missing params\.(searchKeywords|geographyFilter|queryRationale)/.test(e))) {
       fixHints.push(
         'Each LINKEDIN_EXTENSION search_companies step MUST have: searchKeywords (array of behavior/function terms, no geography), geographyFilter.regions (array of country/region names), sizeFilter.{min,max}, and queryRationale (one sentence).',
@@ -799,11 +914,6 @@ export class StrategistAgent extends BaseAgent {
         'Each LLM_ANALYSIS / SCORING / CRAWL4AI step needs groundingRequired:true, outputContract (with forbiddenPhrases), and instruction. See the GROUNDED-OR-NOTHING section.',
       );
     }
-    if (firstCheck.errors.some((e) => e.includes('broad_term_in_keywords'))) {
-      fixHints.push(
-        'Expand the user\'s broad market input ("fintech", "AI", "healthtech", "B2B SaaS", "ecommerce") into SPECIFIC sub-categories that companies use to describe themselves. "fintech" → ["payment infrastructure"], ["neobank"], ["embedded finance"]. "AI" → ["MLOps"], ["computer vision platform"]. ONE sub-category per step. The user\'s broad term must NEVER appear in searchKeywords.',
-      );
-    }
     if (firstCheck.errors.some((e) => e.includes('banned_phrase_in_keywords'))) {
       fixHints.push(
         'Remove urgency / stage / marketing phrases ("hiring developers", "GDPR compliant", "AI-powered", "scaling team", "Series A") from searchKeywords. These return zero LinkedIn results. Use sub-category NOUNS only ("payment infrastructure", "neobank", "MLOps").',
@@ -812,6 +922,16 @@ export class StrategistAgent extends BaseAgent {
     if (firstCheck.errors.some((e) => e.includes('too_many_keywords'))) {
       fixHints.push(
         'Each search step has AT MOST 4 keywords: sub-category name + 1-2 technical specialties + optional service word (e.g. ["payment processing","API","PCI"] or ["neobank","core banking","BaaS"]). If you have more sub-categories, split them across SEPARATE search steps.',
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('too_few_gmaps_search_steps'))) {
+      fixHints.push(
+        "Generate 3-6 GMAPS_EXTENSION steps with action 'search_businesses', dependsOn: [], and params { query: '<niche keywords, NO city/country>', location: '<city or region>', limit: 20, queryRationale: '<one sentence>' }. Mix broad niches ('restaurant') with narrow ones ('asian restaurant', 'sushi restaurant'). For local_business do NOT add LINKEDIN_EXTENSION:search_companies or CRAWL4AI jobs steps.",
+      );
+    }
+    if (firstCheck.errors.some((e) => e.includes('geography_in_query') || /missing params\.(query|location)\b/.test(e))) {
+      fixHints.push(
+        "Each GMAPS_EXTENSION search_businesses step MUST have params.query (the niche ONLY, e.g. 'asian restaurant' — never a city/country name) and params.location (the city/region, e.g. 'Riyadh'). Move any geography out of query and into location.",
       );
     }
     const retryMessages = [
@@ -954,11 +1074,23 @@ export class StrategistAgent extends BaseAgent {
         params: {},
       });
     }
-    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
+    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid' || bdStrategy === 'local_hybrid') {
       steps.push({
         id: 'discover_companies',
         tool: 'LINKEDIN_EXTENSION',
         action: 'search_companies',
+        dependsOn: [],
+        params: {},
+      });
+    }
+    if (bdStrategy === 'local_business' || bdStrategy === 'local_hybrid') {
+      // Empty params are acceptable — the master-agent dispatch branch falls
+      // back to config targetIndustries/services for query and locations for
+      // the Maps location.
+      steps.push({
+        id: 'discover_businesses',
+        tool: 'GMAPS_EXTENSION',
+        action: 'search_businesses',
         dependsOn: [],
         params: {},
       });
@@ -981,12 +1113,26 @@ export class StrategistAgent extends BaseAgent {
     bdStrategy: SalesStrategy['bdStrategy'],
   ): NonNullable<SalesStrategy['pipelineSteps']> {
     const isWrong = (s: { tool: string; action: string }) => {
+      const isJobsRoot = s.tool === 'CRAWL4AI'
+        && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+      const isLiSearchRoot = s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+      const isGmapsStep = s.tool === 'GMAPS_EXTENSION';
       if (bdStrategy === 'industry_target') {
-        return s.tool === 'CRAWL4AI'
-          && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+        return isJobsRoot || isGmapsStep;
       }
       if (bdStrategy === 'hiring_signal') {
-        return s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+        return isLiSearchRoot || isGmapsStep;
+      }
+      if (bdStrategy === 'hybrid') {
+        return isGmapsStep;
+      }
+      if (bdStrategy === 'local_business') {
+        // Maps-only discovery — no LinkedIn or jobs roots.
+        return isJobsRoot || isLiSearchRoot;
+      }
+      if (bdStrategy === 'local_hybrid') {
+        // Maps + LinkedIn companies, no jobs.
+        return isJobsRoot;
       }
       return false;
     };
@@ -1021,12 +1167,18 @@ export class StrategistAgent extends BaseAgent {
       s.tool === 'CRAWL4AI'
       && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
 
+    const isGmapsSearch = (s: { tool: string; action: string }) =>
+      s.tool === 'GMAPS_EXTENSION' && s.action === 'search_businesses';
+
     const hasExt = steps.some(isExtSearch);
     const hasJobs = steps.some(isJobsSearch);
+    const hasGmaps = steps.some(isGmapsSearch);
 
-    if (bdStrategy === 'industry_target') return hasExt && !hasJobs;
-    if (bdStrategy === 'hiring_signal') return hasJobs && !hasExt;
-    if (bdStrategy === 'hybrid') return hasExt && hasJobs;
+    if (bdStrategy === 'industry_target') return hasExt && !hasJobs && !hasGmaps;
+    if (bdStrategy === 'hiring_signal') return hasJobs && !hasExt && !hasGmaps;
+    if (bdStrategy === 'hybrid') return hasExt && hasJobs && !hasGmaps;
+    if (bdStrategy === 'local_business') return hasGmaps && !hasExt && !hasJobs;
+    if (bdStrategy === 'local_hybrid') return hasGmaps && hasExt && !hasJobs;
     return true;
   }
 }

@@ -13,6 +13,10 @@ import {
   type CopilotActivityDraft,
 } from '../prompts/copilot-activity.prompt.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { getTenantCadence } from '../services/followup-cadence.service.js';
+import { getTenantById, updateTenant } from '../services/tenant.service.js';
+import { classifyStagesInBackground } from '../services/stage-classifier.service.js';
+import { onDealStageChanged, setSequenceCadenceOverride } from '../services/followup-engine.service.js';
 import logger from '../utils/logger.js';
 
 // --- Schemas ---
@@ -26,7 +30,9 @@ const createStageSchema = z.object({
   isLost: z.boolean().default(false),
 });
 
-const updateStageSchema = createStageSchema.partial();
+const updateStageSchema = createStageSchema.partial().extend({
+  followUpEligible: z.boolean().optional(),
+});
 
 const createDealSchema = z.object({
   contactId: z.string().uuid(),
@@ -47,6 +53,8 @@ const updateDealSchema = z.object({
   currency: z.string().max(3).optional(),
   notes: z.string().optional(),
   expectedCloseAt: z.string().optional(),
+  // Follow-up engine per-lead cadence override (null = tenant default).
+  cadenceOverride: z.enum(['fast', 'mid', 'slow']).nullable().optional(),
 });
 
 // Activity types that imply a real contact touchpoint and should surface
@@ -103,6 +111,9 @@ export default async function crmRoutes(fastify: FastifyInstance) {
       }).returning();
     });
 
+    // Re-classify follow-up eligibility now that the pipeline changed.
+    classifyStagesInBackground(request.tenantId);
+
     return reply.status(201).send({ data: stage });
   });
 
@@ -118,13 +129,37 @@ export default async function crmRoutes(fastify: FastifyInstance) {
     const parsed = updateStageSchema.safeParse(request.body);
     if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
 
+    // An explicit followUpEligible edit pins the flag — the AI classifier
+    // never overwrites a user decision. Won/lost stages are always ineligible.
+    const updateData: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
+    if (parsed.data.followUpEligible !== undefined) {
+      updateData.followUpClassifiedBy = 'user';
+    }
+    if (parsed.data.isWon || parsed.data.isLost) {
+      updateData.followUpEligible = false;
+    }
+
+    const [before] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({ name: crmStages.name, classifiedBy: crmStages.followUpClassifiedBy })
+        .from(crmStages)
+        .where(and(eq(crmStages.id, id), eq(crmStages.tenantId, request.tenantId)))
+        .limit(1);
+    });
+
     const [stage] = await withTenant(request.tenantId, async (tx) => {
       return tx.update(crmStages)
-        .set({ ...parsed.data, updatedAt: new Date() })
+        .set(updateData)
         .where(and(eq(crmStages.id, id), eq(crmStages.tenantId, request.tenantId)))
         .returning();
     });
     if (!stage) throw new NotFoundError('CrmStage', id);
+
+    // A rename changes the stage's meaning — re-classify (user-pinned stages
+    // are skipped inside the classifier).
+    if (parsed.data.name && before && before.name !== parsed.data.name && before.classifiedBy !== 'user') {
+      classifyStagesInBackground(request.tenantId);
+    }
+
     return { data: stage };
   });
 
@@ -138,6 +173,39 @@ export default async function crmRoutes(fastify: FastifyInstance) {
     });
     if (result.length === 0) throw new NotFoundError('CrmStage', id);
     return { success: true };
+  });
+
+  // ── Follow-up cadence (tenant-level strategy for the follow-up engine) ──────
+
+  // GET /api/crm/followup-cadence
+  fastify.get('/followup-cadence', async (request) => {
+    const cadence = await getTenantCadence(request.tenantId);
+    return { data: cadence };
+  });
+
+  // PUT /api/crm/followup-cadence
+  fastify.put('/followup-cadence', async (request) => {
+    const parsed = z.object({
+      strategy: z.enum(['fast', 'mid', 'slow']),
+      intervals: z.record(z.array(z.number().int().min(1).max(90)).min(1).max(6)).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+    // Read-merge-write: tenants.settings is a shared JSONB blob — never clobber
+    // other keys (companyProfile, …).
+    const tenant = await getTenantById(request.tenantId);
+    const settings = (tenant.settings as Record<string, unknown>) ?? {};
+    await updateTenant(request.tenantId, {
+      settings: {
+        ...settings,
+        followupCadence: {
+          ...(settings.followupCadence as Record<string, unknown> | undefined),
+          strategy: parsed.data.strategy,
+          ...(parsed.data.intervals ? { intervals: parsed.data.intervals } : {}),
+        },
+      },
+    });
+    return { data: await getTenantCadence(request.tenantId) };
   });
 
   // ── Deals ───────────────────────────────────────────────────────────────────
@@ -187,6 +255,17 @@ export default async function crmRoutes(fastify: FastifyInstance) {
       }).returning();
     });
 
+    // Follow-up engine: a deal created directly into an eligible stage
+    // starts its sequence.
+    try {
+      const [stage] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(crmStages).where(eq(crmStages.id, parsed.data.stageId)).limit(1);
+      });
+      if (stage) await onDealStageChanged(request.tenantId, deal!.id, stage);
+    } catch (err) {
+      logger.warn({ err, dealId: deal!.id }, 'create deal: follow-up engine hook failed');
+    }
+
     return reply.status(201).send({ data: deal });
   });
 
@@ -223,7 +302,8 @@ export default async function crmRoutes(fastify: FastifyInstance) {
     const parsed = updateDealSchema.safeParse(request.body);
     if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
 
-    const updateData: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
+    const { stageId, cadenceOverride, ...rest } = parsed.data;
+    const updateData: Record<string, unknown> = { ...rest, updatedAt: new Date() };
     if (parsed.data.expectedCloseAt) {
       updateData.expectedCloseAt = new Date(parsed.data.expectedCloseAt);
     }
@@ -235,7 +315,29 @@ export default async function crmRoutes(fastify: FastifyInstance) {
         .returning();
     });
     if (!deal) throw new NotFoundError('Deal', id);
-    return { data: deal };
+
+    // Stage changes go through moveDealStage — the single chokepoint that
+    // logs the activity AND drives the follow-up engine lifecycle.
+    if (stageId && stageId !== deal.stageId) {
+      await moveDealStage({
+        tenantId: request.tenantId,
+        dealId: id,
+        newStageId: stageId,
+        userId: request.userId,
+      });
+    }
+
+    // Per-lead cadence override for the follow-up engine.
+    if (cadenceOverride !== undefined) {
+      await setSequenceCadenceOverride(request.tenantId, id, cadenceOverride);
+    }
+
+    const [fresh] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select().from(deals)
+        .where(and(eq(deals.id, id), eq(deals.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    return { data: fresh ?? deal };
   });
 
   // DELETE /api/crm/deals/:id

@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, getStatusColor } from '@/lib/utils';
-import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare } from 'lucide-react';
+import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store, Star, Phone } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { ExportButton } from '@/components/shared/export-button';
@@ -24,16 +24,18 @@ import { QuotaBadge } from '@/components/agents/quota-badge';
 import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
+import { AgentSettingsTab } from '@/components/agents/agent-settings-tab';
+import { AgentQueueTab } from '@/components/agents/agent-queue-tab';
 import { FitScoreBadge } from '@/components/companies/fit-score-badge';
 import type { CompanyFitScoreVerdict } from '@/types';
 
-type Tab = 'overview' | 'contacts' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room';
+type Tab = 'queue' | 'overview' | 'contacts' | 'businesses' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room' | 'settings';
 const VALID_TABS: readonly Tab[] = [
-  'overview', 'contacts', 'opportunities', 'companies', 'documents', 'emails', 'activity', 'strategy', 'room',
+  'queue', 'overview', 'contacts', 'businesses', 'opportunities', 'companies', 'documents', 'emails', 'activity', 'strategy', 'room', 'settings',
 ];
 
 function tabFromQuery(value: string | null): Tab {
-  return value && (VALID_TABS as readonly string[]).includes(value) ? (value as Tab) : 'overview';
+  return value && (VALID_TABS as readonly string[]).includes(value) ? (value as Tab) : 'queue';
 }
 
 export default function AgentDetailPage() {
@@ -54,7 +56,7 @@ export default function AgentDetailPage() {
   function selectTab(t: Tab) {
     setActiveTab(t);
     const q = new URLSearchParams(searchParams.toString());
-    if (t === 'overview') q.delete('tab'); else q.set('tab', t);
+    if (t === 'queue') q.delete('tab'); else q.set('tab', t);
     const qs = q.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
@@ -85,6 +87,7 @@ export default function AgentDetailPage() {
 
   const agent = agentRes;
   const contacts = contactsRes?.data ?? [];
+  const gmapsBusinesses = contacts.filter((c) => c.sourceType === 'gmaps_business');
   const totalContacts = stats?.totalContacts ?? contactsRes?.pagination?.total ?? 0;
   const config = (agent?.config ?? {}) as Record<string, unknown>;
   const agentCompanies = companiesData?.data ?? [];
@@ -140,8 +143,12 @@ export default function AgentDetailPage() {
   ];
 
   const tabs: { key: Tab; label: string; icon: React.ElementType; count?: number }[] = [
+    { key: 'queue', label: 'Queue', icon: ListChecks },
     { key: 'overview', label: 'Overview', icon: BarChart3 },
     { key: 'contacts', label: 'Contacts', icon: Users, count: totalContacts },
+    ...(gmapsBusinesses.length > 0
+      ? [{ key: 'businesses' as Tab, label: 'Businesses', icon: Store, count: gmapsBusinesses.length }]
+      : []),
     { key: 'opportunities', label: 'Opportunities', icon: Zap },
     { key: 'companies', label: 'Companies', icon: Building2, count: agentCompanies.length },
     { key: 'documents', label: 'Documents', icon: FileText, count: agentDocuments.length },
@@ -149,6 +156,7 @@ export default function AgentDetailPage() {
     { key: 'activity', label: 'Activity', icon: Activity },
     { key: 'strategy', label: 'Strategy', icon: Brain },
     { key: 'room', label: 'Agent Room', icon: MessageSquare },
+    { key: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
   return (
@@ -239,6 +247,10 @@ export default function AgentDetailPage() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === 'queue' && (
+        <AgentQueueTab agentId={id} agentName={agent.name} />
+      )}
+
       {activeTab === 'overview' && (
         <>
           {/* Action plan — gates outreach until the user fills in the required answers */}
@@ -408,6 +420,61 @@ export default function AgentDetailPage() {
                   </div>
                 </Link>
               ))
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'businesses' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Store className="w-4 h-4" />
+              Businesses ({gmapsBusinesses.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {gmapsBusinesses.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No Google Maps businesses captured yet.
+              </p>
+            ) : (
+              gmapsBusinesses.map((b) => {
+                const meta = (b.sourceMetadata ?? {}) as Record<string, unknown>;
+                const category = typeof meta.category === 'string' ? meta.category : '';
+                const rating = typeof meta.rating === 'number' ? meta.rating : null;
+                const reviews = typeof meta.reviewsCount === 'number' ? meta.reviewsCount : null;
+                const price = typeof meta.pricePerPerson === 'string' ? meta.pricePerPerson
+                  : (typeof meta.priceLevel === 'string' ? meta.priceLevel : '');
+                const menuLink = typeof meta.menuLink === 'string' ? meta.menuLink : '';
+                const hasRec = !!(meta.aiRecommendation && typeof meta.aiRecommendation === 'object');
+                return (
+                  <Link key={b.id} href={`/agents/${id}/contacts/${b.id}`} className="block cursor-pointer">
+                    <div className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate" dir="auto">{b.companyName || b.firstName || 'Business'}</p>
+                        <p className="text-xs text-muted-foreground truncate flex items-center gap-2 flex-wrap" dir="auto">
+                          {category && <span>{category}</span>}
+                          {rating != null && (
+                            <span className="inline-flex items-center gap-0.5">
+                              <Star className="w-3 h-3" /> {rating}{reviews != null ? ` (${reviews})` : ''}
+                            </span>
+                          )}
+                          {price && <span>{price}</span>}
+                          {b.phone && (
+                            <span className="inline-flex items-center gap-0.5"><Phone className="w-3 h-3" /> {b.phone}</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        {hasRec && <Badge variant="outline" className="text-xs">AI</Badge>}
+                        {menuLink && <Badge variant="secondary" className="text-xs">Menu</Badge>}
+                        <Badge variant="secondary" className="text-xs">{b.status}</Badge>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })
             )}
           </CardContent>
         </Card>
@@ -685,6 +752,10 @@ export default function AgentDetailPage() {
 
       {activeTab === 'room' && (
         <AgentRoom masterAgentId={id} />
+      )}
+
+      {activeTab === 'settings' && (
+        <AgentSettingsTab agent={agent} />
       )}
     </div>
   );

@@ -1,8 +1,9 @@
-import { pgTable, uuid, varchar, text, boolean, integer, timestamp, jsonb, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, boolean, integer, timestamp, jsonb, pgEnum, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tenants } from './tenants.js';
 import { masterAgents } from './master-agents.js';
 import { companies } from './companies.js';
+import { users } from './users.js';
 
 export const contactSourceEnum = pgEnum('contact_source', [
   'linkedin_search', 'linkedin_profile', 'cv_upload', 'manual', 'web_search', 'inbound', 'reddit',
@@ -50,6 +51,26 @@ export const contacts = pgTable('contacts', {
   // manual outreach defaults to it but the user can pick others.
   isPrimaryContact: boolean('is_primary_contact').default(false).notNull(),
   // enrichmentRetryCount: integer('enrichment_retry_count').default(0), // Disabled — not migrated to production
+  // ─── Sales Operations Platform — Stage 1 additions ──────────────────
+  // source_type and source_metadata describe how the contact entered the
+  // pipeline (vs. the legacy `source` enum, which is kept for back-compat
+  // with the auto-discovery code paths). Source-type values include
+  // 'ai_discovery' | 'manual_linkedin' | 'referral' | 'extension_capture' |
+  // 'imported_csv' | 'manual_other'. Free text; not enforced as an enum so
+  // new capture surfaces can introduce their own values without a migration.
+  sourceType: text('source_type').notNull().default('ai_discovery'),
+  sourceMetadata: jsonb('source_metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  doNotContact: boolean('do_not_contact').notNull().default(false),
+  doNotContactReason: text('do_not_contact_reason'),
+  doNotContactAt: timestamp('do_not_contact_at', { withTimezone: true }),
+  customTags: text('custom_tags').array().notNull().default(sql`ARRAY[]::text[]`),
+  headline: text('headline'),
+  about: text('about'),
+  phone: varchar('phone', { length: 64 }),
+  whatsapp: varchar('whatsapp', { length: 64 }),
+  twitterUrl: varchar('twitter_url', { length: 500 }),
+  intentScore: integer('intent_score').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
@@ -59,6 +80,16 @@ export const contacts = pgTable('contacts', {
   index('contacts_email_gin_idx').using('gin', sql`${t.email} gin_trgm_ops`),
   index('contacts_skills_gin_idx').using('gin', sql`${t.skills} jsonb_path_ops`),
   index('contacts_completeness_idx').on(t.tenantId, t.dataCompleteness),
+  // Race-safe dedup on (tenant_id, lower(email)) and (tenant_id, linkedin_url).
+  // The capture endpoint relies on these to fail INSERTs that race with
+  // each other, then catches and converts to isDuplicate.
+  uniqueIndex('contacts_tenant_email_unique')
+    .on(t.tenantId, sql`lower(${t.email})`)
+    .where(sql`${t.email} IS NOT NULL`),
+  uniqueIndex('contacts_tenant_linkedin_unique')
+    .on(t.tenantId, t.linkedinUrl)
+    .where(sql`${t.linkedinUrl} IS NOT NULL`),
+  index('contacts_tenant_tags_gin').using('gin', t.customTags),
 ]);
 
 export type Contact = typeof contacts.$inferSelect;

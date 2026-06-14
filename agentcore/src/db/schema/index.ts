@@ -20,7 +20,7 @@ export { contacts, contactSourceEnum, contactStatusEnum } from './contacts.js';
 export type { Contact, NewContact } from './contacts.js';
 
 export { companies } from './companies.js';
-export type { Company, NewCompany } from './companies.js';
+export type { Company, NewCompany, CompanyStage } from './companies.js';
 
 export { documents, docTypeEnum, docStatusEnum } from './documents.js';
 export type { Document, NewDocument } from './documents.js';
@@ -65,7 +65,16 @@ export { deals } from './deals.js';
 export type { Deal, NewDeal } from './deals.js';
 
 export { crmActivities, activityTypeEnum } from './crm-activities.js';
-export type { CrmActivity, NewCrmActivity } from './crm-activities.js';
+export type { CrmActivity, NewCrmActivity, CrmEventCategory, CrmActorType } from './crm-activities.js';
+
+export { prospectStages } from './prospect-stages.js';
+export type { ProspectStageRow, NewProspectStageRow, ProspectStage } from './prospect-stages.js';
+
+export { followupSequences } from './followup-sequences.js';
+export type { FollowupSequence, NewFollowupSequence, FollowupSequenceStatus } from './followup-sequences.js';
+
+export { prospectActions } from './prospect-actions.js';
+export type { ProspectAction, NewProspectAction, ProspectActionType, ProspectActionPriority, ProspectActionStatus, TargetAlternative } from './prospect-actions.js';
 
 export { emailThreads, threadStatusEnum, threadPriorityEnum } from './email-threads.js';
 export type { EmailThread, NewEmailThread } from './email-threads.js';
@@ -96,6 +105,15 @@ export type { OutreachEmail, NewOutreachEmail } from './outreach-emails.js';
 
 export { products } from './products.js';
 export type { Product, NewProduct } from './products.js';
+
+export { messageCompositions } from './message-compositions.js';
+export type { MessageComposition, NewMessageComposition } from './message-compositions.js';
+
+export { linkedinConversations } from './linkedin-conversations.js';
+export type { LinkedinConversation, NewLinkedinConversation } from './linkedin-conversations.js';
+
+export { linkedinMessages } from './linkedin-messages.js';
+export type { LinkedinMessage, NewLinkedinMessage } from './linkedin-messages.js';
 
 export { userTenants } from './user-tenants.js';
 export type { UserTenant, NewUserTenant } from './user-tenants.js';

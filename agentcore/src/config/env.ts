@@ -14,7 +14,18 @@ const envSchema = z.object({
 
   // AWS Bedrock
   AWS_BEARER_TOKEN_BEDROCK: z.string(),
-  AWS_BEDROCK_REGION: z.string().default('us-east-1'),
+  AWS_BEDROCK_REGION: z.string().default('us-west-2'),
+  // Cold-email drafting (Kimi K2.5 on Bedrock) — first-touch only. Higher temp
+  // for varied hooks across prospects. See cold-email-drafter.service.ts.
+  BEDROCK_EMAIL_MODEL: z.string().default('moonshotai.kimi-k2.5'),
+  BEDROCK_EMAIL_TEMPERATURE: z.coerce.number().default(0.8),
+  // Vision model for Google Maps menu OCR/extraction. Amazon Nova Lite is cheap,
+  // multimodal, and reachable via the same Bedrock OpenAI-compatible endpoint.
+  BEDROCK_VISION_MODEL: z.string().default('us.amazon.nova-lite-v1:0'),
+  // Daily per-user generation limit for the Message Studio (POST /api/studio/generate).
+  STUDIO_DAILY_LIMIT: z.coerce.number().default(50),
+  // Daily per-user limit for the Inbox Copilot (POST /api/copilot/draft-reply).
+  COPILOT_DAILY_LIMIT: z.coerce.number().default(100),
 
   // Legacy AI Services (unused — kept for backward compat)
   TOGETHER_API_KEY: z.string().optional(),
@@ -49,6 +60,11 @@ const envSchema = z.object({
 
   // Feature flags
   USE_COMPANY_FINDER: z.coerce.boolean().default(true),
+  // Multi-workspace extension dispatch: when true, the dispatcher will deliver
+  // a tenant's tasks to any extension session whose user is a member of that
+  // tenant (not just sessions bound to the tenant directly). Default true; set
+  // to "false" to revert to the per-tenant lookup if the new path misbehaves.
+  ENABLE_MULTI_WORKSPACE_DISPATCH: z.coerce.boolean().default(true),
 
   // App
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

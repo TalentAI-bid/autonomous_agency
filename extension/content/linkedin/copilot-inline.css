@@ -1,0 +1,116 @@
+/* Inline LinkedIn Inbox Copilot styling. Scoped class names so the
+   button + menu + indicator don't bleed into LinkedIn's own UI. */
+
+.talentai-copilot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: #0a66c2;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  margin: 0 4px;
+  transition: background-color 0.15s;
+}
+
+.talentai-copilot-btn:hover {
+  background: rgba(10, 102, 194, 0.1);
+}
+
+.talentai-copilot-btn:active {
+  background: rgba(10, 102, 194, 0.2);
+}
+
+/* Anchored dropdown menu opened by clicking ✨. Above LinkedIn's z layers
+   so it sits on top of compose toolbars and message threads. */
+#talentai-copilot-menu {
+  position: fixed;
+  z-index: 1000001;
+  background: white;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  min-width: 220px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #1a1a1a;
+}
+
+#talentai-copilot-menu .menu-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  padding: 6px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#talentai-copilot-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #1a1a1a;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+#talentai-copilot-menu button:hover {
+  background: #f3f6f8;
+}
+
+#talentai-copilot-menu button.secondary {
+  color: #666;
+  font-size: 13px;
+}
+
+#talentai-copilot-menu .menu-divider {
+  height: 1px;
+  background: #e0e6eb;
+  margin: 6px 0;
+}
+
+/* Status pill that fades in below the compose form. The compose form
+   itself isn't position:relative in LinkedIn's DOM, so we use a fixed-ish
+   offset from the form's bounding box via `bottom: -28px` and rely on
+   form's normal flow. */
+.talentai-copilot-indicator {
+  position: absolute;
+  bottom: -28px;
+  left: 8px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 100;
+  animation: talentai-copilot-fadein 0.2s ease-out;
+}
+
+.talentai-copilot-indicator.loading {
+  background: #e7f3ff;
+  color: #0a66c2;
+}
+
+.talentai-copilot-indicator.success {
+  background: #d4f4dd;
+  color: #166534;
+}
+
+.talentai-copilot-indicator.error {
+  background: #fee;
+  color: #cf222e;
+}
+
+@keyframes talentai-copilot-fadein {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

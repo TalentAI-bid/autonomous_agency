@@ -41,12 +41,22 @@ const TASK_DELAYS_MS = {
   fetch_company_info: 2000,
   fetch_company_team: 3000,
   fetch_company: 2500,
+  fetch_business: 6000,
   default: 2000,
 };
 function taskJitter(ms, fraction = 0.3) {
   return Math.max(0, Math.round(ms + (Math.random() * 2 - 1) * fraction * ms));
 }
 function taskSleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// Cooldown sentinels — persisted to chrome.storage.local so they survive an
+// MV3 service-worker idle-kill mid-cooldown. In-process setTimeout for these
+// delays orphaned every task chained behind them on SW respawn; tasks now
+// fail-fast on these timestamps and chrome.alarms clears them at expiry.
+let rateLimited429Until = 0;
+let batchCooldownUntil = 0;
+const KEY_429 = 'rateLimited429Until';
+const KEY_BATCH = 'batchCooldownUntil';
 
 // ─── LinkedIn geo-code map ─────────────────────────────────────────────────
 // LinkedIn's `companyHqGeo` URL parameter expects numeric geo IDs, not free
@@ -76,8 +86,10 @@ const ADAPTER_FILES = {
   // other. Legacy fetch_company stays for already-queued rows.
   'linkedin:fetch_company_info': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-info.js'],
   'linkedin:fetch_company_team': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-team.js'],
-  'gmaps:search_businesses':     ['lib/scraper-utils.js', 'content/gmaps/search-businesses.js'],
-  'gmaps:fetch_business':        ['lib/scraper-utils.js', 'content/gmaps/fetch-business.js'],
+  // gmaps adapters are thin wrappers over the self-contained maps-core module
+  // (designed to be cloned out into a standalone project) — inject core first.
+  'gmaps:search_businesses':     ['content/gmaps/maps-core.js', 'content/gmaps/search-businesses.js'],
+  'gmaps:fetch_business':        ['content/gmaps/maps-core.js', 'content/gmaps/fetch-business.js'],
   'crunchbase:search_companies': ['lib/scraper-utils.js', 'content/crunchbase/search-companies.js'],
   'crunchbase:fetch_company':    ['lib/scraper-utils.js', 'content/crunchbase/fetch-company.js'],
 };
@@ -186,17 +198,21 @@ async function handleMessage(msg) {
 }
 
 async function processTask(msg) {
-  const { taskId, site, taskType, params, masterAgentName } = msg;
+  // tenantId is sent by the multi-workspace dispatcher so each result we
+  // emit carries the workspace it belongs to. Older servers don't include it;
+  // we pass through whatever we got (undefined is fine — server falls back to
+  // its DB lookup).
+  const { taskId, tenantId, site, taskType, params, masterAgentName } = msg;
   const adapterKey = `${site}:${taskType}`;
   const files = ADAPTER_FILES[adapterKey];
-  console.log('[TalentAI sw] adapter', { adapterKey, hasFiles: !!files, taskId });
+  console.log('[TalentAI sw] adapter', { adapterKey, hasFiles: !!files, taskId, tenantId });
 
   if (!files) {
-    ws?.send({ type: 'task_result', taskId, status: 'failed', error: `no_adapter_for:${adapterKey}` });
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: `no_adapter_for:${adapterKey}` });
     return;
   }
   if (paused) {
-    ws?.send({ type: 'task_result', taskId, status: 'failed', error: 'extension_paused' });
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: 'extension_paused' });
     return;
   }
 
@@ -204,7 +220,20 @@ async function processTask(msg) {
   const blockState = await chrome.storage.local.get(['dailyBlockUntil']);
   if (blockState.dailyBlockUntil && Date.now() < blockState.dailyBlockUntil) {
     console.log('[TalentAI sw] daily_block_active', { taskId, until: new Date(blockState.dailyBlockUntil).toISOString() });
-    ws?.send({ type: 'task_result', taskId, status: 'failed', error: 'rate_limited_429' });
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: 'rate_limited_429' });
+    return;
+  }
+
+  // Active 429 cooldown — fail-fast so the queue keeps moving. Server
+  // watchdog will re-pend after 5 min; alarm clears the sentinel at expiry.
+  if (rateLimited429Until && Date.now() < rateLimited429Until) {
+    console.log('[TalentAI sw] 429_cooldown_active', { taskId, until: new Date(rateLimited429Until).toISOString() });
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: 'rate_limited_429' });
+    return;
+  }
+  if (batchCooldownUntil && Date.now() < batchCooldownUntil) {
+    console.log('[TalentAI sw] batch_cooldown_active', { taskId, until: new Date(batchCooldownUntil).toISOString() });
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: 'batch_cooldown_pending' });
     return;
   }
 
@@ -216,7 +245,18 @@ async function processTask(msg) {
   try {
     await rateLimiter.waitForSlot(site, taskType);
   } catch (err) {
-    ws?.send({ type: 'task_result', taskId, status: 'failed', error: err.code || String(err.message) });
+    if (err.code === 'batch_cooldown_pending' && err.cooldownUntil) {
+      // Persist the cooldown sentinel + schedule an alarm to clear it. Tasks
+      // arriving during the cooldown short-circuit at the top of processTask
+      // and the server watchdog re-pends them; this avoids a long in-process
+      // setTimeout that would die with the SW on idle-kill.
+      batchCooldownUntil = err.cooldownUntil;
+      await chrome.storage.local.set({ [KEY_BATCH]: batchCooldownUntil });
+      const delayMin = Math.max((err.cooldownUntil - Date.now()) / 60_000, 0.5);
+      chrome.alarms.create('cooldown-batch', { delayInMinutes: delayMin });
+      console.log('[TalentAI sw] batch_cooldown_scheduled', { until: new Date(err.cooldownUntil).toISOString(), delayMin });
+    }
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: err.code || String(err.message) });
     currentTask = null;
     currentMasterAgentName = null;
     broadcast('current_task', null);
@@ -236,7 +276,11 @@ async function processTask(msg) {
     console.log('[TalentAI sw] navigate begin', { taskId, taskType, target, isDetailTask });
     if (isDetailTask) {
       // Detail pages open in a NEW tab to avoid navigating away from search results.
-      tab = await createAndWaitTab(target);
+      // gmaps fanout enqueues ~one fetch_business per business — opening each in
+      // the FOREGROUND steals focus on every task. Open gmaps detail tabs in the
+      // background; LinkedIn keeps foreground (unchanged).
+      const active = site !== 'gmaps';
+      tab = await createAndWaitTab(target, 45_000, { active });
     } else {
       tab = await openOrFocusTab(target, site);
     }
@@ -260,6 +304,7 @@ async function processTask(msg) {
       ws?.send({
         type: 'task_result',
         taskId,
+        tenantId,
         status: 'failed',
         error: `tab_not_on_expected_host:${liveHost || 'unknown'}`,
       });
@@ -352,6 +397,7 @@ async function processTask(msg) {
       ws?.send({
         type: 'task_result',
         taskId,
+        tenantId,
         status: 'failed',
         error: 'blocked_by_popup',
         result: resultMsg.result,
@@ -368,6 +414,7 @@ async function processTask(msg) {
       ws?.send({
         type: 'task_result',
         taskId,
+        tenantId,
         status: 'failed',
         error: 'rate_limited_429',
         result: resultMsg.result,
@@ -392,13 +439,18 @@ async function processTask(msg) {
         });
       } else {
         const backoffMs = Math.min(30_000 * Math.pow(2, consecutive - 1), MAX_BACKOFF_MS);
-        console.log('[TalentAI sw] 429_backoff', { consecutive, backoffMs });
+        // Persist sentinel + schedule alarm. The previous in-process setTimeout
+        // would orphan every queued task on SW idle-kill; tasks now fail-fast
+        // on the sentinel and the server watchdog re-pends them.
+        rateLimited429Until = Date.now() + backoffMs;
+        await chrome.storage.local.set({ [KEY_429]: rateLimited429Until });
+        const delayMin = Math.max(backoffMs / 60_000, 0.5);
+        chrome.alarms.create('cooldown-429', { delayInMinutes: delayMin });
+        console.log('[TalentAI sw] 429_cooldown_scheduled', { consecutive, backoffMs, delayMin });
         broadcast('popup_update', {
           status: 'rate_limited',
           message: `LinkedIn rate limited. Backing off for ${Math.round(backoffMs / 1000)}s (attempt ${consecutive}/${MAX_CONSECUTIVE_BEFORE_DAILY_BLOCK}).`,
         });
-        // Auto-resume after backoff (don't pause permanently like blocked_by_popup)
-        await new Promise((r) => setTimeout(r, backoffMs));
       }
       return;
     }
@@ -418,13 +470,14 @@ async function processTask(msg) {
     ws?.send({
       type: 'task_result',
       taskId,
+      tenantId,
       status: resultMsg.status,
       result: resultMsg.status === 'completed' ? resultMsg.result : undefined,
       error:  resultMsg.status === 'failed'    ? resultMsg.error  : undefined,
     });
   } catch (err) {
     console.error('[TalentAI] task failed', err);
-    ws?.send({ type: 'task_result', taskId, status: 'failed', error: err.message || String(err) });
+    ws?.send({ type: 'task_result', taskId, tenantId, status: 'failed', error: err.message || String(err) });
   } finally {
     // Close detail-task tabs after completion — search tabs stay open.
     if (isDetailTask && tab) {
@@ -464,18 +517,32 @@ function buildUrl(site, type, params) {
     return `https://www.linkedin.com/search/results/companies/?keywords=${keywords}%20${encodeURIComponent(params.location || '')}`;
   }
   if (site === 'linkedin' && type === 'fetch_company') {
+    if (!isAbsoluteLinkedInUrl(params?.linkedinUrl)) {
+      throw new Error(`fetch_company: invalid linkedinUrl=${JSON.stringify(params?.linkedinUrl)}`);
+    }
     return params.linkedinUrl;
   }
   if (site === 'linkedin' && type === 'fetch_company_info') {
     // Force /about/ so the adapter lands on the about page directly.
-    const base = (params.linkedinUrl || '').replace(/\/?$/, '/');
+    // Reject missing/non-https URLs — chrome.tabs.update with a relative
+    // path resolves against chrome-extension:// origin and produces a
+    // chrome-extension://<id>/about/ ERR_FILE_NOT_FOUND loop.
+    if (!isAbsoluteLinkedInUrl(params?.linkedinUrl)) {
+      throw new Error(`fetch_company_info: invalid linkedinUrl=${JSON.stringify(params?.linkedinUrl)}`);
+    }
+    const base = params.linkedinUrl.replace(/\/?$/, '/');
     return base.includes('/about/') ? base : base + 'about/';
   }
   if (site === 'linkedin' && type === 'fetch_company_team') {
-    // /people/ shows the in-app team listing; the adapter further clicks
-    // through to /search/results/people/?currentCompany=... when needed.
-    const base = (params.linkedinUrl || '').replace(/\/?$/, '/');
-    return base.includes('/people/') ? base : base + 'people/';
+    if (!isAbsoluteLinkedInUrl(params?.linkedinUrl)) {
+      throw new Error(`fetch_company_team: invalid linkedinUrl=${JSON.stringify(params?.linkedinUrl)}`);
+    }
+    const base = params.linkedinUrl.replace(/\/?$/, '/');
+    let url = base.includes('/people/') ? base : base + 'people/';
+    if (params.keyword) {
+      url += '?keywords=' + encodeURIComponent(params.keyword);
+    }
+    return url;
   }
   if (site === 'gmaps' && type === 'search_businesses') {
     const q = encodeURIComponent([params.query, params.location].filter(Boolean).join(' '));
@@ -492,6 +559,10 @@ function buildUrl(site, type, params) {
     return params.crunchbaseUrl;
   }
   throw new Error(`no_url_builder_for:${site}:${type}`);
+}
+
+function isAbsoluteLinkedInUrl(u) {
+  return typeof u === 'string' && /^https:\/\/(www\.)?linkedin\.com\//i.test(u);
 }
 
 async function openOrFocusTab(url, site) {
@@ -523,6 +594,14 @@ async function openOrFocusTab(url, site) {
 // (especially for cached pages that load instantly). Hostname-matched so
 // we don't resolve on the prior page's stale complete state.
 function navigateExistingTab(tabId, url, timeoutMs = 45_000) {
+  // Refuse non-absolute URLs. A relative path here makes chrome.tabs.update
+  // resolve against the SW's chrome-extension://<id> origin, producing a
+  // chrome-extension://<id>/about/ ERR_FILE_NOT_FOUND. buildUrl now rejects
+  // missing inputs, but this is a backstop against any future caller that
+  // skips the builder.
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
+    return Promise.reject(new Error(`navigateExistingTab: refusing non-absolute url=${JSON.stringify(url)}`));
+  }
   let expectedHost = '';
   try { expectedHost = new URL(url).hostname; } catch (_) {}
 
@@ -556,7 +635,12 @@ function navigateExistingTab(tabId, url, timeoutMs = 45_000) {
 
 // Create a new tab on the URL and wait for its first `complete` event on
 // the expected hostname.
-function createAndWaitTab(url, timeoutMs = 45_000) {
+function createAndWaitTab(url, timeoutMs = 45_000, { active = true } = {}) {
+  // Same backstop as navigateExistingTab — chrome.tabs.create with a relative
+  // URL resolves against chrome-extension://<id> and breaks the task.
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
+    return Promise.reject(new Error(`createAndWaitTab: refusing non-absolute url=${JSON.stringify(url)}`));
+  }
   let expectedHost = '';
   try { expectedHost = new URL(url).hostname; } catch (_) {}
 
@@ -581,7 +665,7 @@ function createAndWaitTab(url, timeoutMs = 45_000) {
     chrome.tabs.onUpdated.addListener(listener);
     setTimeout(() => finishOnce('timeout'), timeoutMs);
 
-    chrome.tabs.create({ url, active: true }).then((tab) => {
+    chrome.tabs.create({ url, active }).then((tab) => {
       createdTab = tab;
     }).catch((err) => {
       cleanup();
@@ -599,6 +683,88 @@ function broadcast(kind, data) {
 // ─── Popup messages ─────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
+    // Studio popup on LinkedIn profiles — POST to the Studio backend.
+    // authedFetch returns the raw Response (not parsed JSON), so we need
+    // to read the body ourselves and propagate non-2xx errors verbatim.
+    if (msg?.kind === 'studio_generate') {
+      try {
+        const res = await authedFetch('/api/studio/generate', {
+          method: 'POST',
+          body: msg.payload,
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          sendResponse({ ok: false, error: body?.error?.message || `HTTP ${res.status}` });
+          return;
+        }
+        sendResponse({ ok: true, composition: body?.composition ?? null });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message ?? String(err) });
+      }
+      return;
+    }
+
+    // Studio send-detection — the content script detected the user actually
+    // sent a LinkedIn DM / connection note. Record it so the backend logs a
+    // CRM activity. Fire-and-forget: errors are swallowed (best-effort).
+    if (msg?.kind === 'studio_record_action') {
+      try {
+        const res = await authedFetch('/api/studio/record-action', {
+          method: 'POST',
+          body: msg.payload,
+        });
+        const body = await res.json().catch(() => null);
+        sendResponse({ ok: res.ok, contactId: body?.contactId ?? null });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message ?? String(err) });
+      }
+      return;
+    }
+
+    // Google Maps capture panel — push user-selected business listings to
+    // the CRM. The panel sends normalized records from maps-core; the
+    // backend returns per-item saved/duplicate/error statuses.
+    if (msg?.kind === 'gmaps_capture') {
+      try {
+        const res = await authedFetch('/api/extension/gmaps/capture', {
+          method: 'POST',
+          body: msg.payload,
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          sendResponse({ ok: false, error: body?.error?.message || `HTTP ${res.status}` });
+          return;
+        }
+        sendResponse({ ok: true, data: body?.data ?? {} });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message ?? String(err) });
+      }
+      return;
+    }
+
+    // Inbox Copilot on LinkedIn messaging — POST to the copilot draft endpoint.
+    if (msg?.kind === 'copilot_draft_reply') {
+      try {
+        const res = await authedFetch('/api/copilot/draft-reply', {
+          method: 'POST',
+          body: msg.payload,
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          sendResponse({ ok: false, error: body?.error?.message || `HTTP ${res.status}` });
+          return;
+        }
+        sendResponse({
+          ok: true,
+          draft: body?.draft ?? null,
+          conversation: body?.conversation ?? null,
+        });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message ?? String(err) });
+      }
+      return;
+    }
+
     if (msg?.kind === 'popup_get_state') {
       const session = await getSession();
       const usage = rateLimiter.getUsage();
@@ -607,6 +773,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         hasKey: !!session?.apiKey,
         user: session?.user ?? null,
         tenant: session?.tenant ?? null,
+        // Multi-workspace: full membership list so the popup can render
+        // "Processing N workspace(s)" instead of a single tenant name.
+        workspaces: Array.isArray(session?.workspaces) ? session.workspaces : [],
         serverUrl: session?.serverUrl || DEFAULT_SERVER,
         status: currentStatus,
         paused,
@@ -699,6 +868,53 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       return;
     }
+
+    // ─── Sales Operations Platform — Stage 1 ────────────────────────────
+    // contact_lookup: ask backend whether a contact already exists for the
+    // current LinkedIn URL so the widget can render the "✅ In Pipeline"
+    // status badge before the user clicks. Sends linkedinUrl only.
+    if (msg?.kind === 'contact_lookup') {
+      try {
+        const linkedinUrl = (msg.payload && msg.payload.linkedinUrl) || '';
+        if (!linkedinUrl) { sendResponse({ ok: false, error: 'linkedinUrl required' }); return; }
+        const qs = new URLSearchParams({ linkedinUrl }).toString();
+        const res = await authedFetch(`/api/contacts/lookup?${qs}`);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = body?.error?.message || body?.error || `http_${res.status}`;
+          sendResponse({ ok: false, error: err });
+          return;
+        }
+        sendResponse({ ok: true, data: body?.data ?? { exists: false } });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+      return;
+    }
+
+    // contact_capture: create a contact via the new shared capture endpoint.
+    // Reuses the same code path the dashboard form uses (dedup, rate limit,
+    // timeline event) — extension callers just default sourceType='extension_capture'.
+    if (msg?.kind === 'contact_capture') {
+      try {
+        const payload = msg.payload || {};
+        const res = await authedFetch('/api/contacts/capture', {
+          method: 'POST',
+          body: { sourceType: 'extension_capture', ...payload },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const code = body?.error?.code;
+          const message = body?.error?.message || `http_${res.status}`;
+          sendResponse({ ok: false, status: res.status, code, error: message });
+          return;
+        }
+        sendResponse({ ok: true, data: body?.data ?? {} });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+      return;
+    }
   })();
   return true; // async sendResponse
 });
@@ -774,6 +990,31 @@ function isNewerVersion(remote, local) {
 // ─── Lifecycle ─────────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(() => { ensureConnected(); checkForUpdate(); });
 chrome.runtime.onStartup.addListener(() => { ensureConnected(); checkForUpdate(); });
+
+// Restore cooldown sentinels from storage on SW respawn. If a cooldown was
+// active when the SW was killed, the alarm may have been lost too — recreate
+// it so tasks resume at the correct moment.
+(async () => {
+  const stored = await chrome.storage.local.get([KEY_429, KEY_BATCH]);
+  const now = Date.now();
+  const restore429 = stored[KEY_429];
+  const restoreBatch = stored[KEY_BATCH];
+  if (typeof restore429 === 'number' && restore429 > now) {
+    rateLimited429Until = restore429;
+    chrome.alarms.create('cooldown-429', { delayInMinutes: Math.max((restore429 - now) / 60_000, 0.5) });
+    console.log('[TalentAI sw] 429_cooldown_restored', { until: new Date(restore429).toISOString() });
+  } else if (restore429) {
+    await chrome.storage.local.remove(KEY_429);
+  }
+  if (typeof restoreBatch === 'number' && restoreBatch > now) {
+    batchCooldownUntil = restoreBatch;
+    chrome.alarms.create('cooldown-batch', { delayInMinutes: Math.max((restoreBatch - now) / 60_000, 0.5) });
+    console.log('[TalentAI sw] batch_cooldown_restored', { until: new Date(restoreBatch).toISOString() });
+  } else if (restoreBatch) {
+    await chrome.storage.local.remove(KEY_BATCH);
+  }
+})();
+
 // Also attempt a connection when the worker first wakes up.
 ensureConnected();
 checkForUpdate();
@@ -811,6 +1052,18 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   }
   if (a.name === 'check-update') {
     await checkForUpdate();
+    return;
+  }
+  if (a.name === 'cooldown-429') {
+    rateLimited429Until = 0;
+    await chrome.storage.local.remove(KEY_429);
+    console.log('[TalentAI sw] 429_cooldown_ended');
+    return;
+  }
+  if (a.name === 'cooldown-batch') {
+    batchCooldownUntil = 0;
+    await chrome.storage.local.remove(KEY_BATCH);
+    console.log('[TalentAI sw] batch_cooldown_ended');
     return;
   }
 });

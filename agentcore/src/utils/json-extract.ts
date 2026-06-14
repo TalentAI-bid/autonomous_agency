@@ -33,9 +33,13 @@ export function extractJSONFromText<T = unknown>(text: string): T {
     .replace(/<think>[\s\S]*/gi, '')              // unclosed tag (strip to end)
     .trim();
 
-  // 2. Direct parse
+  // 2. Direct parse — then retry with control chars escaped (some models emit
+  // raw newlines/tabs inside string values, which are invalid JSON).
   try {
     return JSON.parse(cleaned) as T;
+  } catch { /* continue */ }
+  try {
+    return JSON.parse(escapeControlCharsInStrings(cleaned)) as T;
   } catch { /* continue */ }
 
   // 3. Code-fence extraction — try multiple fence patterns
@@ -61,11 +65,13 @@ export function extractJSONFromText<T = unknown>(text: string): T {
       return JSON.parse(balanced) as T;
     } catch { /* continue to trailing-comma cleanup */ }
 
-    // 5. Trailing-comma cleanup on the balanced extraction
-    const noTrailingCommas = balanced
-      .replace(/,\s*([\]}])/g, '$1');
+    // 5. Trailing-comma cleanup + control-char escaping on the balanced extraction
+    const noTrailingCommas = balanced.replace(/,\s*([\]}])/g, '$1');
     try {
       return JSON.parse(noTrailingCommas) as T;
+    } catch { /* fall through */ }
+    try {
+      return JSON.parse(escapeControlCharsInStrings(noTrailingCommas)) as T;
     } catch { /* fall through */ }
   }
 
@@ -139,4 +145,50 @@ function extractBalancedJSON(text: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Escape raw control characters (< 0x20) that appear INSIDE JSON string
+ * literals — models sometimes emit literal newlines/tabs in a string value,
+ * which `JSON.parse` rejects as "Bad control character in string literal".
+ * Characters outside strings (structural whitespace) are left untouched.
+ */
+function escapeControlCharsInStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && inString) {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+
+    if (inString) {
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        if (ch === '\n') out += '\\n';
+        else if (ch === '\r') out += '\\r';
+        else if (ch === '\t') out += '\\t';
+        else out += '\\u' + code.toString(16).padStart(4, '0');
+        continue;
+      }
+    }
+    out += ch;
+  }
+
+  return out;
 }

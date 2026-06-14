@@ -64,7 +64,7 @@ export interface SalesStrategy {
   userRole?: 'vendor' | 'buyer';
   targetIndustries?: string[];
   painPointsAddressed?: string[];
-  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid';
+  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid';
   marketAnalysis?: {
     customerPersonas?: Array<{
       title?: string;
@@ -107,13 +107,23 @@ export interface SalesStrategy {
   };
   pipelineSteps?: Array<{
     id: string;
-    tool: 'LINKEDIN_EXTENSION' | 'CRAWL4AI' | 'LLM_ANALYSIS' | 'REACHER' | 'EMAIL_PATTERN' | 'SCORING';
+    tool: 'LINKEDIN_EXTENSION' | 'GMAPS_EXTENSION' | 'CRAWL4AI' | 'LLM_ANALYSIS' | 'REACHER' | 'EMAIL_PATTERN' | 'SCORING';
     action: string;
     dependsOn: string[];
     params?: PipelineStepParams;
   }>;
   hiringKeywords?: string[];
   targetTech?: string[];
+
+  /**
+   * Decision-maker titles used to drive the LinkedIn team-scrape step.
+   * Each entry becomes a `…/people/?keywords=<kw>` fetch. Distinct from
+   * `hiringKeywords` (job postings target companies have open) and from
+   * `idealCustomerShape.buyerFunctions` (whom we eventually email). When
+   * `pipelineSteps` includes `LINKEDIN_EXTENSION:fetch_company_team`, the
+   * strategist must emit a non-empty list.
+   */
+  teamRoleKeywords?: string[];
 
   /**
    * Concrete shape of a "good lead" for this seller. Drives both the
@@ -175,6 +185,13 @@ export interface PipelineStepParams {
   geographyFilter?: { regions: string[] };
   sizeFilter?: { min: number; max: number };
   queryRationale?: string;
+  // Mandatory for GMAPS_EXTENSION search_businesses steps. `query` is the
+  // niche keywords ONLY (e.g. "asian restaurant" — NO city/country names);
+  // `location` is the city/region the Maps search runs in. Geography NEVER
+  // belongs in `query` — same separation rule as searchKeywords/geographyFilter.
+  query?: string;
+  location?: string;
+  limit?: number;
   // Round 11 — LinkedIn industry-classification facet. Each entry is the
   // industry's display name ("Financial Services", "Software Development",
   // "Hospitals and Health Care"). Resolved to LinkedIn's numeric URN at URL
@@ -217,7 +234,7 @@ export interface PipelineStepParams {
  * Not enforced by the schema (config is untyped JSONB), but referenced by
  * master-agent.ts, strategist.agent.ts and chat.service.ts at runtime.
  */
-export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid';
+export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid';
 
 export interface MasterAgentConfigFlags {
   /**

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, sql, and, count, isNotNull, gt, avg } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { contacts, campaigns, masterAgents, interviews, emailsSent, campaignContacts } from '../db/schema/index.js';
+import { contacts, campaigns, masterAgents, interviews, emailsSent, campaignContacts, crmActivities } from '../db/schema/index.js';
 
 export default async function analyticsRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
@@ -105,6 +105,43 @@ export default async function analyticsRoutes(fastify: FastifyInstance) {
           scheduled: interviewCount?.count || 0,
         },
         avgScore: avgScoreResult?.avg ? Math.round(Number(avgScoreResult.avg)) : null,
+      };
+    });
+
+    return { data };
+  });
+
+  // GET /api/analytics/outreach-activity — counts of outreach actions recorded
+  // across channels (email + LinkedIn, incl. extension-reported sends) plus the
+  // number of contacts that have responded.
+  fastify.get('/outreach-activity', async (request) => {
+    const data = await withTenant(request.tenantId, async (tx) => {
+      const countByType = async (type: (typeof crmActivities.$inferInsert)['type']) => {
+        const [row] = await tx
+          .select({ count: count() })
+          .from(crmActivities)
+          .where(and(eq(crmActivities.tenantId, request.tenantId), eq(crmActivities.type, type)));
+        return row?.count || 0;
+      };
+
+      const [emailsSent, linkedinMessagesSent, personsAddedWithNote, connectionsAccepted] = await Promise.all([
+        countByType('email_sent'),
+        countByType('linkedin_message_sent'),
+        countByType('linkedin_connection_sent'),
+        countByType('linkedin_connection_accepted'),
+      ]);
+
+      const [repliedRow] = await tx
+        .select({ count: count() })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, request.tenantId), eq(contacts.status, 'replied')));
+
+      return {
+        emailsSent,
+        linkedinMessagesSent,
+        personsAddedWithNote,
+        connectionsAccepted,
+        responses: repliedRow?.count || 0,
       };
     });
 

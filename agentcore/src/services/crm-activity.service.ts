@@ -1,8 +1,9 @@
 import { eq, and, asc } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { crmActivities, crmStages, deals, contacts } from '../db/schema/index.js';
-import type { NewCrmActivity, CrmStage } from '../db/schema/index.js';
+import type { NewCrmActivity, CrmStage, CrmEventCategory, CrmActorType } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
+import { inferEventCategory, inferActorType } from './timeline.service.js';
 import logger from '../utils/logger.js';
 
 export interface LogActivityOpts {
@@ -15,12 +16,24 @@ export interface LogActivityOpts {
   title: string;
   description?: string;
   metadata?: Record<string, unknown>;
+  /** Optional — inferred from `type` when not supplied. See timeline.service.ts. */
+  eventCategory?: CrmEventCategory;
+  /** Optional — inferred from `type` + presence of userId when not supplied. */
+  actorType?: CrmActorType;
 }
 
 /**
  * Log a CRM activity and emit a WebSocket event.
+ *
+ * For new code, prefer logEvent() in timeline.service.ts (forces explicit
+ * eventCategory + actorType). This function exists for the older call sites
+ * that already use the legacy shape — it now infers the new fields so
+ * those callers don't need to be touched in Stage 1.
  */
 export async function logActivity(opts: LogActivityOpts): Promise<{ id: string }> {
+  const eventCategory = opts.eventCategory ?? inferEventCategory(opts.type);
+  const actorType = opts.actorType ?? inferActorType(opts.type, opts.userId);
+
   const [activity] = await withTenant(opts.tenantId, async (tx) => {
     return tx.insert(crmActivities).values({
       tenantId: opts.tenantId,
@@ -29,6 +42,8 @@ export async function logActivity(opts: LogActivityOpts): Promise<{ id: string }
       userId: opts.userId,
       masterAgentId: opts.masterAgentId,
       type: opts.type,
+      eventCategory,
+      actorType,
       title: opts.title,
       description: opts.description,
       metadata: opts.metadata,
@@ -95,7 +110,20 @@ export async function seedDefaultStages(tenantId: string): Promise<CrmStage[]> {
     ).returning();
   });
 
-  return stages;
+  // Classify follow-up eligibility for the fresh pipeline (awaited so the
+  // seed response carries the flags; the classifier swallows LLM failures).
+  try {
+    const { classifyStagesForTenant } = await import('./stage-classifier.service.js');
+    await classifyStagesForTenant(tenantId);
+    return withTenant(tenantId, async (tx) => {
+      return tx.select().from(crmStages)
+        .where(eq(crmStages.tenantId, tenantId))
+        .orderBy(asc(crmStages.position));
+    });
+  } catch (err) {
+    logger.warn({ err, tenantId }, 'seedDefaultStages: follow-up classification failed');
+    return stages;
+  }
 }
 
 /**
@@ -152,6 +180,19 @@ export async function ensureDeal(opts: {
     }).returning({ id: deals.id });
   });
 
+  // Follow-up engine: a deal born into an eligible stage starts its sequence.
+  try {
+    const [stage] = await withTenant(opts.tenantId, async (tx) => {
+      return tx.select().from(crmStages).where(eq(crmStages.id, stageId)).limit(1);
+    });
+    if (stage) {
+      const { onDealStageChanged } = await import('./followup-engine.service.js');
+      await onDealStageChanged(opts.tenantId, deal!.id, stage);
+    }
+  } catch (err) {
+    logger.warn({ err, dealId: deal!.id }, 'ensureDeal: follow-up engine hook failed');
+  }
+
   return { id: deal!.id, created: true };
 }
 
@@ -202,6 +243,17 @@ export async function moveDealStage(opts: {
       newStageName: newStage?.name,
     },
   });
+
+  // Follow-up engine: entering an eligible stage starts/reactivates the
+  // sequence; leaving one (incl. won/lost) halts it.
+  if (newStage) {
+    try {
+      const { onDealStageChanged } = await import('./followup-engine.service.js');
+      await onDealStageChanged(opts.tenantId, opts.dealId, newStage);
+    } catch (err) {
+      logger.warn({ err, dealId: opts.dealId }, 'moveDealStage: follow-up engine hook failed');
+    }
+  }
 }
 
 /**

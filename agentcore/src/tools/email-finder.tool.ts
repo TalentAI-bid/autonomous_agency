@@ -10,9 +10,9 @@ import logger from '../utils/logger.js';
  *
  * Server-wide guarantees:
  *   - Reacher SMTP probes are SEQUENTIAL with a 1s gap between attempts.
- *     The user's Reacher instance is rate-limited to 300 checks/day across
+ *     The user's Reacher instance is rate-limited to 600 checks/day across
  *     the entire server (all tenants combined).
- *   - The 300/day counter lives in Redis (`reacher:daily:checks`) so all
+ *   - The 600/day counter lives in Redis (`reacher:daily:checks`) so all
  *     worker processes share it.
  *   - Once a pattern is verified for a domain it is persisted both in-memory
  *     (process-local cache) and in `domain_patterns` (durable). Every other
@@ -20,7 +20,7 @@ import logger from '../utils/logger.js';
  *     with ZERO SMTP cost.
  */
 
-const MAX_DAILY_EMAIL_CHECKS = 300;
+const MAX_DAILY_EMAIL_CHECKS = 600;
 const REACHER_DAILY_KEY = 'reacher:daily:checks';
 const PATTERN_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h in-memory cache
 
@@ -145,7 +145,7 @@ function secondsUntilUtcMidnight(now: Date = new Date()): number {
 
 /**
  * Atomically reserve one Reacher slot for today.
- * Returns false if today's 300/day server-wide cap has been reached.
+ * Returns false if today's 600/day server-wide cap has been reached.
  */
 async function tryConsumeReacherSlot(): Promise<boolean> {
   const newCount = await queueRedis.incr(REACHER_DAILY_KEY);

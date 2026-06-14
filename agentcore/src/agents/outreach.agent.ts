@@ -2,7 +2,7 @@ import { eq, and, asc, or, desc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
-import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents, emailAccounts, opportunities } from '../db/schema/index.js';
+import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents, emailAccounts, opportunities, outreachEmails } from '../db/schema/index.js';
 import { enqueueEmail } from '../tools/email-queue.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
@@ -10,6 +10,9 @@ import { ensureDefaultCampaign, enrollContactInSequence } from '../services/foll
 import { buildSystemPrompt, buildUserPrompt, type OutreachEmail } from '../prompts/outreach.prompt.js';
 import { buildSalesEmailPrompt, type EmailGenerationContext } from '../prompts/sales-email-generation.js';
 import { buildRecruitmentEmailPrompt } from '../prompts/recruitment-email-generation.js';
+import { draftColdEmail, type ColdEmailTrack } from '../services/cold-email-drafter.service.js';
+import { resolveSenderFirstName } from '../services/sender.service.js';
+import { ensureMessagingConfig, isMessagingConfigSufficient, buildColdEmailSender } from '../services/messaging-config.service.js';
 import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
 
@@ -88,6 +91,21 @@ export class OutreachAgent extends BaseAgent {
         .limit(1);
     });
     const config = (agent?.config as Record<string, unknown>) ?? {};
+
+    // Resolve the account holder's first name. Used for the cold-email
+    // sender block and the email-template signature. Throws if missing —
+    // unsigned drafts must fail loud rather than ship anonymous.
+    const senderFirstName = await resolveSenderFirstName(this.tenantId);
+
+    // Sender IDENTITY (company/product) comes from the WORKSPACE — the same
+    // source the Message Studio and manual drafts use — so generated copy
+    // reflects the workspace's configured company/product, not the agent name
+    // or a hardcoded default. When the workspace has no usable messaging
+    // config we fall back to the per-agent config below (no hard fail).
+    const messagingConfig = await ensureMessagingConfig(this.tenantId);
+    const workspaceSender = isMessagingConfigSufficient(messagingConfig)
+      ? await buildColdEmailSender(this.tenantId)
+      : null;
 
     // 2b. Load configured email account (if set in agent config)
     let emailAccountId: string | undefined;
@@ -205,21 +223,37 @@ export class OutreachAgent extends BaseAgent {
           competitors: (companyRawData.competitors as string[]) ?? undefined,
           recentFunding: (companyRawData.recentFunding as string) ?? undefined,
           keyPeople: (companyRawData.keyPeople as Array<{ name: string; title: string }>) ?? undefined,
+          openRoles:
+            (companyRawData.openPositions as Array<{ title: string; salary?: string; location?: string }> | undefined)
+            ?? (companyRawData.jobListings as Array<{ title: string }> | undefined)
+            ?? undefined,
         },
-        sender: {
-          companyName: (config.senderCompanyName as string) ?? agent?.name ?? undefined,
-          companyDescription: (config.senderCompanyDescription as string) ?? agent?.description ?? undefined,
-          services: (config.services as string[]) ?? undefined,
-          caseStudies: (config.caseStudies as Array<{ title: string; result: string }>) ?? undefined,
-          differentiators: (config.differentiators as string[]) ?? undefined,
-          valueProposition: (config.valueProposition as string) ?? undefined,
-          callToAction: (config.callToAction as string) ?? undefined,
-          calendlyUrl: (config.calendlyUrl as string) ?? undefined,
-          website: (config.senderWebsite as string) ?? undefined,
-          senderFirstName: (config.senderFirstName as string) ?? undefined,
-          senderTitle: (config.senderTitle as string) ?? undefined,
-          products: ((config.pipelineContext as Record<string, unknown>)?.sales as Record<string, unknown>)?.products as Array<{ name: string; description?: string | null; keyFeatures?: string[] | null; painPointsSolved?: string[] | null }> | undefined,
-        },
+        // Workspace identity wins when configured (company/product/location +
+        // products from the workspace), with the agent's campaign-level extras
+        // (CTA, Calendly, case studies) layered on top. Otherwise fall back to
+        // the per-agent config entirely.
+        sender: workspaceSender
+          ? {
+              ...workspaceSender,
+              senderFirstName,
+              callToAction: (config.callToAction as string) ?? undefined,
+              calendlyUrl: (config.calendlyUrl as string) ?? undefined,
+              caseStudies: (config.caseStudies as Array<{ title: string; result: string }>) ?? undefined,
+            }
+          : {
+              companyName: (config.senderCompanyName as string) ?? agent?.name ?? undefined,
+              companyDescription: (config.senderCompanyDescription as string) ?? agent?.description ?? undefined,
+              services: (config.services as string[]) ?? undefined,
+              caseStudies: (config.caseStudies as Array<{ title: string; result: string }>) ?? undefined,
+              differentiators: (config.differentiators as string[]) ?? undefined,
+              valueProposition: (config.valueProposition as string) ?? undefined,
+              callToAction: (config.callToAction as string) ?? undefined,
+              calendlyUrl: (config.calendlyUrl as string) ?? undefined,
+              website: (config.senderWebsite as string) ?? undefined,
+              senderFirstName,
+              senderTitle: (config.senderTitle as string) ?? undefined,
+              products: ((config.pipelineContext as Record<string, unknown>)?.sales as Record<string, unknown>)?.products as Array<{ name: string; description?: string | null; keyFeatures?: string[] | null; painPointsSolved?: string[] | null }> | undefined,
+            },
         campaign: {
           tone: (config.emailTone as string) ?? 'professional',
           useCase,
@@ -245,11 +279,99 @@ export class OutreachAgent extends BaseAgent {
         } : undefined,
       };
 
-      const { system, user } = useCase === 'sales'
-        ? buildSalesEmailPrompt(emailGenCtx)
-        : buildRecruitmentEmailPrompt(emailGenCtx);
+      if (stepNumber === 1) {
+        // First-touch (cold) → Kimi K2.5 via Bedrock. The classifier returns
+        // one of four tracks; only NORMAL_OUTREACH falls through to the
+        // existing enqueue/send path. PARTNERSHIP/COLLABORATION inserts a
+        // pending_review row for human approval. SKIP records telemetry
+        // and exits without persistence.
+        const cold = await draftColdEmail(
+          this.tenantId,
+          {
+            recipient: emailGenCtx.contact,
+            company: emailGenCtx.company,
+            sender: emailGenCtx.sender,
+          },
+        );
+        logger.info({
+          tenantId: this.tenantId,
+          contactId,
+          track: cold.track,
+          classification: cold.classification,
+          patternUsed: cold.patternUsed,
+          partnershipAngle: cold.partnershipAngle,
+          collaborationAngle: cold.collaborationAngle,
+          hookSource: cold.hookSource,
+          differentiator: cold.differentiator,
+          needsReview: cold.meta.needsReview,
+          model: cold.meta.model,
+        }, 'OutreachAgent: cold-email drafted via Kimi');
+        await this.recordColdEmailStat({
+          skipped: cold.track === 'SKIP',
+          reason: cold.skipReason,
+          track: cold.track,
+          masterAgentId,
+        });
 
-      email = await this.generateEmail(system, user);
+        if (cold.track === 'SKIP') {
+          await this.clearCurrentAction();
+          return {
+            skipped: true,
+            track: 'SKIP',
+            classification: cold.classification,
+            reason: cold.skipReason,
+            contactId,
+            stepNumber,
+          };
+        }
+
+        if (cold.track === 'PARTNERSHIP_OUTREACH' || cold.track === 'COLLABORATION_OUTREACH') {
+          // Never auto-send. Persist as pending_review so the contact's
+          // email history surfaces the draft for human approval.
+          await withTenant(this.tenantId, async (tx) => {
+            await tx.insert(outreachEmails).values({
+              tenantId: this.tenantId,
+              masterAgentId,
+              contactId,
+              subject: cold.subject,
+              body: cold.body,
+              status: 'pending_review',
+              track: cold.track,
+              classification: cold.classification,
+              partnershipAngle: cold.partnershipAngle ?? null,
+              collaborationAngle: cold.collaborationAngle ?? null,
+              proposedExchange: cold.proposedExchange ?? null,
+            });
+          });
+          logger.info({
+            tenantId: this.tenantId,
+            contactId,
+            track: cold.track,
+            classification: cold.classification,
+          }, 'OutreachAgent: queued for human review (partnership/collaboration)');
+          await this.clearCurrentAction();
+          return {
+            skipped: false,
+            track: cold.track,
+            classification: cold.classification,
+            pendingReview: true,
+            contactId,
+            stepNumber,
+          };
+        }
+
+        // NORMAL_OUTREACH — falls through to enqueue/send flow below.
+        // Track/classification persistence on emails_sent is handled by the
+        // existing queue flow; the manual /send-email route writes
+        // outreach_emails with these fields. We don't need to thread them
+        // here.
+        email = { subject: cold.subject, body: cold.body };
+      } else {
+        const { system, user } = useCase === 'sales'
+          ? buildSalesEmailPrompt(emailGenCtx)
+          : buildRecruitmentEmailPrompt(emailGenCtx);
+        email = await this.generateEmail(system, user);
+      }
     } else {
       // Fallback to existing basic email generation (backward compatible)
       const emailRules = (config.emailRules as string[]) ?? undefined;
@@ -282,7 +404,7 @@ export class OutreachAgent extends BaseAgent {
     const trackingId = randomUUID();
     const wrappedBody = wrapEmailBody({
       body: plainTextToHtml(email.body),
-      senderName: (config.senderFirstName as string) ?? undefined,
+      senderName: senderFirstName,
       senderTitle: (config.senderTitle as string) ?? undefined,
       senderCompany: (config.senderCompanyName as string) ?? agent?.name ?? undefined,
       senderWebsite: (config.senderWebsite as string) ?? undefined,
@@ -433,6 +555,14 @@ export class OutreachAgent extends BaseAgent {
       } catch (err) {
         logger.warn({ err, contactId }, 'Failed to log CRM activity');
       }
+
+      // Pipeline-stage tracking: increment touches + promote new → first_touch_sent.
+      try {
+        const { recordTouch } = await import('../services/prospect-stage.service.js');
+        await recordTouch({ tenantId: this.tenantId, contactId, channel: 'email' });
+      } catch (err) {
+        logger.warn({ err, contactId }, 'recordTouch failed after outreach email');
+      }
     }
 
     // 8. Dispatch next step if applicable (skip in dry-run)
@@ -513,6 +643,115 @@ export class OutreachAgent extends BaseAgent {
         subject: `Opportunity: ${params.opportunity.title}`,
         body: `<p>${response}</p>`,
       };
+    }
+  }
+
+  /**
+   * Increment day-scoped counters for cold-email outcomes and log a stats
+   * line on every call. Once skip-rate crosses 30 % with at least 10
+   * samples for the masterAgent on the current UTC day, emit a single
+   * WARN — SETNX guards prevent re-firing the same day. Per-day keys
+   * auto-expire after 25 h so cardinality stays bounded.
+   *
+   * Telemetry is best-effort: any Redis hiccup is swallowed so the
+   * caller's job result is unaffected.
+   */
+  private async recordColdEmailStat(opts: {
+    skipped: boolean;
+    reason?: string;
+    track?: ColdEmailTrack;
+    masterAgentId?: string;
+  }): Promise<void> {
+    try {
+      const tenantId = this.tenantId;
+      const agentId = opts.masterAgentId ?? this.masterAgentId;
+      const dateUTC = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const base = `tenant:${tenantId}:agent:${agentId}:cold:${dateUTC}`;
+      const draftedKey = `${base}:drafted`;
+      const skippedKey = `${base}:skipped`;
+      const reasonsKey = `${base}:reasons`;
+      const warnedKey = `${base}:warned`;
+      const TTL = 25 * 3600;
+
+      let drafted: number;
+      let skipped: number;
+      if (opts.skipped) {
+        skipped = await this.redis.incr(skippedKey);
+        if (skipped === 1) await this.redis.expire(skippedKey, TTL);
+        drafted = parseInt((await this.redis.get(draftedKey)) ?? '0', 10);
+        if (opts.reason) {
+          const reasonKey = opts.reason.slice(0, 100);
+          await this.redis.hincrby(reasonsKey, reasonKey, 1);
+          await this.redis.expire(reasonsKey, TTL);
+        }
+      } else {
+        drafted = await this.redis.incr(draftedKey);
+        if (drafted === 1) await this.redis.expire(draftedKey, TTL);
+        skipped = parseInt((await this.redis.get(skippedKey)) ?? '0', 10);
+      }
+
+      // Per-track counter (v4): every track gets its own count so logs
+      // can break down NORMAL vs PARTNERSHIP vs COLLABORATION vs SKIP.
+      if (opts.track) {
+        const trackKey = `${base}:track:${opts.track}`;
+        const n = await this.redis.incr(trackKey);
+        if (n === 1) await this.redis.expire(trackKey, TTL);
+      }
+
+      const total = drafted + skipped;
+      const rate = total > 0 ? skipped / total : 0;
+
+      // Pull top-3 skip reasons + byTrack every 10th call (chatty otherwise).
+      let topReasons: Array<{ reason: string; count: number }> | undefined;
+      let byTrack: Record<string, number> | undefined;
+      if (total > 0 && total % 10 === 0) {
+        const hash = await this.redis.hgetall(reasonsKey);
+        topReasons = Object.entries(hash)
+          .map(([reason, count]) => ({ reason, count: parseInt(count, 10) }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3);
+        const trackNames: ColdEmailTrack[] = [
+          'NORMAL_OUTREACH',
+          'PARTNERSHIP_OUTREACH',
+          'COLLABORATION_OUTREACH',
+          'SKIP',
+        ];
+        const values = await Promise.all(
+          trackNames.map((t) => this.redis.get(`${base}:track:${t}`)),
+        );
+        byTrack = Object.fromEntries(
+          trackNames.map((t, i) => [t, parseInt(values[i] ?? '0', 10)]),
+        );
+      }
+
+      logger.info({
+        tenantId,
+        masterAgentId: agentId,
+        drafted,
+        skipped,
+        rate: Number(rate.toFixed(3)),
+        dateUTC,
+        ...(opts.track ? { track: opts.track } : {}),
+        ...(topReasons ? { topReasons } : {}),
+        ...(byTrack ? { byTrack } : {}),
+      }, 'cold_email.batch.stats');
+
+      // One-shot WARN per masterAgent per day when discovery quality drops.
+      if (total >= 10 && rate > 0.30) {
+        const claimed = await this.redis.set(warnedKey, '1', 'EX', TTL, 'NX');
+        if (claimed === 'OK') {
+          logger.warn({
+            tenantId,
+            masterAgentId: agentId,
+            drafted,
+            skipped,
+            rate: Number(rate.toFixed(3)),
+            dateUTC,
+          }, 'high_skip_rate_warning: discovery may be pulling too many non-buyers, consider tightening ICP filters');
+        }
+      }
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'recordColdEmailStat: telemetry failed (non-fatal)');
     }
   }
 }

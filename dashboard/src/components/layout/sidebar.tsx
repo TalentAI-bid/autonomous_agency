@@ -50,10 +50,14 @@ export function Sidebar() {
 
   const workspace: NavItem[] = [
     { href: '/dashboard', label: 'Dashboard', icon: 'dash' },
+    { href: '/queue', label: 'Daily Queue', icon: 'target' },
+    { href: '/prospects', label: 'Prospects', icon: 'users' },
     { href: '/agents', label: 'Agents', icon: 'bot', count: agents?.length },
     { href: '/agents/new', label: 'New Agent', icon: 'plus' },
+    { href: '/studio', label: 'Studio', icon: 'zap' },
   ];
   const data: NavItem[] = [
+    { href: '/companies', label: 'Companies', icon: 'build' },
     { href: '/crm', label: 'Pipeline', icon: 'deal' },
     { href: '/analytics', label: 'Analytics', icon: 'chart' },
   ];
@@ -61,6 +65,7 @@ export function Sidebar() {
     { href: '/settings/company', label: 'Company Profile', icon: 'flag' },
     { href: '/settings/products', label: 'Products', icon: 'zap' },
     { href: '/settings/email', label: 'Email Accounts', icon: 'mail' },
+    { href: '/settings/messaging', label: 'Messaging', icon: 'mail' },
     { href: '/linkedin-extension', label: 'LinkedIn Extension', icon: 'globe' },
   ];
   const tools: NavItem[] = [

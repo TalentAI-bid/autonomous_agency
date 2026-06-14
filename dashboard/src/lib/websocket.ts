@@ -71,9 +71,17 @@ class WebSocketManager {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (ev) => {
         this.ws = null;
         this.dispatchInternal('ws:disconnected', {});
+        // 4001 = server rejected our token. Reconnecting in a tight loop just
+        // hammers the api (we previously generated a 5.9GB log file this way).
+        // Stop until the user re-authenticates and explicitly calls connect().
+        if (ev.code === 4001) {
+          this.manualClose = true;
+          this.dispatchInternal('ws:unauthorized', { code: 4001 });
+          return;
+        }
         if (!this.manualClose) {
           this.scheduleReconnect();
         }

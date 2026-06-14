@@ -161,3 +161,6 @@ vite.config.ts.timestamp-*
 Screenshot 2026-04-26 111021.png
 image copy.png
 Screenshot 2026-04-26 105509.png
+
+# CRX signing key (never commit)
+extension-private.pem

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import {
   createCopilotSession,
   sendCopilotMessageStream,
@@ -6,8 +7,37 @@ import {
   suggestProduct,
 } from '../services/copilot.service.js';
 import { getConversation } from '../services/chat.service.js';
-import { ValidationError } from '../utils/errors.js';
+import { generateReplyDraft } from '../services/inbox-copilot.service.js';
+import { ValidationError, UnauthorizedError } from '../utils/errors.js';
 import { isOriginAllowed } from '../utils/cors.js';
+
+// Inbox-copilot endpoint sits under the same /api/copilot prefix as the
+// existing session-based copilot. They share auth but no business logic.
+const draftReplySchema = z.object({
+  recipientLinkedinUrl: z.string().min(1, 'recipientLinkedinUrl is required'),
+  recipientName: z.string().min(1, 'recipientName is required'),
+  recipientCompany: z.string().optional(),
+  recipientTitle: z.string().optional(),
+  conversationHistory: z
+    .array(
+      z.object({
+        direction: z.enum(['inbound', 'outbound']),
+        body: z.string().min(1),
+        sentAt: z.string().min(1),
+      }),
+    )
+    .min(1, 'conversationHistory cannot be empty'),
+  mode: z
+    .enum([
+      'generate_from_scratch',
+      'improve_existing',
+      'make_shorter',
+      'make_more_direct',
+      'different_angle',
+    ])
+    .default('generate_from_scratch'),
+  existingDraft: z.string().max(3000).optional(),
+});
 
 export default async function copilotRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
@@ -74,5 +104,32 @@ export default async function copilotRoutes(fastify: FastifyInstance) {
     }
     const suggestion = await suggestProduct(request.tenantId, name.trim());
     return { data: { suggestion } };
+  });
+
+  // POST /api/copilot/draft-reply — LinkedIn Inbox Copilot
+  // Drafts a reply to the latest inbound message in a LinkedIn DM thread.
+  // The extension's sidebar (copilot-sidebar.js) hits this endpoint.
+  fastify.post('/draft-reply', async (request) => {
+    if (!request.userId) throw new UnauthorizedError();
+    const parsed = draftReplySchema.safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+
+    const result = await generateReplyDraft({
+      tenantId: request.tenantId,
+      userId: request.userId,
+      recipientLinkedinUrl: parsed.data.recipientLinkedinUrl,
+      recipientName: parsed.data.recipientName,
+      recipientCompany: parsed.data.recipientCompany,
+      recipientTitle: parsed.data.recipientTitle,
+      conversationHistory: parsed.data.conversationHistory,
+      mode: parsed.data.mode,
+      existingDraft: parsed.data.existingDraft,
+    });
+
+    return {
+      success: true,
+      draft: result.draft,
+      conversation: result.conversation,
+    };
   });
 }

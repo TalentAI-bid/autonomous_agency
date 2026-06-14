@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { useContact } from '@/hooks/use-contacts';
+import { useContact, useUpdateContact } from '@/hooks/use-contacts';
+import { useToast } from '@/hooks/use-toast';
 import { useMasterAgent } from '@/hooks/use-agents';
 import { useContactTimeline, useDeals, useCrmStages } from '@/hooks/use-crm';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
@@ -12,6 +13,7 @@ import { AddActivityDialog } from '@/components/crm/add-activity-dialog';
 import { EmailComposeModal } from '@/components/contacts/email-compose-modal';
 import { EmailEditor } from '@/components/contacts/email-editor';
 import { SequencePanel } from '@/components/contacts/sequence-panel';
+import { GmapsBusinessCard } from '@/components/prospects/gmaps-business-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,7 +22,7 @@ import { formatDate, formatRelative } from '@/lib/utils';
 import {
   User, Mail, Building, MapPin, Linkedin, Star, ExternalLink,
   Github, Globe, GraduationCap, Briefcase, Code,
-  Activity, DollarSign, Send,
+  Activity, DollarSign, Send, Reply,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { ContactDeepData } from '@/types';
@@ -34,6 +36,21 @@ export default function ContactDetailPage() {
   const { data: deals } = useDeals({ contactId });
   const { data: stages } = useCrmStages();
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const updateContact = useUpdateContact();
+  const { toast } = useToast();
+
+  const handleMarkResponded = async () => {
+    try {
+      await updateContact.mutateAsync({ id: contactId, status: 'replied' });
+      toast({ title: 'Marked as responded' });
+    } catch (err) {
+      toast({
+        title: 'Failed to update',
+        description: err instanceof Error ? err.message : 'Please try again',
+        variant: 'destructive',
+      });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -89,6 +106,16 @@ export default function ContactDetailPage() {
                 <Send className="w-3.5 h-3.5 mr-1.5" /> Draft Email
               </Button>
             )}
+            {contact.status !== 'replied' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMarkResponded}
+                disabled={updateContact.isPending}
+              >
+                <Reply className="w-3.5 h-3.5 mr-1.5" /> Mark as responded
+              </Button>
+            )}
           </div>
           <div className="flex flex-wrap gap-4 mt-2 text-sm text-muted-foreground">
             {contact.title && <span>{contact.title}</span>}
@@ -108,6 +135,9 @@ export default function ContactDetailPage() {
 
       {/* Followup sequence panel — hidden when no campaign_contact rows exist */}
       <SequencePanel contactId={contactId} />
+
+      {/* Google Maps business detail — renders only for gmaps_business contacts */}
+      <GmapsBusinessCard contactId={contact.id} sourceType={contact.sourceType} meta={contact.sourceMetadata} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Summary Card */}

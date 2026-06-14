@@ -1,24 +1,52 @@
 'use client';
 
-import { useCompanies } from '@/hooks/use-companies';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDate } from '@/lib/utils';
-import type { CompanyFilters } from '@/types';
+import { formatDate, cn } from '@/lib/utils';
+import type { Company, MasterAgent } from '@/types';
 import Link from 'next/link';
 import { ExternalLink, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface CompanyTableProps {
-  filters?: CompanyFilters;
+  companies: Company[];
+  agentsById: Map<string, MasterAgent>;
+  isLoading: boolean;
 }
 
-export function CompanyTable({ filters }: CompanyTableProps) {
-  const { data: res, isLoading } = useCompanies(filters);
-  const companies = res?.data ?? [];
-  const meta = res?.pagination;
+type AgentTypeLabel = { label: string; variant: 'success' | 'blue' | 'purple' | 'secondary' };
 
+function agentTypeFromConfig(agent: MasterAgent | undefined): AgentTypeLabel {
+  const strategy = (agent?.config as Record<string, unknown> | undefined)?.bdStrategy;
+  switch (strategy) {
+    case 'hiring_signal':
+      return { label: 'Hiring', variant: 'success' };
+    case 'industry_target':
+      return { label: 'Industry', variant: 'blue' };
+    case 'hybrid':
+      return { label: 'Hybrid', variant: 'purple' };
+    default:
+      return { label: '—', variant: 'secondary' };
+  }
+}
+
+function readFitScore(company: Company): number | null {
+  const fitScore = company.rawData?.fitScore?.buyer_fit_score;
+  if (typeof fitScore === 'number') return Math.round(fitScore);
+  const legacy = company.rawData?.triage?.fit_score;
+  if (typeof legacy === 'number') return Math.round(legacy);
+  return null;
+}
+
+function fitColorClass(score: number | null): string {
+  if (score == null) return 'text-muted-foreground';
+  if (score >= 80) return 'text-emerald-400 font-semibold';
+  if (score >= 60) return 'text-amber-400 font-medium';
+  return 'text-muted-foreground';
+}
+
+export function CompanyTable({ companies, agentsById, isLoading }: CompanyTableProps) {
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -38,62 +66,84 @@ export function CompanyTable({ filters }: CompanyTableProps) {
   }
 
   return (
-    <div className="space-y-3">
-      {meta && (
-        <p className="text-xs text-muted-foreground">
-          Showing {companies.length} companies
-        </p>
-      )}
-      <div className="rounded-lg border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Domain</TableHead>
-              <TableHead>Industry</TableHead>
-              <TableHead>Size</TableHead>
-              <TableHead>Tech Stack</TableHead>
-              <TableHead>Funding</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead className="w-10"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {companies.map((company) => (
+    <div className="rounded-lg border overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Company</TableHead>
+            <TableHead>Agent</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Fit</TableHead>
+            <TableHead>Tags</TableHead>
+            <TableHead>Industry</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead className="w-10"></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {companies.map((company) => {
+            const agent = company.masterAgentId ? agentsById.get(company.masterAgentId) : undefined;
+            const agentType = agentTypeFromConfig(agent);
+            const fit = readFitScore(company);
+            const tech = company.techStack ?? [];
+            const fitSignals = company.rawData?.fitScore?.signals;
+            const hiringChip = (fitSignals?.hiring_signals?.length ?? 0) > 0;
+            const fundedChip = (fitSignals?.funding_signals?.length ?? 0) > 0;
+            const techShown = tech.slice(0, 3);
+            const techExtra = tech.length - techShown.length;
+
+            return (
               <TableRow key={company.id} className="hover:bg-muted/30">
                 <TableCell className="font-medium">
-                  <div>
-                    <p>{company.name}</p>
-                    {company.linkedinUrl && (
-                      <a
-                        href={company.linkedinUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-400 hover:underline"
-                      >
-                        LinkedIn
-                      </a>
+                  <div className="min-w-0">
+                    <p className="truncate">{company.name}</p>
+                    {company.domain && (
+                      <p className="text-xs text-muted-foreground truncate">{company.domain}</p>
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">{company.domain || '—'}</TableCell>
-                <TableCell className="text-sm">{company.industry || '—'}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{company.size || '—'}</TableCell>
+                <TableCell className="text-sm">
+                  {company.masterAgentId ? (
+                    <Link
+                      href={`/agents/${company.masterAgentId}`}
+                      className="text-blue-400 hover:underline truncate"
+                    >
+                      {agent?.name ?? '—'}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
                 <TableCell>
-                  <div className="flex flex-wrap gap-1 max-w-[200px]">
-                    {(company.techStack ?? []).slice(0, 4).map((tech) => (
-                      <Badge key={tech} variant="secondary" className="text-xs">
-                        {tech}
-                      </Badge>
+                  <Badge variant={agentType.variant}>{agentType.label}</Badge>
+                </TableCell>
+                <TableCell>
+                  <span className={cn('text-sm tabular-nums', fitColorClass(fit))}>
+                    {fit != null ? `${fit}%` : '—'}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1 max-w-[260px]">
+                    {hiringChip && (
+                      <Badge variant="success" className="text-[10px]">Hiring</Badge>
+                    )}
+                    {fundedChip && (
+                      <Badge variant="blue" className="text-[10px]">Funded</Badge>
+                    )}
+                    {techShown.map((t) => (
+                      <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
                     ))}
-                    {(company.techStack ?? []).length > 4 && (
-                      <Badge variant="outline" className="text-xs">
-                        +{(company.techStack ?? []).length - 4}
-                      </Badge>
+                    {techExtra > 0 && (
+                      <Badge variant="outline" className="text-[10px]">+{techExtra}</Badge>
+                    )}
+                    {!hiringChip && !fundedChip && techShown.length === 0 && (
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">{company.funding || '—'}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {company.industry || '—'}
+                </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {formatDate(company.createdAt)}
                 </TableCell>
@@ -107,10 +157,10 @@ export function CompanyTable({ filters }: CompanyTableProps) {
                   )}
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            );
+          })}
+        </TableBody>
+      </Table>
     </div>
   );
 }

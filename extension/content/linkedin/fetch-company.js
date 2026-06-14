@@ -142,10 +142,10 @@
           pName = pName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
           if (!pName) continue;
 
-          // Extract title — skip name duplicates, connection-degree text, and
-          // screen-reader-only status labels ("Status is online/offline") that
-          // LinkedIn injects as <span class="visually-hidden"> next to the avatar.
-          const SKIP = /degree connection|View.*profile|3rd\+|2nd|1st|\bprofile\b|status is (online|offline)|^(message|follow|connect)$/i;
+          // Extract title — clean each candidate line of name duplication,
+          // connection-degree text (EN + FR), and CTA buttons rather than
+          // skipping it (on FR the degree + title share one text node).
+          const MUTUAL = /relations? en commun|mutual connection|relation que vous avez/i;
 
           function isHiddenForA11y(el) {
             let node = el;
@@ -163,13 +163,24 @@
             .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
             .filter((t) => t.length > 5 && t.length < 200);
 
+          const isPureName = (t) => pName && t.includes(pName)
+            && t.split(pName).join('').replace(/[·•\-|\s]/g, '').length < 3;
           let title = '';
+          // Pass 1: prefer a granular occupation line with no degree/mutual
+          // markers in its RAW text (LinkedIn renders the subtitle in its own
+          // element, separate from the degree badge + "mutual connections" node).
           for (const t of allText) {
-            if (t.includes(pName)) continue;
-            if (SKIP.test(t)) continue;
-            if (t.startsWith('•')) continue;
-            title = t;
-            break;
+            if (DEGREE_RAW.test(t) || MUTUAL.test(t) || isPureName(t)) continue;
+            const cleaned = sanitizeTitle(t, pName);
+            if (cleaned.length >= 3) { title = cleaned; break; }
+          }
+          // Pass 2 (fallback): clean a marker-laden line when no granular one exists.
+          if (!title) {
+            for (const t of allText) {
+              if (isPureName(t)) continue;
+              const cleaned = sanitizeTitle(t, pName);
+              if (cleaned.length >= 3) { title = cleaned; break; }
+            }
           }
 
           people.push({ name: pName, title, linkedinUrl: profileUrl });
@@ -220,9 +231,48 @@
     // " View …" and concatenated "SeveroView" (boundary at end of word).
     if (/View\b/i.test(t)) return false;
     if (/\bprofile\b/i.test(t)) return false;
+    if (/\bprofil\b/i.test(t)) return false;          // FR "profil" (EN "profile" above)
+    if (/Relation de\s+\d/i.test(t)) return false;    // FR connection-degree leak
+    if (/degree connection/i.test(t)) return false;   // EN connection-degree leak
+    if (/[·•]\s*\d/.test(t)) return false;            // visible degree badge leak ("· 3e")
     if (/%[0-9A-Fa-f]{2}/.test(t)) return false; // URL-encoded residue
     return true;
   }
+
+  // Connection-degree markers leak into anchor text on non-English LinkedIn UIs.
+  // Cut everything from the first degree marker onward (locale-agnostic):
+  //   EN  "• 1st" / "1st degree connection" / "2nd" / "3rd+"
+  //   FR  "· 3e"  / "Relation de 2e niveau" / "Relation de 3e niveau et plus"
+  function stripConnectionDegree(text) {
+    if (!text) return text;
+    let t = String(text);
+    t = t.replace(/\s*Relation de\s+\d.*$/is, '');                       // FR a11y degree phrase
+    t = t.replace(/\s*\b\d(?:st|nd|rd|th)\b[^|]*?\bdegree\b.*$/is, '');   // EN "Nth degree connection"
+    t = t.replace(/\s*[·•]\s*(?:1re|2e|3e|1st|2nd|3rd)\+?.*$/is, '');     // visible badge "· 3e"/"• 3rd+"
+    t = t.replace(/\s*\b(?:1st|2nd|3rd)\+?\b.*$/is, '');                  // EN bare degree
+    t = t.replace(/\s*\b(?:1re|2e|3e)\b.*$/is, '');                       // FR bare degree
+    return t.trim();
+  }
+
+  // Clean a candidate title line of name duplication, connection-degree
+  // fragments, and CTA buttons (EN + FR). Returns '' when nothing meaningful
+  // survives so the caller keeps looking.
+  function sanitizeTitle(raw, pName) {
+    let s = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (pName) s = s.split(pName).join(' ');
+    s = s.replace(/Relation de\s+\d\w*\s+niveau(?:\s+et\s+plus)?/gi, ' ');   // FR degree phrase
+    s = s.replace(/\b\d(?:st|nd|rd|th)\s+degree(?:\s+connection)?\b/gi, ' '); // EN degree phrase
+    s = s.replace(/[·•]\s*(?:1re|2e|3e|1st|2nd|3rd)\+?/gi, ' ');             // degree badge
+    s = s.replace(/\b(?:Message|Se\s+connecter|Connect|Follow|Suivre|S['’]abonner)\b/gi, ' '); // CTAs
+    s = s.replace(/\s+et\s+\d+\s+autres?\s+relations?\s+en\s+commun.*$/i, ' '); // FR "et N autres relations en commun"
+    s = s.replace(/\s*\b(?:relations?\s+en\s+commun|mutual connections?|est une relation que vous avez en commun)\b.*$/i, ' ');
+    s = s.replace(/\s+/g, ' ').replace(/^[·•\-|\s]+/, '').replace(/[·•\-|\s]+$/, '').trim();
+    return s;
+  }
+
+  // Raw markers that mean a text node is a degree/connection-insight node, not
+  // the occupation subtitle — used to prefer a clean granular line first.
+  const DEGREE_RAW = /Relation de\s+\d|[·•]\s*(?:1re|2e|3e|1st|2nd|3rd)|\bdegree connection\b/i;
 
   // LinkedIn renders <a> with both visible name + a screen-reader span like
   // "View Saurabh Kaushik's profile". textContent concatenates the two with no
@@ -232,6 +282,12 @@
   function cleanLinkedInA11yText(text) {
     if (!text) return text;
     let t = text.trim();
+    // French a11y: "Voir le profil de NAME" → NAME (mirror of the English arm).
+    const fr = t.match(/Voir le profil de\s+(.+)/i);
+    if (fr && fr[1]) {
+      const inner = fr[1].trim().replace(/[‘’'"`]+\s*$/, '').trim();
+      if (inner.length >= 2 && inner.length <= 100) return inner;
+    }
     // Pattern A: "View NAME('s) profile" embedded → return NAME (it's the full name).
     // Accept straight, curly, and backtick apostrophes — LinkedIn renders U+2019.
     const m = t.match(/View\s+(.+?)(?:[’'‘`]s\s+profile|\s+profile)/i);
@@ -307,7 +363,7 @@
     // and the embedded "View NAME's profile" screen-reader-only string.
     if (profileAnchor) {
       let text = (profileAnchor.textContent || '').trim().replace(/\s+/g, ' ');
-      text = text.replace(/\s*•\s*(?:1st|2nd|3rd)(?:\+)?\s*/g, ' ').trim();
+      text = stripConnectionDegree(text);
       text = text.replace(/Status is (online|offline|away)/gi, '').trim();
       text = cleanLinkedInA11yText(text);
       if (isValidName(text)) return text;

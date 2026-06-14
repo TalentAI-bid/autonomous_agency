@@ -103,6 +103,9 @@ export interface Contact {
   score?: number;
   scoreDetails?: Record<string, unknown>;
   source?: ContactSource;
+  sourceType?: string;
+  sourceMetadata?: Record<string, unknown>;
+  phone?: string;
   status: ContactStatus;
   rawData?: Record<string, unknown>;
   createdAt: string;
@@ -408,7 +411,7 @@ export interface AgentStatus {
 
 // ── CRM & Email Types (re-exported) ──────────────────────────────────────────
 
-export type { CrmStage, Deal, DealWithContact, CrmActivity, ActivityType, BoardColumn } from './crm';
+export type { CrmStage, Deal, DealWithContact, CrmActivity, ActivityType, BoardColumn, CadenceStrategy, FollowupCadence } from './crm';
 export type { EmailAccount, EmailListenerConfig, QuotaStatus, EmailProvider, ListenerProtocol } from './email';
 
 // ── Mailbox Types ─────────────────────────────────────────────────────────
@@ -634,6 +637,7 @@ export interface CompanyFilters {
   cursor?: string;
   limit?: number;
   sortBy?: 'createdAt' | 'fit_score';
+  includeIncomplete?: boolean;
 }
 
 // ── Product & Company Profile Types ──────────────────────────────────────────

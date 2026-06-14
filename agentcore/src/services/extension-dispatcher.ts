@@ -1,15 +1,27 @@
-import { eq, and, asc, desc, isNull, lte, sql } from 'drizzle-orm';
-import { withTenant } from '../config/database.js';
+import { eq, and, asc, desc, gt, isNull, lte, or, exists, inArray, sql } from 'drizzle-orm';
+import { db, withTenant } from '../config/database.js';
 import { companies, contacts, extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
+import { userTenants } from '../db/schema/user-tenants.js';
 import type { ExtensionTask } from '../db/schema/index.js';
 import { pubRedis } from '../queues/setup.js';
 import { dispatchJob } from './queue.service.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
 import { enqueueFitScore } from '../queues/fit-score-queues.js';
+import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
-import { logPipelineError } from '../utils/pipeline-error.js';
+import { logPipelineError, formatRateLimitMessage } from '../utils/pipeline-error.js';
+import { logEvent } from './timeline.service.js';
+import { ingestGmapsBusiness } from './gmaps-lead.service.js';
+import { prospectStages } from '../db/schema/index.js';
 
 // ─── Rate limits (server-authoritative; client mirrors these) ──────────────
+//
+// Quotas live on the per-user extension_sessions row (dailyTasksCount JSONB).
+// After multi-workspace, a user has exactly one extension session regardless
+// of how many tenants they're a member of, so the cap is effectively
+// per-user — i.e. per LinkedIn account. 80 search-tasks/day is one quota
+// across ALL the user's workspaces, not per-workspace; this matches reality
+// because the LinkedIn account is shared.
 
 export type ExtensionSite = 'linkedin' | 'gmaps' | 'crunchbase';
 export type ExtensionTaskType =
@@ -24,15 +36,18 @@ export const EXTENSION_SITE_LIMITS = {
   linkedin: {
     // Mirrors extension/lib/rate-limiter.js. minDelayMs is enforced
     // client-side (server only enforces dailyCap); kept in sync here as
-    // documentation. fetch_company bumped 4s → 8s + per-batch cooldown
-    // after long runs hit LinkedIn 429s on 58-company chains.
-    search_companies: { dailyCap: 10, minDelayMs: 4000 },
+    // documentation. Caps raised after the prior 10-search/100-fetch values
+    // bottlenecked multi-agent demo runs (one agent burning 10 starved every
+    // other agent on the same session for 24h). 80 search-tasks/day per
+    // session covers ~8 strategist runs of 10 search steps each;
+    // 400 fetch-tasks/day supports ~200 enriched companies per session.
+    search_companies: { dailyCap: 80, minDelayMs: 4000 },
     fetch_company: { dailyCap: 100, minDelayMs: 8000 },
     // Split adapters get the same cap each — together they double the rate
     // of LinkedIn page hits per company. minDelayMs stays at 8s per call so
     // the per-tab pacing matches the legacy combined adapter.
-    fetch_company_info: { dailyCap: 100, minDelayMs: 8000 },
-    fetch_company_team: { dailyCap: 100, minDelayMs: 8000 },
+    fetch_company_info: { dailyCap: 400, minDelayMs: 8000 },
+    fetch_company_team: { dailyCap: 400, minDelayMs: 8000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },
@@ -49,6 +64,40 @@ function getLimit(site: ExtensionSite, type: ExtensionTaskType): { dailyCap: num
   return siteLimits?.[type];
 }
 
+// ─── Defensive enqueue guard ────────────────────────────────────────────────
+// fetch_company_info / fetch_company_team REQUIRE a per-company linkedinUrl
+// in params. Standalone strategist steps without one fail later inside the
+// extension with `invalid linkedinUrl=undefined`, polluting metrics. This
+// guard catches the bug at the enqueue boundary and logs the call site via
+// stack trace so we can find whoever's calling without a URL.
+function looksLikeMissingLinkedInUrl(
+  type: ExtensionTaskType,
+  params: Record<string, unknown> | undefined,
+): boolean {
+  if (type !== 'fetch_company_info' && type !== 'fetch_company_team') return false;
+  const url = params?.linkedinUrl;
+  return typeof url !== 'string' || url.trim().length === 0;
+}
+
+function rejectMissingLinkedInUrl(
+  callsite: 'single' | 'batch',
+  task: { tenantId: string; masterAgentId?: string | null; site: ExtensionSite; type: ExtensionTaskType; params: Record<string, unknown> | undefined },
+): void {
+  logger.error(
+    {
+      callsite,
+      tenantId: task.tenantId,
+      masterAgentId: task.masterAgentId ?? null,
+      site: task.site,
+      type: task.type,
+      paramKeys: Object.keys(task.params ?? {}),
+      linkedinUrl: task.params?.linkedinUrl,
+      stack: new Error('linkedinUrl_missing_at_enqueue').stack,
+    },
+    'CRITICAL: enqueueing fetch_company_info/_team task with no linkedinUrl — bug somewhere',
+  );
+}
+
 // ─── Enqueue ────────────────────────────────────────────────────────────────
 
 export async function enqueueExtensionTask(params: {
@@ -60,6 +109,17 @@ export async function enqueueExtensionTask(params: {
   priority?: number;
   dispatchAfter?: Date;
 }): Promise<{ taskId: string }> {
+  if (looksLikeMissingLinkedInUrl(params.type, params.params)) {
+    rejectMissingLinkedInUrl('single', {
+      tenantId: params.tenantId,
+      masterAgentId: params.masterAgentId ?? null,
+      site: params.site,
+      type: params.type,
+      params: params.params,
+    });
+    throw new Error(`enqueueExtensionTask: ${params.type} requires params.linkedinUrl`);
+  }
+
   const [row] = await withTenant(params.tenantId, async (tx) => {
     return tx
       .insert(extensionTasks)
@@ -113,6 +173,86 @@ interface BatchTaskInput {
  * Tasks within the same batch share the same `dispatchAfter` timestamp;
  * the extension's per-task minDelay still serialises them client-side.
  */
+/**
+ * Fan out company enrichment to the MODERN split tasks: one `fetch_company_info`
+ * per company + one `fetch_company_team` per `teamRoleKeyword`. This makes the
+ * extension load the simple `/company/<slug>/people/?keywords=<kw>` page — never
+ * the legacy combined `fetch_company` task, which clicks through to LinkedIn's
+ * canned `/search/results/people/?currentCompany=…` search.
+ *
+ * Shared by the `search_companies` auto-chain and the LinkedIn-Jobs (hiring
+ * signal) discovery path so both behave identically.
+ */
+export async function enqueueCompanyEnrichmentFanout(
+  tenantId: string,
+  masterAgentId: string | undefined,
+  companies: Array<{ linkedinUrl: string; companyId?: string }>,
+): Promise<void> {
+  if (companies.length === 0) return;
+
+  // Keywords come from the strategist's saved sales-strategy
+  // (config.salesStrategy.teamRoleKeywords); legacy chat-set keywords on
+  // config.teamRoleKeywords are a fallback for agents whose strategy hasn't
+  // been regenerated yet. If neither is set, the team fetch is skipped — the
+  // user must re-run the strategist to populate them.
+  let teamKeywords: string[] = [];
+  if (masterAgentId) {
+    try {
+      const [agentRow] = await withTenant(tenantId, async (tx) => {
+        return tx.select({ config: masterAgents.config })
+          .from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, tenantId)))
+          .limit(1);
+      });
+      const cfg = agentRow?.config as Record<string, unknown> | undefined;
+      const strategyRaw = (cfg?.salesStrategy as Record<string, unknown> | undefined)?.teamRoleKeywords;
+      const legacyRaw = cfg?.teamRoleKeywords;
+      const pickFrom = (raw: unknown): string[] =>
+        Array.isArray(raw)
+          ? raw
+              .filter((k): k is string => typeof k === 'string')
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0 && s.length <= 60)
+          : [];
+      const strategyKw = pickFrom(strategyRaw);
+      const legacyKw = pickFrom(legacyRaw);
+      teamKeywords = strategyKw.length > 0 ? strategyKw : legacyKw;
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), masterAgentId },
+        'Failed to load teamRoleKeywords for fanout — skipping team fetch',
+      );
+    }
+  }
+
+  const fanoutTasks: BatchTaskInput[] = [];
+  for (const c of companies) {
+    fanoutTasks.push({
+      masterAgentId,
+      site: 'linkedin',
+      type: 'fetch_company_info',
+      params: { linkedinUrl: c.linkedinUrl, companyId: c.companyId },
+      priority: 3,
+    });
+    for (const keyword of teamKeywords) {
+      fanoutTasks.push({
+        masterAgentId,
+        site: 'linkedin',
+        type: 'fetch_company_team',
+        params: { linkedinUrl: c.linkedinUrl, companyId: c.companyId, keyword },
+        priority: 3,
+      });
+    }
+  }
+  if (teamKeywords.length === 0) {
+    logger.info(
+      { masterAgentId, companyCount: companies.length },
+      'team_fetch_skipped_no_keywords — strategist did not emit config.salesStrategy.teamRoleKeywords; re-run /regenerate-strategy to populate',
+    );
+  }
+  await enqueueExtensionTaskBatch(tenantId, fanoutTasks);
+}
+
 export async function enqueueExtensionTaskBatch(
   tenantId: string,
   tasks: BatchTaskInput[],
@@ -120,12 +260,31 @@ export async function enqueueExtensionTaskBatch(
 ): Promise<{ taskIds: string[]; batches: number }> {
   if (tasks.length === 0) return { taskIds: [], batches: 0 };
 
+  // Filter out fetch_company_info/_team rows missing linkedinUrl. These
+  // would otherwise reach the extension and fail with `invalid linkedinUrl=undefined`,
+  // burning a daily-cap slot for nothing. Log each rejection so we can find
+  // the upstream code path that's producing them.
+  const validTasks = tasks.filter((t) => {
+    if (looksLikeMissingLinkedInUrl(t.type, t.params)) {
+      rejectMissingLinkedInUrl('batch', {
+        tenantId,
+        masterAgentId: t.masterAgentId ?? null,
+        site: t.site,
+        type: t.type,
+        params: t.params,
+      });
+      return false;
+    }
+    return true;
+  });
+  if (validTasks.length === 0) return { taskIds: [], batches: 0 };
+
   const batchSize = opts.batchSize ?? 10;
   const batchCooldownMs = opts.batchCooldownMs ?? 60_000;
   const firstBatchDelayMs = opts.firstBatchDelayMs ?? 0;
 
   const now = Date.now();
-  const values = tasks.map((t, idx) => {
+  const values = validTasks.map((t, idx) => {
     const batchIdx = Math.floor(idx / batchSize);
     const dispatchAfter = new Date(now + firstBatchDelayMs + batchIdx * batchCooldownMs);
     return {
@@ -145,10 +304,11 @@ export async function enqueueExtensionTaskBatch(
   });
 
   const taskIds = inserted.map((r) => r.id);
-  const batches = Math.ceil(tasks.length / batchSize);
+  const batches = Math.ceil(validTasks.length / batchSize);
+  const rejected = tasks.length - validTasks.length;
 
   logger.info(
-    { tenantId, count: tasks.length, batches, batchSize, batchCooldownMs },
+    { tenantId, requested: tasks.length, count: validTasks.length, rejected, batches, batchSize, batchCooldownMs },
     'Enqueued extension tasks in batches',
   );
 
@@ -166,52 +326,25 @@ export async function enqueueExtensionTaskBatch(
 // ─── Dispatch ───────────────────────────────────────────────────────────────
 
 export async function tryDispatch(tenantId: string, taskId: string): Promise<boolean> {
-  // Load active session + task. Diagnostic for the no-session case is
-  // emitted inside the callback so the operator can see in production logs
-  // exactly why a fetch_company queue isn't draining (extension session
-  // offline; tasks stay `pending` and are picked up by drainPending() on
-  // reconnect).
-  const result = await withTenant(tenantId, async (tx) => {
-    const [task] = await tx
+  // Load the task — we always need a fresh row before considering dispatch.
+  const task = await withTenant(tenantId, async (tx) => {
+    const [t] = await tx
       .select()
       .from(extensionTasks)
       .where(and(eq(extensionTasks.id, taskId), eq(extensionTasks.tenantId, tenantId)))
       .limit(1);
-    if (!task || task.status !== 'pending') return { task: null, session: null };
+    if (!t || t.status !== 'pending') return null;
     // Skip silently if the task is scheduled for the future — the periodic
     // re-drainer will pick it up at its dispatchAfter timestamp.
-    if (task.dispatchAfter && task.dispatchAfter.getTime() > Date.now()) {
-      return { task: null, session: null };
-    }
-
-    const [session] = await tx
-      .select()
-      .from(extensionSessions)
-      .where(
-        and(
-          eq(extensionSessions.tenantId, tenantId),
-          eq(extensionSessions.connected, true),
-          isNull(extensionSessions.revokedAt),
-        ),
-      )
-      .orderBy(desc(extensionSessions.lastSeenAt))
-      .limit(1);
-
-    if (!session) {
-      logger.info(
-        { taskId, tenantId, masterAgentId: task.masterAgentId, type: task.type },
-        'Extension task queued but not dispatched — no connected extension session',
-      );
-    }
-
-    return { task, session: session ?? null };
+    if (t.dispatchAfter && t.dispatchAfter.getTime() > Date.now()) return null;
+    return t;
   });
+  if (!task) return false;
 
-  if (!result.task || !result.session) return false;
-
-  const { task, session } = result;
-
-  // Skip dispatch if the owning master agent is paused
+  // Gate dispatch on the owning master agent's lifecycle. A task that still
+  // carries a master_agent_id must not dispatch if that agent has been deleted
+  // (row gone) or paused — otherwise queued tasks keep firing at the extension
+  // long after the agent is gone, with no way to stop them.
   if (task.masterAgentId) {
     const [agentRow] = await withTenant(tenantId, async (tx) => {
       return tx.select({ status: masterAgents.status })
@@ -219,40 +352,75 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
         .where(eq(masterAgents.id, task.masterAgentId as string))
         .limit(1);
     });
-    if (agentRow?.status === 'paused') {
-      logger.info({ taskId, masterAgentId: task.masterAgentId }, 'Skipped dispatch — master agent is paused');
+    if (!agentRow) {
+      // Agent deleted out from under the task — cancel it so the sweep stops retrying.
+      await withTenant(tenantId, async (tx) => {
+        await tx.update(extensionTasks)
+          .set({ status: 'cancelled', updatedAt: new Date() })
+          .where(and(eq(extensionTasks.id, taskId), eq(extensionTasks.tenantId, tenantId)));
+      });
+      logger.info({ taskId, masterAgentId: task.masterAgentId }, 'Cancelled dispatch — master agent deleted');
+      return false;
+    }
+    if (agentRow.status === 'paused' || agentRow.status === 'paused_quota') {
+      logger.info({ taskId, masterAgentId: task.masterAgentId, status: agentRow.status }, 'Skipped dispatch — master agent paused');
       return false;
     }
   }
 
-  const limit = getLimit(task.site as ExtensionSite, task.type as ExtensionTaskType);
-  const key = `${task.site}:${task.type}`;
+  // Load ALL eligible (connected, recent heartbeat, non-revoked) sessions
+  // that can reach this tenant. The previous .limit(1) most-recent picker
+  // stalled the queue whenever the chosen session was at cap — even if a
+  // sibling session had headroom. We fall back across sessions in
+  // lastSeenAt-desc order so the healthiest one wins first.
+  //
+  // When ENABLE_MULTI_WORKSPACE_DISPATCH is on, a session is reachable if
+  // its USER is a member of the requested tenant via user_tenants — that is
+  // the same predicate for both legacy per-tenant sessions and new
+  // tenant-less multi-workspace sessions. This is what unblocks shiran
+  // without requiring him to re-login: his existing tenant=2a559a80 session
+  // becomes eligible for tasks in c0e5f997 because user_tenants lists him
+  // as an owner there.
+  //
+  // With the flag off we preserve the old per-tenant predicate exactly so
+  // rollback is a one-env-var flip.
+  const tenantMatch = env.ENABLE_MULTI_WORKSPACE_DISPATCH
+    ? exists(
+        db
+          .select({ one: sql<number>`1` })
+          .from(userTenants)
+          .where(and(
+            eq(userTenants.userId, extensionSessions.userId),
+            eq(userTenants.tenantId, tenantId),
+            inArray(userTenants.role, ['owner', 'admin', 'member']),
+          )),
+      )
+    : eq(extensionSessions.tenantId, tenantId);
 
-  // Reset daily counters if dailyResetAt older than 24h
-  const now = new Date();
-  const resetAt = session.dailyResetAt ? new Date(session.dailyResetAt) : new Date(0);
-  const needsReset = now.getTime() - resetAt.getTime() > 24 * 60 * 60 * 1000;
-  const counts: Record<string, number> = needsReset
-    ? {}
-    : { ...((session.dailyTasksCount as Record<string, number>) ?? {}) };
+  const eligibleSessions = await db
+    .select()
+    .from(extensionSessions)
+    .where(and(
+      tenantMatch!,
+      eq(extensionSessions.connected, true),
+      isNull(extensionSessions.revokedAt),
+      gt(extensionSessions.lastSeenAt, sql`NOW() - INTERVAL '90 seconds'`),
+    ))
+    .orderBy(desc(extensionSessions.lastSeenAt));
 
-  const used = counts[key] ?? 0;
-  if (limit && used >= limit.dailyCap) {
-    logger.info({ taskId, tenantId, site: task.site, type: task.type, used, cap: limit.dailyCap }, 'rate_limit_hit');
-    if (task.site === 'linkedin') {
-      await logPipelineError({
-        tenantId,
-        masterAgentId: task.masterAgentId ?? null,
-        step: 'extension.dispatch',
-        tool: 'LINKEDIN_EXTENSION',
-        errorType: 'linkedin_rate_limit',
-        context: { taskId, site: task.site, type: task.type, used, cap: limit.dailyCap },
-      });
-    }
+  if (eligibleSessions.length === 0) {
+    logger.info(
+      { taskId, tenantId, masterAgentId: task.masterAgentId, type: task.type },
+      'Extension task queued but not dispatched — no connected extension session',
+    );
     return false;
   }
 
-  // Look up the master-agent name (for popup display) — optional, cheap
+  const limit = getLimit(task.site as ExtensionSite, task.type as ExtensionTaskType);
+  const key = `${task.site}:${task.type}`;
+  const now = new Date();
+
+  // Look up the master-agent name once — used by all dispatch attempts below.
   let masterAgentName: string | null = null;
   if (task.masterAgentId) {
     const [agentRow] = await withTenant(tenantId, async (tx) => {
@@ -265,44 +433,119 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
     masterAgentName = agentRow?.name ?? null;
   }
 
-  // Mark dispatched + bump counter
-  await withTenant(tenantId, async (tx) => {
-    await tx
-      .update(extensionTasks)
-      .set({
-        status: 'dispatched',
-        sessionId: session.id,
-        dispatchedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(extensionTasks.id, task.id));
+  const { hasLiveExtensionSocket } = await import('../websocket/extension.js');
 
+  // Track the most recently-seen at-cap session so we can surface its real
+  // dailyResetAt in the rate-limit pipeline error if every session refuses.
+  let lastAtCap: { session: typeof eligibleSessions[number]; used: number; cap: number } | null = null;
+
+  for (const session of eligibleSessions) {
+    // Even if the DB says connected=true, the in-memory socket map is the
+    // source of truth — a crashed/restarted process leaves orphan rows that
+    // would otherwise consume dispatches into a dead Redis subscriber.
+    if (!hasLiveExtensionSocket(session.id)) {
+      await withTenant(tenantId, async (tx) => {
+        await tx
+          .update(extensionSessions)
+          .set({ connected: false, updatedAt: new Date() })
+          .where(eq(extensionSessions.id, session.id));
+      });
+      logger.warn(
+        { sessionId: session.id, tenantId },
+        'self_healed_orphan_session_no_live_socket',
+      );
+      continue;
+    }
+
+    // Per-session daily-cap check. Reset counters if dailyResetAt older than 24h.
+    const resetAt = session.dailyResetAt ? new Date(session.dailyResetAt) : new Date(0);
+    const needsReset = now.getTime() - resetAt.getTime() > 24 * 60 * 60 * 1000;
+    const counts: Record<string, number> = needsReset
+      ? {}
+      : { ...((session.dailyTasksCount as Record<string, number>) ?? {}) };
+    const used = counts[key] ?? 0;
+    if (limit && used >= limit.dailyCap) {
+      lastAtCap = { session, used, cap: limit.dailyCap };
+      continue;
+    }
+
+    // Acquired a slot on this session. Mark dispatched + bump counter.
     counts[key] = used + 1;
-    await tx
-      .update(extensionSessions)
-      .set({
-        dailyTasksCount: counts,
-        dailyResetAt: needsReset ? now : session.dailyResetAt,
-        updatedAt: now,
-      })
-      .where(eq(extensionSessions.id, session.id));
-  });
+    await withTenant(tenantId, async (tx) => {
+      await tx
+        .update(extensionTasks)
+        .set({
+          status: 'dispatched',
+          sessionId: session.id,
+          dispatchedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(extensionTasks.id, task.id));
 
-  // Publish to the extension's Redis channel
-  const payload = JSON.stringify({
-    type: 'task',
-    taskId: task.id,
-    site: task.site,
-    taskType: task.type,
-    params: task.params,
-    requestedAt: now.toISOString(),
-    masterAgentId: task.masterAgentId ?? null,
-    masterAgentName,
-  });
-  await pubRedis.publish(`extension-dispatch:${session.id}`, payload);
+      await tx
+        .update(extensionSessions)
+        .set({
+          dailyTasksCount: counts,
+          dailyResetAt: needsReset ? now : session.dailyResetAt,
+          updatedAt: now,
+        })
+        .where(eq(extensionSessions.id, session.id));
+    });
 
-  logger.info({ taskId: task.id, tenantId, sessionId: session.id, site: task.site, type: task.type }, 'Extension task dispatched');
-  return true;
+    const payload = JSON.stringify({
+      type: 'task',
+      taskId: task.id,
+      // Carried per-task so multi-workspace sessions can echo it back on
+      // task_result and so the popup can attribute work to the right workspace.
+      // Result-routing on the server still goes through the DB lookup as a
+      // safety net (see onExtensionTaskComplete), so this field is advisory.
+      tenantId,
+      site: task.site,
+      taskType: task.type,
+      params: task.params,
+      requestedAt: now.toISOString(),
+      masterAgentId: task.masterAgentId ?? null,
+      masterAgentName,
+    });
+    await pubRedis.publish(`extension-dispatch:${session.id}`, payload);
+
+    logger.info({ taskId: task.id, tenantId, sessionId: session.id, site: task.site, type: task.type }, 'Extension task dispatched');
+    return true;
+  }
+
+  // No session accepted. If at least one was at cap, surface a real-reset
+  // pipeline error rather than the misleading static "Pausing for 1 hour".
+  if (lastAtCap) {
+    const baseResetAt = lastAtCap.session.dailyResetAt
+      ? new Date(lastAtCap.session.dailyResetAt)
+      : null;
+    const nextResetAt = baseResetAt ? new Date(baseResetAt.getTime() + 24 * 60 * 60 * 1000) : null;
+    logger.info(
+      {
+        taskId, tenantId, site: task.site, type: task.type,
+        used: lastAtCap.used, cap: lastAtCap.cap,
+        sessionCount: eligibleSessions.length,
+      },
+      'all_sessions_at_cap',
+    );
+    if (task.site === 'linkedin') {
+      await logPipelineError({
+        tenantId,
+        masterAgentId: task.masterAgentId ?? null,
+        step: 'extension.dispatch',
+        tool: 'LINKEDIN_EXTENSION',
+        errorType: 'linkedin_rate_limit',
+        message: formatRateLimitMessage(nextResetAt),
+        context: {
+          taskId, site: task.site, type: task.type,
+          used: lastAtCap.used, cap: lastAtCap.cap,
+          sessionCount: eligibleSessions.length,
+          nextResetAt: nextResetAt?.toISOString() ?? null,
+        },
+      });
+    }
+  }
+  return false;
 }
 
 // ─── Drain on reconnect ─────────────────────────────────────────────────────
@@ -328,6 +571,47 @@ export async function drainPending(tenantId: string, sessionId: string): Promise
   }
   if (dispatched > 0) {
     logger.info({ tenantId, sessionId, dispatched, total: pending.length }, 'Drained pending extension tasks on reconnect');
+  }
+  return dispatched;
+}
+
+// Multi-workspace drain: pulls the oldest pending tasks across every tenant
+// the session's user is a member of and dispatches each one through the
+// regular per-tenant tryDispatch (which itself now allows tenant-less
+// sessions). One JOIN, fair cross-workspace ordering by created_at.
+export async function drainPendingForUser(userId: string, sessionId: string): Promise<number> {
+  if (!env.ENABLE_MULTI_WORKSPACE_DISPATCH) {
+    // Flag-off rollback: tenant-less sessions can't drain anything in this
+    // mode, but they shouldn't exist either (the dispatcher and login code
+    // both gate on the same flag in practice). Logged so we notice if it
+    // ever happens.
+    logger.warn({ sessionId, userId }, 'drainPendingForUser called with multi-workspace flag OFF — no-op');
+    return 0;
+  }
+
+  const pending = await db
+    .select({ id: extensionTasks.id, tenantId: extensionTasks.tenantId })
+    .from(extensionTasks)
+    .innerJoin(userTenants, eq(userTenants.tenantId, extensionTasks.tenantId))
+    .where(and(
+      eq(userTenants.userId, userId),
+      inArray(userTenants.role, ['owner', 'admin', 'member']),
+      eq(extensionTasks.status, 'pending'),
+      lte(extensionTasks.dispatchAfter, new Date()),
+    ))
+    .orderBy(desc(extensionTasks.priority), asc(extensionTasks.createdAt))
+    .limit(50);
+
+  let dispatched = 0;
+  for (const row of pending) {
+    const ok = await tryDispatch(row.tenantId, row.id);
+    if (ok) dispatched++;
+  }
+  if (pending.length > 0) {
+    logger.info(
+      { userId, sessionId, dispatched, total: pending.length, tenants: [...new Set(pending.map((p) => p.tenantId))].length },
+      'Drained pending extension tasks on reconnect (multi-workspace)',
+    );
   }
   return dispatched;
 }
@@ -385,6 +669,47 @@ export function stopScheduledDispatcher(): void {
   if (scheduledDrainerInterval) {
     clearInterval(scheduledDrainerInterval);
     scheduledDrainerInterval = null;
+  }
+}
+
+// ─── Stuck-dispatched watchdog ──────────────────────────────────────────────
+// A task is marked `dispatched` the moment we publish to Redis, but if the
+// extension's WS dies between publish and ack, no `task_result` ever comes
+// back — the row sits in `dispatched` forever and the queue silently shrinks
+// to zero throughput. This watchdog re-pends anything that's been dispatched
+// for more than 5 minutes so the next drainer cycle gives it another chance.
+
+let stuckWatchdogInterval: NodeJS.Timeout | null = null;
+
+export async function rePendStuckDispatched(): Promise<number> {
+  const cutoff = new Date(Date.now() - 5 * 60_000);
+  const { db } = await import('../config/database.js');
+  const res = await db
+    .update(extensionTasks)
+    .set({ status: 'pending', sessionId: null, dispatchedAt: null, updatedAt: new Date() })
+    .where(and(eq(extensionTasks.status, 'dispatched'), lte(extensionTasks.dispatchedAt, cutoff)))
+    .returning({ id: extensionTasks.id });
+  if (res.length > 0) {
+    logger.warn({ count: res.length }, 're_pended_stuck_dispatched_tasks');
+  }
+  return res.length;
+}
+
+export function startStuckDispatchedWatchdog(intervalMs = 60_000): void {
+  if (stuckWatchdogInterval) return;
+  stuckWatchdogInterval = setInterval(() => {
+    rePendStuckDispatched().catch((err) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Stuck-dispatched watchdog errored');
+    });
+  }, intervalMs);
+  stuckWatchdogInterval.unref?.();
+  logger.info({ intervalMs }, 'Stuck-dispatched watchdog started');
+}
+
+export function stopStuckDispatchedWatchdog(): void {
+  if (stuckWatchdogInterval) {
+    clearInterval(stuckWatchdogInterval);
+    stuckWatchdogInterval = null;
   }
 }
 
@@ -635,25 +960,28 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     const requestedRegions =
       ((task.params as { geographyFilter?: { regions?: string[] } })?.geographyFilter?.regions ?? [])
         .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
-    let droppedGeoMismatch = 0;
+    let geoFlagged = 0;
     for (const c of rawCompanies) {
       const name = String(c.name ?? '').trim();
       if (!name || name.length < 2) continue;
 
       // Geo filter — LinkedIn's `companyHqGeo` is a soft facet that leaks
-      // globally-relevant matches when keywords are strong. Drop any company
-      // whose extracted `location` clearly falls outside the requested
-      // regions. Empty location passes through (fetch_company_info will fill
-      // `headquarters` and a future pass can re-evaluate).
+      // globally-relevant matches when keywords are strong. We no longer DROP
+      // mismatches (the search adapter's `location` field is unreliable — it
+      // sometimes contains a description snippet rather than a city). Instead
+      // we annotate the row so the dashboard can render an "out of region"
+      // tag, and let fetch_company_info populate the real headquarters for a
+      // post-enrichment pass to re-evaluate.
+      let geoMismatch: { expected: string[]; got: string } | null = null;
       if (requestedRegions.length > 0) {
         const cLocation = typeof c.location === 'string' ? c.location : '';
-        if (!isLocationInRegions(cLocation, requestedRegions)) {
-          droppedGeoMismatch++;
+        if (cLocation && !isLocationInRegions(cLocation, requestedRegions)) {
+          geoMismatch = { expected: requestedRegions, got: cLocation };
+          geoFlagged++;
           logger.info(
             { taskId: task.id, name, location: cLocation, requestedRegions },
-            'discovery_dropped_geo_mismatch',
+            'discovery_geo_mismatch_flagged',
           );
-          continue;
         }
       }
 
@@ -664,7 +992,9 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       // preserves enriched fields (description, website, funding) that an
       // earlier fetch_company run may already have populated on the existing
       // row — the search-result payload is strictly slimmer.
-      const linkedinUrl = typeof c.linkedinUrl === 'string' ? c.linkedinUrl : undefined;
+      const linkedinUrl = typeof c.linkedinUrl === 'string' && c.linkedinUrl.trim().length > 0
+        ? c.linkedinUrl
+        : undefined;
       if (linkedinUrl) {
         const [existing] = await withTenant(task.tenantId, async (tx) => {
           return tx
@@ -696,7 +1026,11 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
             industry: (c.industry as string) ?? undefined,
             size: (c.size as string) ?? undefined,
             linkedinUrl,
-            rawData: { source: 'linkedin_extension', ...c },
+            rawData: {
+              source: 'linkedin_extension',
+              ...c,
+              ...(geoMismatch ? { geoMismatch } : {}),
+            },
           },
           task.masterAgentId ?? undefined,
         );
@@ -721,29 +1055,15 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     }
 
     if (pendingFetchTasks.length > 0) {
-      // Parallel fanout: per company URL, enqueue BOTH fetch_company_info
-      // (about page → industry/size/HQ/description) AND fetch_company_team
-      // (people page → people array). They run independently — one failing
-      // does not block the other. The fit-score worker re-runs whenever
-      // either completes so the score progressively refines.
+      // Parallel fanout: per company, enqueue fetch_company_info (about page)
+      // + one fetch_company_team per teamRoleKeyword. Shared with the
+      // LinkedIn-Jobs path — see enqueueCompanyEnrichmentFanout.
       try {
-        const fanoutTasks = pendingFetchTasks.flatMap((t) => [
-          {
-            masterAgentId: task.masterAgentId ?? undefined,
-            site: 'linkedin' as const,
-            type: 'fetch_company_info' as const,
-            params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
-            priority: 3,
-          },
-          {
-            masterAgentId: task.masterAgentId ?? undefined,
-            site: 'linkedin' as const,
-            type: 'fetch_company_team' as const,
-            params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
-            priority: 3,
-          },
-        ]);
-        await enqueueExtensionTaskBatch(task.tenantId, fanoutTasks);
+        await enqueueCompanyEnrichmentFanout(
+          task.tenantId,
+          task.masterAgentId ?? undefined,
+          pendingFetchTasks,
+        );
       } catch (err) {
         logger.warn(
           { err: err instanceof Error ? err.message : String(err), count: pendingFetchTasks.length, taskId: task.id },
@@ -758,7 +1078,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         masterAgentId: task.masterAgentId,
         rawResultCount: rawCompanies.length,
         saved,
-        droppedGeoMismatch,
+        geoFlagged,
         requestedRegions,
       },
       'discovery_saved_summary',
@@ -795,30 +1115,77 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
 
   if (site === 'gmaps') {
     const items = (result.businesses ?? (type === 'fetch_business' ? [result] : [])) as Array<Record<string, unknown>>;
+    const params = (task.params ?? {}) as Record<string, unknown>;
     let saved = 0;
+    const detailFanout: BatchTaskInput[] = [];
     for (const b of items) {
       const name = String(b.name ?? '').trim();
       if (!name) continue;
+      const mapsUrl = typeof b.mapsUrl === 'string' ? b.mapsUrl : undefined;
+      const isDetail = type === 'fetch_business';
       try {
-        const savedRow = await saveOrUpdateCompanyStatic(
-          task.tenantId,
-          {
-            name,
-            domain: typeof b.website === 'string' ? extractDomain(b.website) : undefined,
-            rawData: { source: 'gmaps_extension', ...b },
-          },
-          task.masterAgentId ?? undefined,
-        );
-        if (type === 'search_businesses') {
-          await dispatchJob(task.tenantId, 'enrichment', {
-            companyId: savedRow.id,
+        // Shared with POST /api/extension/gmaps/capture — creates company +
+        // business-contact + Lead-stage deal and dispatches enrichment when
+        // the business has a website (Maps never shows emails).
+        const ingest = await ingestGmapsBusiness(task.tenantId, task.masterAgentId ?? undefined, {
+          name,
+          category: typeof b.category === 'string' ? b.category : undefined,
+          address: typeof b.address === 'string' ? b.address : undefined,
+          phone: typeof b.phone === 'string' ? b.phone : undefined,
+          website: typeof b.website === 'string' ? b.website : undefined,
+          rating: typeof b.rating === 'number' ? b.rating : null,
+          reviewCount: typeof b.reviewCount === 'number' ? b.reviewCount : null,
+          reviewsCount: typeof b.reviewsCount === 'number' ? b.reviewsCount : null,
+          mapsUrl,
+          searchQuery: typeof params.query === 'string' ? params.query : undefined,
+          location: typeof params.location === 'string' ? params.location : undefined,
+          // Place-detail-only fields (present on fetch_business results).
+          hours: (typeof b.hours === 'string' || (b.hours && typeof b.hours === 'object'))
+            ? (b.hours as string | Record<string, string>) : undefined,
+          priceLevel: typeof b.priceLevel === 'string' ? b.priceLevel : undefined,
+          description: typeof b.description === 'string' ? b.description : undefined,
+          serviceOptions: Array.isArray(b.serviceOptions) ? (b.serviceOptions as string[]) : undefined,
+          plusCode: typeof b.plusCode === 'string' ? b.plusCode : undefined,
+          coordinates: (b.coordinates && typeof b.coordinates === 'object')
+            ? (b.coordinates as { lat: number; lng: number }) : undefined,
+          menuLink: typeof b.menuLink === 'string' ? b.menuLink : undefined,
+          photoUrls: Array.isArray(b.photoUrls) ? (b.photoUrls as string[]) : undefined,
+          pricePerPerson: typeof b.pricePerPerson === 'string' ? b.pricePerPerson : undefined,
+          directionsUrl: typeof b.directionsUrl === 'string' ? b.directionsUrl : undefined,
+          reviewsHtml: typeof b.reviewsHtml === 'string' ? b.reviewsHtml : undefined,
+          ratingDistribution: Array.isArray(b.ratingDistribution)
+            ? (b.ratingDistribution as Array<{ label: string }>) : undefined,
+          aboutHtml: typeof b.aboutHtml === 'string' ? b.aboutHtml : undefined,
+          detailFetched: isDetail,
+        });
+        saved++;
+        // Every business with a place URL gets one place-detail scrape (it has
+        // phone/hours/menu the search card lacks). Fan out a fetch_business when
+        // ingest reports the row still needs detailing — a fetch_business result
+        // has detailFetched=true (needsDetail=false), so it never fans out from
+        // itself. The completion re-enters ingest, backfilling the contact and
+        // dispatching enrichment for a newly-known website + menu vision.
+        if (ingest.needsDetail && mapsUrl) {
+          detailFanout.push({
             masterAgentId: task.masterAgentId ?? undefined,
-            source: 'gmaps_extension',
+            site: 'gmaps',
+            type: 'fetch_business',
+            params: { mapsUrl },
+            priority: 6,
           });
         }
-        saved++;
       } catch (err) {
         logger.debug({ err, name }, 'Skipped invalid gmaps business');
+      }
+    }
+    if (detailFanout.length > 0) {
+      try {
+        await enqueueExtensionTaskBatch(task.tenantId, detailFanout);
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err), count: detailFanout.length, taskId: task.id },
+          'gmaps fetch_business fanout enqueue failed (non-fatal)',
+        );
       }
     }
     return { extracted: items.length, saved };
@@ -962,6 +1329,43 @@ function rankPeopleByTitle<T extends { title: string }>(people: readonly T[]): T
   return [...people].sort((a, b) => scorePersonTitle(b.title) - scorePersonTitle(a.title));
 }
 
+/**
+ * Merge a new keyword-scoped people batch into the existing
+ * companies.rawData. Returns both the per-keyword map and a deduped flat
+ * list (by linkedinUrl, falling back to lowercased name) for backwards
+ * compatibility with readers that expect `rawData.people` as a flat array.
+ */
+function mergePeopleByKeyword(
+  existingFlat: unknown,
+  existingByKeyword: Record<string, unknown>,
+  bucketKey: string,
+  newPeople: Array<{ name: string; title: string; linkedinUrl: string }>,
+): { byKeyword: Record<string, typeof newPeople>; flat: typeof newPeople } {
+  const byKeyword: Record<string, typeof newPeople> = {};
+  for (const [k, v] of Object.entries(existingByKeyword)) {
+    if (Array.isArray(v)) byKeyword[k] = v as typeof newPeople;
+  }
+  byKeyword[bucketKey] = newPeople;
+
+  // Build a deduped union across all buckets, falling back on the legacy
+  // flat list if the byKeyword map is otherwise empty.
+  const seen = new Set<string>();
+  const flat: typeof newPeople = [];
+  const pushUnique = (p: { name: string; title: string; linkedinUrl: string }) => {
+    const id = (p.linkedinUrl || '').toLowerCase().trim() || (p.name || '').toLowerCase().trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    flat.push(p);
+  };
+  for (const list of Object.values(byKeyword)) {
+    for (const p of list) pushUnique(p);
+  }
+  if (flat.length === 0 && Array.isArray(existingFlat)) {
+    for (const p of existingFlat as typeof newPeople) pushUnique(p);
+  }
+  return { byKeyword, flat };
+}
+
 function extractDomain(url: string): string | undefined {
   try {
     const u = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -985,7 +1389,21 @@ export async function markSessionConnected(sessionId: string, connected: boolean
     .where(eq(extensionSessions.id, sessionId));
 }
 
-export async function findSessionByApiKeyHash(apiKeyHash: string): Promise<{ id: string; tenantId: string; userId: string } | null> {
+// Touch lastSeenAt only — used as a real liveness signal from the WS ping
+// handler so stale lastSeenAt actually means the SW is dead, not just that
+// no reconnect happened. Caller throttles to ≤1 write per 10s per session.
+export async function touchSessionLastSeen(sessionId: string): Promise<void> {
+  const { db } = await import('../config/database.js');
+  await db
+    .update(extensionSessions)
+    .set({ lastSeenAt: new Date(), updatedAt: new Date() })
+    .where(eq(extensionSessions.id, sessionId));
+}
+
+// tenantId is null for multi-workspace sessions (post-0029 migration); the
+// dispatcher uses userId + user_tenants to fan out across the user's
+// workspaces. Legacy per-tenant sessions still carry a non-null tenantId.
+export async function findSessionByApiKeyHash(apiKeyHash: string): Promise<{ id: string; tenantId: string | null; userId: string } | null> {
   const { db } = await import('../config/database.js');
   const [row] = await db
     .select({
@@ -1101,8 +1519,15 @@ async function handleCompanyTeamComplete(
   task: ExtensionTask,
   c: Record<string, unknown>,
 ): Promise<{ extracted: number; saved: number }> {
-  const p = task.params as { linkedinUrl?: string; companyId?: string };
+  const p = task.params as { linkedinUrl?: string; companyId?: string; keyword?: string };
   const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
+  const taskKeyword = (typeof p.keyword === 'string' && p.keyword.trim()) ? p.keyword.trim() : null;
+  // Defensive: also accept the extension echoing the keyword back on the
+  // result payload — useful if dispatcher → extension param plumbing ever
+  // drifts.
+  const resultKeyword = (typeof c.keyword === 'string' && c.keyword.trim()) ? c.keyword.trim() : null;
+  const keyword = taskKeyword ?? resultKeyword;
+  const bucketKey = keyword ?? '__legacy__';
 
   // Find the target company row. Direct-merge into rawData; we deliberately
   // do NOT go through saveOrUpdateCompanyStatic because that helper requires
@@ -1123,10 +1548,16 @@ async function handleCompanyTeamComplete(
     if (!row) return null;
 
     const existingRaw = (row.rawData ?? {}) as Record<string, unknown>;
+    const existingByKeyword = (existingRaw.peopleByKeyword as Record<string, unknown> | undefined) ?? {};
+    const mergedPeople = mergePeopleByKeyword(existingRaw.people, existingByKeyword, bucketKey, rawPeople);
+
     const [updated] = await tx.update(companies).set({
       rawData: {
         ...existingRaw,
-        people: rawPeople,
+        // Keep `people` populated with the deduped union for backwards
+        // compatibility with anything reading the flat list.
+        people: mergedPeople.flat,
+        peopleByKeyword: mergedPeople.byKeyword,
         teamFetchedAt: new Date().toISOString(),
       },
       updatedAt: new Date(),
@@ -1135,16 +1566,17 @@ async function handleCompanyTeamComplete(
   });
 
   if (!savedCompany) {
-    logger.warn({ taskId: task.id, companyId: p.companyId, linkedinUrl: p.linkedinUrl }, 'fetch_company_team: no target company row found');
+    logger.warn({ taskId: task.id, companyId: p.companyId, linkedinUrl: p.linkedinUrl, keyword }, 'fetch_company_team: no target company row found');
     return { extracted: rawPeople.length, saved: 0 };
   }
 
-  // Save the top 3 KEY persons from LinkedIn — same logic as the legacy
-  // fetch_company branch. Preserved verbatim so existing outreach behaviour
-  // is unchanged.
+  // With keyword-scoped fetches the candidate pool is already role-filtered,
+  // so the title-score ranking is just a tiebreaker. Save up to 5 per
+  // keyword fetch (was 3 in the unfiltered world) since each fetch returns
+  // intentionally targeted hits.
   const rankedPeople = rankPeopleByTitle(rawPeople);
   let savedCount = 0;
-  for (const person of rankedPeople.slice(0, 3)) {
+  for (const person of rankedPeople.slice(0, 5)) {
     const cleanName = sanitizePersonName(person.name);
     if (!cleanName) {
       logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');
@@ -1200,12 +1632,51 @@ async function handleCompanyTeamComplete(
           companyId: savedCompany.id,
           companyName: savedCompany.name,
           source: 'linkedin_profile',
+          // New Sales Operations source-type vocabulary, in parallel with the
+          // legacy `source` enum above. New code reads source_type.
+          sourceType: 'ai_discovery',
+          sourceMetadata: { discoverySource: 'linkedin_extension_people' },
           rawData: { discoverySource: 'linkedin_extension_people', ...person },
         }).returning({ id: contacts.id });
       });
 
       if (inserted) {
         savedCount++;
+        // Mirror the contact to prospect_stages so the Stage 2 detail page +
+        // Stage 3 triage worker see a row. Best-effort; failure is non-fatal.
+        try {
+          await withTenant(task.tenantId, async (tx) => {
+            await tx.insert(prospectStages).values({
+              contactId: inserted.id,
+              tenantId: task.tenantId,
+              currentStage: 'new',
+            }).onConflictDoNothing();
+          });
+        } catch (err) {
+          logger.debug({ err, contactId: inserted.id }, 'Failed to seed prospect_stages for AI-discovered contact (non-fatal)');
+        }
+        // Append a timeline event so the contact's history shows where
+        // they came from. Best-effort; failure must not abort the dispatch.
+        try {
+          await logEvent({
+            tenantId: task.tenantId,
+            contactId: inserted.id,
+            type: 'contact_added',
+            eventCategory: 'discovery',
+            actorType: 'system',
+            masterAgentId: task.masterAgentId ?? undefined,
+            title: 'Discovered via LinkedIn team scan',
+            metadata: {
+              sourceType: 'ai_discovery',
+              discoverySource: 'linkedin_extension_people',
+              companyId: savedCompany.id,
+              companyName: savedCompany.name,
+              taskId: task.id,
+            },
+          });
+        } catch (err) {
+          logger.debug({ err, contactId: inserted.id }, 'Failed to log contact_added event (non-fatal)');
+        }
         if (task.masterAgentId) {
           try {
             await dispatchJob(task.tenantId, 'enrichment', {

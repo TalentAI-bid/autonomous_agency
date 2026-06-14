@@ -9,7 +9,12 @@ export const AGENT_TYPES = [
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
-export type QueueType = AgentType | 'dead-letter';
+// Non-agent queue types (orchestration, not tied to the agent_configs.agent_type
+// enum). 'triage' was added for Sales Ops Stage 3; it's not an agent in the
+// traditional sense — it has no agent_config row and doesn't go through
+// createTaskRecord. Keep it separate so the agent-enum-typed call sites
+// don't widen and break.
+export type QueueType = AgentType | 'dead-letter' | 'triage';
 
 /** Default job options per agent type */
 export const QUEUE_CONFIGS: Record<QueueType, {
@@ -84,6 +89,10 @@ export const QUEUE_CONFIGS: Record<QueueType, {
   linkedin: {
     defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 15000 } },
     concurrency: 2,
+  },
+  triage: {
+    defaultJobOptions: { attempts: 2, backoff: { type: 'exponential', delay: 30000 } },
+    concurrency: 1,
   },
   'dead-letter': {
     defaultJobOptions: { attempts: 1, backoff: { type: 'fixed', delay: 0 } },

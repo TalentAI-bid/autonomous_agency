@@ -252,19 +252,59 @@
     return after;
   }
 
+  // Shared filters across the multi-priority cascade. Kept outside the
+  // loops so Priority 1 and Priority 1.5 apply identical rules.
+  function isMetaCompanyLine(text) {
+    // "Acme · 12,345 followers" / "Acme · 2,500 employés" / French/EN variants.
+    // Must have both a · AND a numeric-or-followers token; a plain
+    // "Title · Subtitle" headline must NOT trip this.
+    return /·/.test(text)
+      && /\b(\d{1,3}(?:[.,]\d{3})*\+?|followers?|connections?|abonné|relation)\b/i.test(text);
+  }
+  function isLikelyLocation(text) {
+    // "London, England" / "San Francisco, CA". Requires a comma separator
+    // AND no role-y preposition. Cap at 40 chars to be conservative.
+    return /^[A-Za-zÀ-ÿ\s.,'-]+$/.test(text)
+      && text.length < 40
+      && /,/.test(text)
+      && !/\b(at|@|chez|bei|en)\b/i.test(text);
+  }
+
   function readHeadline() {
     // Priority 1: first non-junk <p> sibling in the top card after the name.
     const ps = topCardParagraphs();
     for (const p of ps) {
       const text = (p.innerText || p.textContent || '').trim().replace(/\s+/g, ' ');
       if (looksLikeJunkText(text)) continue;
-      // Skip the "Company · School" line — usually has a dot-separator and
-      // is short. The headline is usually the longest descriptive line.
-      if (/·/.test(text) && text.length < 120) continue;
-      // Skip pure location strings like "United States" or "City, Country"
-      if (/^[A-Za-zÀ-ÿ\s.,'-]+$/.test(text) && text.length < 50 && !/\b\w{6,}\b/.test(text)) continue;
+      if (isMetaCompanyLine(text)) continue;
+      if (isLikelyLocation(text)) continue;
       console.log(LOG, 'readHeadline: matched top-card <p>', text);
       return text;
+    }
+
+    // Priority 1.5: 2026 layout often puts the headline in a <div> or
+    // <span>, not a <p>. Walk text-bearing children of the top-card
+    // container that come after the name heading. Skip ancestors of the
+    // name (their flattened text would be the whole card).
+    const nameHeading = findNameHeading();
+    if (nameHeading) {
+      const container = findTopCardContainer(nameHeading);
+      if (container) {
+        const candidates = [...container.querySelectorAll('div, span')].filter((el) => {
+          if (!(nameHeading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
+          if (el.contains(nameHeading)) return false;
+          const own = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+          return own.length >= 5 && own.length <= 200;
+        });
+        for (const el of candidates) {
+          const text = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+          if (looksLikeJunkText(text)) continue;
+          if (isMetaCompanyLine(text)) continue;
+          if (isLikelyLocation(text)) continue;
+          console.log(LOG, 'readHeadline: matched top-card div/span', text);
+          return text;
+        }
+      }
     }
 
     // Priority 2: legacy class selectors for older LinkedIn layouts.
@@ -286,7 +326,14 @@
         return text;
       }
     }
-    console.warn(LOG, 'readHeadline: no headline found');
+    // Diagnostic dump: when every priority misses, the DOM is the
+    // ground truth. Truncated outerHTML pasted back tells us exactly
+    // which selector to add next.
+    const _heading = findNameHeading();
+    const _container = _heading ? findTopCardContainer(_heading) : null;
+    console.warn(LOG, 'readHeadline: no headline found', {
+      topCardHTML: _container ? (_container.outerHTML || '').slice(0, 1500) : '(no top-card container)',
+    });
     return '';
   }
 
@@ -676,7 +723,7 @@
   // ─── Widget render ───────────────────────────────────────────────────────
 
   function buildWidget(state) {
-    const { profile, signedIn, dashboardUrl } = state;
+    const { profile, signedIn, dashboardUrl, lookup } = state;
     const wrap = document.createElement('div');
     wrap.id = WIDGET_ID;
 
@@ -692,10 +739,47 @@
       ? escapeHtml(headlineParts.join(' · '))
       : '<span class="tai-skeleton">—</span>';
 
+    // ─── Already-in-pipeline state ───────────────────────────────────
+    // Sales Operations Platform — Stage 1: a lookup hit means this
+    // contact was added already (via dashboard, AI discovery, or a
+    // previous capture). Show a green status badge instead of the form.
+    if (signedIn && lookup && lookup.exists) {
+      const stageLabel = lookup.currentStage ? ` · stage: ${escapeHtml(lookup.currentStage)}` : '';
+      const dashboardLink = dashboardUrl && lookup.contactId
+        ? `<a href="${dashboardUrl}/prospects/${lookup.contactId}" target="_blank">Open in dashboard ↗</a>`
+        : '';
+      wrap.innerHTML = `
+        <div class="tai-header" style="background:linear-gradient(135deg,#1a7f37 0%,#136127 100%)">
+          <strong>TalentAI · In Pipeline</strong>
+          <button type="button" class="tai-close" aria-label="Dismiss">×</button>
+        </div>
+        <div class="tai-body">
+          <div class="tai-row">
+            <div class="tai-avatar" style="background:#1a7f37">${escapeHtml(initials(profile.name))}</div>
+            <div style="min-width:0;flex:1">
+              <div class="tai-name">${nameDisplay}</div>
+              <div class="tai-headline">${headlineDisplay}${stageLabel}</div>
+            </div>
+          </div>
+          <div class="tai-result tai-ok" style="display:block">
+            ✅ Already in your pipeline${stageLabel}.<br/>${dashboardLink}
+          </div>
+        </div>
+      `;
+      wrap.querySelector('.tai-close').addEventListener('click', () => {
+        try { sessionStorage.setItem(SESSION_DISMISS_KEY, '1'); } catch (_) {}
+        wrap.remove();
+        mounted = false;
+      });
+      return wrap;
+    }
+
+    // ─── Capture form state ──────────────────────────────────────────
+
     // Surface what's missing so the user knows BEFORE saving.
     const hints = [];
     if (!profile.title) hints.push('No role detected — will save without a title.');
-    if (!profile.companyName) hints.push('No company detected — will auto-route to your most active agent.');
+    if (!profile.companyName) hints.push('No company detected — will save without a company.');
     const hintsHtml = hints.length
       ? `<div class="tai-hint">${hints.map(escapeHtml).join('<br/>')}</div>`
       : '';
@@ -704,7 +788,7 @@
 
     wrap.innerHTML = `
       <div class="tai-header">
-        <strong>TalentAI · Add to CRM</strong>
+        <strong>TalentAI · Add to Pipeline</strong>
         <button type="button" class="tai-close" aria-label="Dismiss">×</button>
       </div>
       <div class="tai-body">
@@ -717,14 +801,16 @@
           </div>
         </div>
         ${hintsHtml}
-        <div class="tai-route-note">Linked to every one of your agents that has this company. New companies go to your most active agent.</div>
-        <button type="button" class="tai-primary" ${canSubmit ? '' : 'disabled'}>+ Add to CRM</button>
+        <div class="tai-route-note">Adds to every agent whose company matches.</div>
+        <button type="button" class="tai-primary" data-action="add" ${canSubmit ? '' : 'disabled'}>💾 Add to company</button>
+        <button type="button" class="tai-primary" data-action="connected" ${canSubmit ? '' : 'disabled'}>🤝 Connected</button>
+        <button type="button" class="tai-primary" data-action="accepted_lead" ${canSubmit ? '' : 'disabled'}>✅ Accepted lead</button>
         <div class="tai-result"></div>
       </div>
     `;
 
     const closeBtn = wrap.querySelector('.tai-close');
-    const submit = wrap.querySelector('button.tai-primary');
+    const actionBtns = Array.from(wrap.querySelectorAll('button.tai-primary[data-action]'));
     const resultBox = wrap.querySelector('.tai-result');
 
     closeBtn.addEventListener('click', () => {
@@ -734,69 +820,77 @@
       console.log(LOG, 'dismissed by user');
     });
 
-    submit.addEventListener('click', async () => {
-      submit.disabled = true;
-      submit.textContent = 'Saving…';
+    // All three actions route through manual_add_profile → POST
+    // /api/extension/contacts/manual, which links the person to EVERY agent
+    // whose company matches (creating the company under the most-active agent
+    // when none match). `action` decides the post-link effect:
+    //   add → just link · connected → log connection-accepted · accepted_lead → mark qualified.
+    const ACTION_LABELS = {
+      add: '💾 Add to company',
+      connected: '🤝 Connected',
+      accepted_lead: '✅ Accepted lead',
+    };
+
+    const runAction = async (action, btn) => {
+      actionBtns.forEach((b) => { b.disabled = true; });
+      const origLabel = ACTION_LABELS[action] ?? btn.textContent;
+      btn.textContent = 'Saving…';
       resultBox.className = 'tai-result';
       resultBox.textContent = '';
 
       try {
         const fresh = scrapeProfile();
-        // No masterAgentId — backend auto-picks based on company match
-        // (priority 1) or most-active agent (priority 2).
-        const payload = { ...fresh };
-        if (!payload.name) throw new Error('Could not read name from profile');
-        console.log(LOG, 'saving', payload);
-        const res = await chrome.runtime.sendMessage({ kind: 'manual_add_profile', payload });
-        if (!res || !res.ok) throw new Error(res?.error || 'Save failed');
+        if (!fresh.name) throw new Error('Could not read name from profile');
 
-        const reasonLabel = {
-          company_match: 'matched existing company',
-          most_active: 'auto-picked your most active agent',
-          oldest: 'first agent (no activity yet)',
-          override: 'requested',
+        // The manual endpoint expects `companyName` (not `company`).
+        const payload = {
+          name: fresh.name,
+          title: fresh.title || undefined,
+          companyName: fresh.companyName || undefined,
+          linkedinUrl: fresh.linkedinUrl,
+          action,
         };
-
-        const rows = Array.isArray(res.rows) ? res.rows : [];
-        const roleLine = `Role: ${escapeHtml(payload.title || '—')}`;
-        const companyLine = `Company: ${escapeHtml(payload.companyName || 'not detected')}`;
-
-        let agentBlock = '';
-        if (rows.length > 1) {
-          // Fan-out: list every agent it landed under.
-          const items = rows.map((r) => {
-            const tag = `<span class="tai-route-tag">${escapeHtml(reasonLabel[r.reason] || 'auto-routed')}</span>`;
-            const dedupTag = r.dedup ? ' <span class="tai-route-tag" style="background:#eaeef2;color:#57606a">dedup</span>' : '';
-            return `<li>${escapeHtml(r.agentName)} ${tag}${dedupTag}</li>`;
-          }).join('');
-          agentBlock = `Linked to ${rows.length} agents:<ul style="margin:4px 0 0 16px;padding:0">${items}</ul>`;
-        } else if (rows.length === 1) {
-          const r = rows[0];
-          const tag = `<span class="tai-route-tag">${escapeHtml(reasonLabel[r.reason] || 'auto-routed')}</span>`;
-          agentBlock = `Agent: ${escapeHtml(r.agentName)} ${tag}`;
-        } else if (res.masterAgentName) {
-          // Backward-compat with older backend response shape
-          const tag = `<span class="tai-route-tag">${escapeHtml(reasonLabel[res.routeReason] || 'auto-routed')}</span>`;
-          agentBlock = `Agent: ${escapeHtml(res.masterAgentName)} ${tag}`;
+        console.log(LOG, 'manual_add_profile', payload);
+        const res = await safeSendMessage({ kind: 'manual_add_profile', payload });
+        if (!res || !res.ok) {
+          const err = new Error(res?.error || 'Save failed');
+          err.status = res?.status;
+          throw err;
         }
 
+        const rows = Array.isArray(res.rows) ? res.rows : [];
+        const agentNames = rows.map((r) => r.agentName).filter(Boolean);
+        const n = rows.length;
+        const where = agentNames.length ? ` (${escapeHtml(agentNames.join(', '))})` : '';
         const dashboardLink = dashboardUrl && res.contactId
-          ? `<a href="${dashboardUrl}/contacts/${res.contactId}" target="_blank">View in dashboard ↗</a>`
+          ? `<br/><a href="${dashboardUrl}/prospects/${res.contactId}" target="_blank">Open in dashboard ↗</a>`
           : '';
-        const allDedup = rows.length > 0 && rows.every((r) => r.dedup);
-        const dedupNote = allDedup ? ' (already existed — reused)' : '';
+
+        let msg;
+        if (action === 'connected') msg = `🤝 Marked connected · ${n} agent(s)${where}`;
+        else if (action === 'accepted_lead') msg = `✅ Marked accepted lead · ${n} agent(s)${where}`;
+        else msg = `✅ Added to ${n} agent(s)${where}`;
 
         resultBox.className = 'tai-result tai-ok';
-        resultBox.innerHTML = `✓ Saved to CRM${dedupNote} as <strong>${escapeHtml(payload.name)}</strong>.<br/>${roleLine}<br/>${companyLine}<br/>${agentBlock}<br/>${dashboardLink}`;
-        submit.textContent = '✓ Saved';
-        console.log(LOG, 'saved', res);
+        resultBox.innerHTML = `${msg}${dashboardLink}`;
+        btn.textContent = '✓ Done';
+        actionBtns.forEach((b) => { if (b !== btn) { b.disabled = false; } });
+        console.log(LOG, 'manual_add_profile result', res);
       } catch (err) {
-        console.warn(LOG, 'save failed', err);
+        console.warn(LOG, 'action failed', err);
+        let message = err.message || 'Save failed';
+        if (!signedIn || /unauth/i.test(message)) {
+          message = 'Please sign in to TalentAI from the extension popup.';
+        }
         resultBox.className = 'tai-result tai-err';
-        resultBox.textContent = err.message || 'Save failed';
-        submit.disabled = false;
-        submit.textContent = '+ Add to CRM';
+        resultBox.textContent = message;
+        actionBtns.forEach((b) => { b.disabled = false; });
+        btn.textContent = origLabel;
       }
+    };
+
+    actionBtns.forEach((btn) => {
+      btn.addEventListener('click', () => runAction(btn.getAttribute('data-action'), btn));
     });
 
     return wrap;
@@ -886,12 +980,33 @@
     signedIn = !!(stateResp && stateResp.signedIn);
     if (stateResp?.serverUrl) dashboardUrl = deriveDashboardUrl(stateResp.serverUrl);
 
+    // Sales Operations Platform — Stage 1: lookup-on-mount. If the
+    // contact is already tracked we render an "✅ In Pipeline" badge
+    // instead of the capture form. Best-effort: a lookup failure renders
+    // the form anyway, so the user can still capture if the SW is slow.
+    let lookup = null;
+    if (signedIn && profile.linkedinUrl) {
+      try {
+        const lookupResp = await safeSendMessage({
+          kind: 'contact_lookup',
+          payload: { linkedinUrl: profile.linkedinUrl },
+        });
+        if (lookupResp && lookupResp.ok) {
+          lookup = lookupResp.data || null;
+        } else {
+          console.log(LOG, 'mount: lookup failed', lookupResp?.error);
+        }
+      } catch (err) {
+        console.log(LOG, 'mount: lookup threw', err);
+      }
+    }
+
     injectStyles();
-    const widget = buildWidget({ profile, signedIn, dashboardUrl });
+    const widget = buildWidget({ profile, signedIn, dashboardUrl, lookup });
     (document.body || document.documentElement).appendChild(widget);
     mounted = true;
     mounting = false;
-    console.log(LOG, 'widget mounted', { signedIn, hasName: !!profile.name });
+    console.log(LOG, 'widget mounted', { signedIn, hasName: !!profile.name, lookupExists: !!lookup?.exists });
   }
 
   function unmount() {

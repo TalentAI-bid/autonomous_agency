@@ -21,7 +21,11 @@ export const extensionTaskStatusEnum = pgEnum('extension_task_status', [
 
 export const extensionSessions = pgTable('extension_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  // tenantId is nullable for multi-workspace sessions: the dispatcher uses
+  // userId + user_tenants memberships to find pending tasks, so a session
+  // doesn't need to be scoped to one tenant. Old per-tenant sessions still
+  // carry a tenantId until they're revoked.
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   apiKey: varchar('api_key', { length: 128 }),
   apiKeyHash: varchar('api_key_hash', { length: 128 }).notNull(),

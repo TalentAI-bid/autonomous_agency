@@ -29,6 +29,10 @@ interface RealtimeState {
   contactCounts: Record<string, number>; // masterAgentId → count
   agentLiveActions: Record<string, LiveAction>; // agentType → live action
   agentMessages: AgentMessage[];
+  // Timestamp of the last manual /queue/refresh click. Used by useQueue to
+  // poll for ~120s as a safety net in case the queue:ready WS event is
+  // missed (reconnect window, missed publish, etc.).
+  lastManualRefreshAt: number | null;
 
   setConnected: (connected: boolean) => void;
   addEvent: (event: AgentEvent) => void;
@@ -36,6 +40,8 @@ interface RealtimeState {
   incrementContactCount: (masterAgentId: string) => void;
   updateAgentLiveAction: (agentType: string, action?: string, description?: string) => void;
   addAgentMessage: (message: AgentMessage) => void;
+  markManualRefresh: () => void;
+  clearManualRefresh: () => void;
   clear: () => void;
 }
 
@@ -46,6 +52,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
   contactCounts: {},
   agentLiveActions: {},
   agentMessages: [],
+  lastManualRefreshAt: null,
 
   setConnected: (connected) => set({ connected }),
 
@@ -97,6 +104,9 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       agentMessages: [message, ...state.agentMessages].slice(0, MAX_EVENTS),
     })),
 
+  markManualRefresh: () => set({ lastManualRefreshAt: Date.now() }),
+  clearManualRefresh: () => set({ lastManualRefreshAt: null }),
+
   clear: () =>
     set({
       connected: false,
@@ -105,5 +115,6 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       contactCounts: {},
       agentLiveActions: {},
       agentMessages: [],
+      lastManualRefreshAt: null,
     }),
 }));

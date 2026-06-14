@@ -22,6 +22,17 @@
       console.log('[TalentAI cs] li/fetch-info aborted_non_linkedin_host', { host, href: location.href });
       return { debug: { reason: 'non_linkedin_host', host, href: location.href } };
     }
+    // Reject a malformed `linkedinUrl` if the SW passed one. We allow
+    // missing/undefined since the adapter can run on whatever LinkedIn page
+    // the tab is currently on, but a non-https or non-linkedin string is a
+    // sign of upstream corruption — fail loudly rather than building bogus
+    // sub-URLs from it.
+    const linkedinUrlParam = params?.linkedinUrl;
+    if (linkedinUrlParam !== undefined && linkedinUrlParam !== null
+        && (typeof linkedinUrlParam !== 'string' || !linkedinUrlParam.startsWith('https://www.linkedin.com/'))) {
+      console.log('[TalentAI cs] li/fetch-info aborted_invalid_linkedin_url', { linkedinUrlParam });
+      return { debug: { reason: 'invalid_linkedin_url', linkedinUrl: linkedinUrlParam } };
+    }
     const currentUrl = new URL(location.href);
     if (!currentUrl.pathname.includes('/about')) {
       const aboutUrl = currentUrl.origin + currentUrl.pathname.replace(/\/?$/, '/about/');

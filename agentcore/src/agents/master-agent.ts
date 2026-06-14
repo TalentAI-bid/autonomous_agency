@@ -536,7 +536,7 @@ export class MasterAgent extends BaseAgent {
               // LLM-derived value. Once the user picks "industry" / "hiring" /
               // "hybrid" in chat, that pick is the single source of truth.
               const userExplicit = (agentConfig as Record<string, unknown>).userExplicitBdStrategy as
-                | 'hiring_signal' | 'industry_target' | 'hybrid' | undefined;
+                | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | undefined;
               const bdStrategy = userExplicit ?? strategy.bdStrategy ?? 'hybrid';
               if (userExplicit) {
                 logger.info({ masterAgentId, userExplicit, strategistBdStrategy: strategy.bdStrategy }, 'Dispatch: using user-explicit bdStrategy');
@@ -578,12 +578,24 @@ export class MasterAgent extends BaseAgent {
                 const wrongStepIds = new Set(
                   pipelineSteps
                     .filter((s) => {
+                      const isJobsRoot = s.tool === 'CRAWL4AI'
+                        && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+                      const isLiSearchRoot = s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+                      const isGmapsStep = s.tool === 'GMAPS_EXTENSION';
                       if (userExplicit === 'industry_target') {
-                        return s.tool === 'CRAWL4AI'
-                          && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
+                        return isJobsRoot || isGmapsStep;
                       }
                       if (userExplicit === 'hiring_signal') {
-                        return s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
+                        return isLiSearchRoot || isGmapsStep;
+                      }
+                      if (userExplicit === 'hybrid') {
+                        return isGmapsStep;
+                      }
+                      if (userExplicit === 'local_business') {
+                        return isJobsRoot || isLiSearchRoot;
+                      }
+                      if (userExplicit === 'local_hybrid') {
+                        return isJobsRoot;
                       }
                       return false;
                     })
@@ -654,6 +666,22 @@ export class MasterAgent extends BaseAgent {
                     );
                     step.action = aliased;
                   }
+                  // fetch_company_info/team need a per-company `linkedinUrl`
+                  // the strategist doesn't have at plan time. The dispatcher
+                  // auto-fans-out these from search_companies completion
+                  // (extension-dispatcher.ts:723-746). Emitting them as
+                  // standalone pipeline steps falls through to the search
+                  // dispatch block below, which builds rows with `searchUrl`
+                  // and no `linkedinUrl` — those then fail in buildUrl() at
+                  // the extension with `invalid linkedinUrl=undefined`. Skip
+                  // them here so the auto-fanout path does the work.
+                  if (step.action === 'fetch_company_info' || step.action === 'fetch_company_team') {
+                    logger.info(
+                      { masterAgentId, stepId: step.id, action: step.action },
+                      'master-agent: skipping standalone fetch_company_info/team — auto-fanned-out by dispatcher on search_companies completion',
+                    );
+                    continue;
+                  }
                 }
 
                 logger.info(
@@ -702,26 +730,18 @@ export class MasterAgent extends BaseAgent {
                   }
 
                   // ── New contract path (PART 2/3): the strategist emitted
-                  // searchKeywords + geographyFilter + sizeFilter on the step.
-                  // Build ONE searchUrl per step via the LinkedIn URL builder
-                  // and enqueue a single task. The extension navigates straight
-                  // to that URL.
+                  // searchKeywords + geographyFilter on the step. Build ONE
+                  // searchUrl per step via the LinkedIn URL builder and enqueue
+                  // a single task. The extension navigates straight to that
+                  // URL. industryFilter / sizeFilter are not part of the
+                  // contract — fit is judged by the downstream scorer, not
+                  // gated at search time.
                   const stepKeywords = (step.params?.searchKeywords as string[] | undefined);
                   const stepGeoFilter = (step.params?.geographyFilter as { regions?: string[] } | undefined);
-                  const stepSizeFilter = (step.params?.sizeFilter as { min?: number; max?: number } | undefined);
-                  const stepIndustryFilter = (step.params?.industryFilter as { industries?: string[] } | undefined);
                   if (Array.isArray(stepKeywords) && stepKeywords.length > 0 && stepGeoFilter?.regions?.length) {
                     const searchUrl = buildLinkedInCompanySearchURL({
                       searchKeywords: stepKeywords,
                       geographyFilter: { regions: stepGeoFilter.regions },
-                      sizeFilter:
-                        typeof stepSizeFilter?.min === 'number' && typeof stepSizeFilter?.max === 'number'
-                          ? { min: stepSizeFilter.min, max: stepSizeFilter.max }
-                          : undefined,
-                      industryFilter:
-                        Array.isArray(stepIndustryFilter?.industries) && stepIndustryFilter.industries.length > 0
-                          ? { industries: stepIndustryFilter.industries }
-                          : undefined,
                     });
                     await enqueueExtensionTask({
                       tenantId: this.tenantId,
@@ -774,6 +794,53 @@ export class MasterAgent extends BaseAgent {
                   logger.info(
                     { masterAgentId, stepId: step.id, action: step.action, dispatched: searchTerms.length * locs.length },
                     'Pipeline step dispatched (LINKEDIN_EXTENSION legacy fan-out)',
+                  );
+                  continue;
+                }
+
+                // ── GMAPS_EXTENSION: Google Maps local-business search,
+                // dispatched as an extensionTasks row (site 'gmaps'). The
+                // extension builds the Maps URL from params.query + location
+                // and the completion handler ingests businesses as
+                // company+contact+deal rows (gmaps-lead.service).
+                if (step.tool === 'GMAPS_EXTENSION') {
+                  const stepQuery = typeof step.params?.query === 'string' ? step.params.query.trim() : '';
+                  const query = stepQuery
+                    || targetIndustries[0]
+                    || industries[0]
+                    || services[0]
+                    || '';
+                  const stepLoc = typeof step.params?.location === 'string' ? step.params.location.trim() : '';
+                  const location = stepLoc || locs[0] || '';
+                  if (!query || !location) {
+                    logger.warn(
+                      { masterAgentId, stepId: step.id, query, location },
+                      'GMAPS_EXTENSION step skipped — empty query or location',
+                    );
+                    this.sendMessage(null, 'system_alert', {
+                      action: 'discovery_inputs_missing',
+                      severity: 'warning',
+                      path: `${step.tool}:${step.action}`,
+                      message: 'I could not enqueue Google Maps tasks — no business niche or city resolved for this mission. Please specify a niche (e.g. "asian restaurant") and a city.',
+                    });
+                    continue;
+                  }
+                  await enqueueExtensionTask({
+                    tenantId: this.tenantId,
+                    masterAgentId,
+                    site: 'gmaps',
+                    type: 'search_businesses',
+                    params: {
+                      query,
+                      location,
+                      limit: (step.params?.limit as number) ?? 20,
+                    },
+                    priority: 7,
+                  });
+                  extensionTasksDispatched++;
+                  logger.info(
+                    { masterAgentId, stepId: step.id, query, location, queryRationale: step.params?.queryRationale },
+                    'Pipeline step dispatched (GMAPS_EXTENSION search_businesses)',
                   );
                   continue;
                 }

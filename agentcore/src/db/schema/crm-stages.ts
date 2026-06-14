@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, boolean, integer, timestamp, index, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, boolean, integer, timestamp, index, unique } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants.js';
 
 export const crmStages = pgTable('crm_stages', {
@@ -11,6 +11,13 @@ export const crmStages = pgTable('crm_stages', {
   isDefault: boolean('is_default').default(false).notNull(),
   isWon: boolean('is_won').default(false).notNull(),
   isLost: boolean('is_lost').default(false).notNull(),
+  // Follow-up engine: whether leads sitting in this stage should receive
+  // cadence-driven follow-up nudges in the Daily Queue. Stage names are
+  // user-defined, so the flag is set by an LLM classification pass
+  // (followUpClassifiedBy='ai') unless the user flips it themselves
+  // (followUpClassifiedBy='user' — never overwritten by re-classification).
+  followUpEligible: boolean('follow_up_eligible').default(false).notNull(),
+  followUpClassifiedBy: text('follow_up_classified_by').$type<'ai' | 'user'>(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [

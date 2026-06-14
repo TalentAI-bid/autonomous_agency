@@ -19,6 +19,7 @@ import { createStrategistWorker } from './strategist.worker.js';
 import { createCompanyFinderWorker } from './company-finder.worker.js';
 import { createCandidateFinderWorker } from './candidate-finder.worker.js';
 import { createLinkedInWorker } from './linkedin.worker.js';
+import { createTriageWorker } from './triage.worker.js';
 import logger from '../utils/logger.js';
 
 export function registerAllWorkers(tenantId: string): Worker[] {
@@ -39,6 +40,7 @@ export function registerAllWorkers(tenantId: string): Worker[] {
     createCompanyFinderWorker(tenantId),
     createCandidateFinderWorker(tenantId),
     createLinkedInWorker(tenantId),
+    createTriageWorker(tenantId),
   ];
 
   for (const worker of workers) {

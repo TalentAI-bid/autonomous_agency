@@ -1,6 +1,6 @@
 import { scrape } from './crawl4ai.tool.js';
 import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
-import { enqueueExtensionTaskBatch } from '../services/extension-dispatcher.js';
+import { enqueueCompanyEnrichmentFanout } from '../services/extension-dispatcher.js';
 import { eq, and } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
 import { companies, opportunities } from '../db/schema/index.js';
@@ -260,30 +260,23 @@ export async function searchLinkedInJobs(
     }
   }
 
-  // Batch-enqueue all fetch_company tasks (10/min cadence) so we don't
-  // fire-hose the extension when a search returns 100+ companies.
+  // Enqueue company enrichment via the MODERN split (fetch_company_info +
+  // fetch_company_team per teamRoleKeyword) so the extension loads the simple
+  // /company/<slug>/people/?keywords=<kw> page — never the legacy combined
+  // fetch_company task, which clicks through to LinkedIn's canned search.
   if (pendingFetchTasks.length > 0) {
     try {
-      await enqueueExtensionTaskBatch(
-        tenantId,
-        pendingFetchTasks.map((t) => ({
-          masterAgentId,
-          site: 'linkedin',
-          type: 'fetch_company',
-          params: { linkedinUrl: t.linkedinUrl, companyId: t.companyId },
-          priority: 3,
-        })),
-      );
+      await enqueueCompanyEnrichmentFanout(tenantId, masterAgentId, pendingFetchTasks);
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), count: pendingFetchTasks.length },
-        'Batched fetch_company enqueue failed (non-fatal)',
+        'Company enrichment fanout enqueue failed (non-fatal)',
       );
     }
   }
 
   logger.info(
-    { tenantId, masterAgentId, jobTitle, location, parsed: unique.length, saved, queuedFetchCompany: pendingFetchTasks.length },
+    { tenantId, masterAgentId, jobTitle, location, parsed: unique.length, saved, queuedEnrichment: pendingFetchTasks.length },
     'Server-side LinkedIn Jobs scrape completed',
   );
 

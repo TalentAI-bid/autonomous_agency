@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, and, desc, count, avg, gt, lt, inArray, isNull, sql, max } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents, pipelineErrors, conversations, conversationMessages } from '../db/schema/index.js';
+import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents, pipelineErrors, conversations, conversationMessages, emailAccounts, emailQueue, extensionTasks } from '../db/schema/index.js';
+import { env } from '../config/env.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
@@ -118,6 +119,52 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     const parsed = updateMasterAgentSchema.safeParse(request.body);
     if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
 
+    // emailAccountId-aware path: when the user changes the agent's outbound
+    // email account, the change must propagate to existing UNSENT email_queue
+    // rows for this agent. The account is otherwise stamped at draft-creation
+    // time (outreach.agent.ts), so without propagation the user changes the
+    // dropdown but pending drafts still send from the old account.
+    //
+    // Detect whether emailAccountId is part of this PATCH and if so, capture
+    // its previous value so we can decide whether to propagate.
+    const incomingConfig = parsed.data.config as Record<string, unknown> | undefined;
+    const emailAccountIdInPatch = incomingConfig !== undefined && 'emailAccountId' in incomingConfig;
+    const newEmailAccountIdRaw = incomingConfig?.emailAccountId;
+    const newEmailAccountId =
+      typeof newEmailAccountIdRaw === 'string' && newEmailAccountIdRaw.length > 0
+        ? newEmailAccountIdRaw
+        : null;
+
+    // Verify the new account belongs to this tenant AND fetch its fromEmail
+    // (we'll need it to update the email_queue.from_email column). Without
+    // this guard the read-side filter in OutreachAgent would silently ignore
+    // an invalid id and fall back to the default account.
+    let newAccountFromEmail: string | null = null;
+    if (newEmailAccountId) {
+      const [acct] = await withTenant(request.tenantId, async (tx) =>
+        tx.select({ id: emailAccounts.id, fromEmail: emailAccounts.fromEmail }).from(emailAccounts)
+          .where(and(eq(emailAccounts.id, newEmailAccountId), eq(emailAccounts.tenantId, request.tenantId)))
+          .limit(1)
+      );
+      if (!acct) throw new ValidationError('Unknown email account for tenant');
+      newAccountFromEmail = acct.fromEmail;
+    }
+
+    // Snapshot the agent's current emailAccountId BEFORE the UPDATE so we
+    // know whether the value actually changed (a PATCH that touches other
+    // config keys must not trigger propagation).
+    let previousEmailAccountId: string | null = null;
+    if (emailAccountIdInPatch) {
+      const [current] = await withTenant(request.tenantId, async (tx) =>
+        tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+          .limit(1)
+      );
+      const currentConfig = (current?.config as Record<string, unknown> | null) ?? {};
+      const prev = currentConfig.emailAccountId;
+      previousEmailAccountId = typeof prev === 'string' && prev.length > 0 ? prev : null;
+    }
+
     const [agent] = await withTenant(request.tenantId, async (tx) => {
       return tx.update(masterAgents)
         .set({ ...parsed.data, updatedAt: new Date() })
@@ -125,6 +172,38 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
         .returning();
     });
     if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    // Propagate emailAccountId changes to unsent draft rows owned by this agent.
+    // Only PATCHes that actually change emailAccountId trigger this; other
+    // config-only PATCHes (e.g. emailTone) leave email_queue rows untouched.
+    if (emailAccountIdInPatch && newEmailAccountId !== previousEmailAccountId) {
+      const propagatedFromEmail =
+        newAccountFromEmail ?? env.SMTP_USER ?? 'outreach@agentcore.app';
+      const updated = await withTenant(request.tenantId, async (tx) => {
+        return tx.update(emailQueue)
+          .set({
+            emailAccountId: newEmailAccountId,
+            fromEmail: propagatedFromEmail,
+          })
+          .where(and(
+            eq(emailQueue.tenantId, request.tenantId),
+            eq(emailQueue.masterAgentId, id),
+            inArray(emailQueue.status, ['pending_approval', 'queued']),
+          ))
+          .returning({ id: emailQueue.id });
+      });
+      logger.info(
+        {
+          masterAgentId: id,
+          previousEmailAccountId,
+          newEmailAccountId,
+          propagatedFromEmail,
+          updatedRowCount: updated.length,
+        },
+        'master-agent PATCH: propagated emailAccountId change to unsent email_queue rows',
+      );
+    }
+
     return { data: agent };
   });
 
@@ -172,6 +251,21 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
         'Failed to annotate linked conversations on agent delete (non-fatal)',
       );
     }
+
+    // Cancel any queued/in-flight extension tasks BEFORE deleting the agent —
+    // the FK is ON DELETE SET NULL, so once the agent row is gone the tasks
+    // become orphaned (master_agent_id NULL) and keep dispatching to the
+    // extension forever with no way to stop them. Cancel while the link is
+    // still intact so the dispatch sweep skips them.
+    await withTenant(request.tenantId, async (tx) => {
+      await tx.update(extensionTasks)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(and(
+          eq(extensionTasks.masterAgentId, id),
+          eq(extensionTasks.tenantId, request.tenantId),
+          inArray(extensionTasks.status, ['pending', 'dispatched']),
+        ));
+    });
 
     const result = await withTenant(request.tenantId, async (tx) => {
       return tx.delete(masterAgents)
@@ -444,6 +538,19 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
         .returning();
     });
     if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    // Halt this agent's queued extension work too — pausing the agent already
+    // blocks new dispatch in tryDispatch, but cancelling clears the backlog so
+    // the extension goes quiet immediately rather than draining stale tasks.
+    await withTenant(request.tenantId, async (tx) => {
+      await tx.update(extensionTasks)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(and(
+          eq(extensionTasks.masterAgentId, id),
+          eq(extensionTasks.tenantId, request.tenantId),
+          inArray(extensionTasks.status, ['pending', 'dispatched']),
+        ));
+    });
 
     // Clean up all pipeline + repeatable email jobs for this tenant
     try {

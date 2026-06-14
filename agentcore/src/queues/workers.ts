@@ -4,6 +4,7 @@ import { pubRedis } from './setup.js';
 import { getQueue } from './queues.js';
 import { createDeadLetterWorker } from './dead-letter.js';
 import { registerAllWorkers } from '../workers/index.js';
+import { createTriageWorker } from '../workers/triage.worker.js';
 import { db, withTenant } from '../config/database.js';
 import { emailListenerConfigs, masterAgents, tenants } from '../db/schema/index.js';
 import { scheduleEmailListenerJob, removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
@@ -12,6 +13,7 @@ import { checkCrawl4aiHealth } from '../tools/crawl4ai.tool.js';
 import { startFollowupSendWorker } from '../workers/followup-send.worker.js';
 import { startFollowupSchedulerWorker, ensureFollowupSchedulerRepeatable } from '../workers/followup-scheduler.worker.js';
 import { startFitScoreWorker } from '../workers/fit-score.worker.js';
+import { startGmapsMenuWorker } from '../workers/gmaps-menu.worker.js';
 import logger from '../utils/logger.js';
 
 /** Active workers registry */
@@ -19,6 +21,48 @@ const activeWorkers: Worker[] = [];
 
 /** Tracks tenants that already have workers registered */
 const registeredTenants = new Set<string>();
+
+/** Tracks tenants that have a triage-only worker registered (no running agent). */
+const triageOnlyTenants = new Set<string>();
+
+/**
+ * Register the triage worker + daily-triage 06:00 UTC repeatable for a tenant
+ * regardless of whether any master_agent is in 'running' status. Triage is a
+ * sales-ops feature decoupled from agent runtime — every tenant with prospects
+ * needs its on-demand /queue/refresh jobs consumed and the daily cron firing.
+ *
+ * Idempotent: skips tenants already fully registered (registerTenantWorkers)
+ * or already triage-registered (this function).
+ */
+export async function ensureTriageForTenant(tenantId: string, tenantName?: string): Promise<boolean> {
+  if (registeredTenants.has(tenantId) || triageOnlyTenants.has(tenantId)) {
+    return false;
+  }
+  const worker = createTriageWorker(tenantId);
+  worker.on('error', (err) => {
+    logger.error({ err, tenantId, workerName: worker.name }, 'Worker error');
+  });
+  activeWorkers.push(worker);
+  triageOnlyTenants.add(tenantId);
+
+  // Re-register the daily-triage repeatable so the 06:00 UTC cron fires.
+  const triageQueue = getQueue(tenantId, 'triage');
+  const existingTriageJobs = await triageQueue.getRepeatableJobs();
+  const staleTriageJob = existingTriageJobs.find(j => j.id === `triage-${tenantId}`);
+  if (staleTriageJob) {
+    await triageQueue.removeRepeatableByKey(staleTriageJob.key);
+  }
+  await triageQueue.add('daily-triage', { tenantId }, {
+    repeat: { pattern: '0 6 * * *' },
+    jobId: `triage-${tenantId}`,
+  });
+
+  logger.info(
+    { tenantId, tenantName },
+    `[triage] registered worker for tenant ${tenantId}${tenantName ? ` (${tenantName})` : ''}`,
+  );
+  return true;
+}
 
 /**
  * Register workers for a specific tenant.
@@ -96,6 +140,23 @@ export async function scheduleAgentJobs(
     });
   }
 
+  // Sales Operations Stage 3 — daily triage worker. Runs once a day at
+  // 06:00 UTC for every tenant whose agent is registered. Generates
+  // prospect_actions for the day's queue. Per-tenant local-time scheduling
+  // is deferred (single-user tenants only for now).
+  {
+    const triageQueue = getQueue(tenantId, 'triage');
+    const existingTriageJobs = await triageQueue.getRepeatableJobs();
+    const staleTriageJob = existingTriageJobs.find(j => j.id === `triage-${tenantId}`);
+    if (staleTriageJob) {
+      await triageQueue.removeRepeatableByKey(staleTriageJob.key);
+    }
+    await triageQueue.add('daily-triage', { tenantId }, {
+      repeat: { pattern: '0 6 * * *' },
+      jobId: `triage-${tenantId}`,
+    });
+  }
+
   // Schedule master-orchestrate repeatable job (every 60s while running)
   if (!enabledAgents.length || enabledAgents.includes('discovery')) {
     const discoveryQueue = getQueue(tenantId, 'discovery');
@@ -150,6 +211,7 @@ export async function closeAllWorkers(): Promise<void> {
   await Promise.all(activeWorkers.map((w) => w.close()));
   activeWorkers.length = 0;
   registeredTenants.clear();
+  triageOnlyTenants.clear();
 }
 
 /**
@@ -187,7 +249,7 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
         logger.info({ url: crawl4ai.url }, 'Crawl4AI is reachable');
       }
 
-      const allTenants = await db.select({ id: tenants.id }).from(tenants);
+      const allTenants = await db.select({ id: tenants.id, name: tenants.name }).from(tenants);
       logger.info({ tenantCount: allTenants.length }, 'Worker startup: found tenants');
 
       const runningAgents: Array<{ id: string; tenantId: string; config: unknown }> = [];
@@ -247,6 +309,23 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
         }
       }
 
+      // Triage is decoupled from agent runtime — register a triage worker +
+      // daily-triage repeatable for every tenant, regardless of master_agent
+      // status. Idempotent: tenants already registered above are skipped.
+      let triageNewlyRegistered = 0;
+      for (const tenant of allTenants) {
+        try {
+          const added = await ensureTriageForTenant(tenant.id, tenant.name ?? undefined);
+          if (added) triageNewlyRegistered++;
+        } catch (err) {
+          logger.error({ err, tenantId: tenant.id }, '[triage] failed to register worker for tenant');
+        }
+      }
+      logger.info(
+        { totalTenants: allTenants.length, newlyRegistered: triageNewlyRegistered, viaRunningAgents: allTenants.length - triageNewlyRegistered },
+        `[triage] ${allTenants.length} tenants registered for triage`,
+      );
+
       // Global (cross-tenant) followup workers + repeatable scheduler tick.
       // One process handles follow-up sends for all tenants; per-job
       // withTenant scopes each DB op correctly.
@@ -254,6 +333,7 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
         startFollowupSchedulerWorker();
         startFollowupSendWorker();
         startFitScoreWorker();
+        startGmapsMenuWorker();
         await ensureFollowupSchedulerRepeatable();
       } catch (err) {
         logger.error({ err }, 'Failed to start followup workers (sequence sends will not run)');

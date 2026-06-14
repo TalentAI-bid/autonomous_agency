@@ -56,25 +56,49 @@ const INDUSTRY_MARKER_PATTERNS = [
   /\benterprise\s+(?:companies|firms|customers)\b/i,
 ];
 
+// Local/consumer-facing place types that signal Google Maps discovery
+// (bdStrategy 'local_business' / 'local_hybrid') rather than LinkedIn.
+const LOCAL_BUSINESS_PATTERNS = [
+  /\brestaurants?\b/i,
+  /\bcaf[eé]s?\b/i,
+  /\bcoffee\s+shops?\b/i,
+  /\bsalons?\b/i,
+  /\bbarbers?(?:\s*shops?)?\b/i,
+  /\bshops?\b/i,
+  /\bstores?\b/i,
+  /\bclinics?\b/i,
+  /\bdentists?\b/i,
+  /\bgyms?\b/i,
+  /\bhotels?\b/i,
+  /\bbakeri(?:es|y)\b/i,
+  /\blocal\s+business(?:es)?\b/i,
+  /\bgoogle\s+maps\b/i,
+  /\bnear\s+me\b/i,
+];
+
 export interface MissionIntentResult {
   hasHiringVerbs: boolean;
   hasIndustryMentions: boolean;
-  recommended: 'hiring_signal' | 'industry_target' | 'hybrid' | null;
+  hasLocalBusinessMentions: boolean;
+  recommended: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | null;
 }
 
 export function detectMissionStrategyFromText(missionText: string | null | undefined): MissionIntentResult {
   const text = (missionText ?? '').trim();
   if (text.length === 0) {
-    return { hasHiringVerbs: false, hasIndustryMentions: false, recommended: null };
+    return { hasHiringVerbs: false, hasIndustryMentions: false, hasLocalBusinessMentions: false, recommended: null };
   }
 
   const hasHiringVerbs = HIRING_VERB_PATTERNS.some((re) => re.test(text));
   const hasIndustryMentions = INDUSTRY_MARKER_PATTERNS.some((re) => re.test(text));
+  const hasLocalBusinessMentions = LOCAL_BUSINESS_PATTERNS.some((re) => re.test(text));
 
   let recommended: MissionIntentResult['recommended'] = null;
-  if (hasHiringVerbs && hasIndustryMentions) recommended = 'hybrid';
+  if (hasLocalBusinessMentions && hasIndustryMentions) recommended = 'local_hybrid';
+  else if (hasLocalBusinessMentions) recommended = 'local_business';
+  else if (hasHiringVerbs && hasIndustryMentions) recommended = 'hybrid';
   else if (hasHiringVerbs) recommended = 'hiring_signal';
   else if (hasIndustryMentions) recommended = 'industry_target';
 
-  return { hasHiringVerbs, hasIndustryMentions, recommended };
+  return { hasHiringVerbs, hasIndustryMentions, hasLocalBusinessMentions, recommended };
 }

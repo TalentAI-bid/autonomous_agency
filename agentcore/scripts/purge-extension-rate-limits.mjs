@@ -7,6 +7,7 @@
 //   node scripts/purge-extension-rate-limits.mjs --email hatemazaiez1@gmail.com [--dry-run]
 //   node scripts/purge-extension-rate-limits.mjs --user-id <uuid>
 //   node scripts/purge-extension-rate-limits.mjs --tenant-id <uuid>
+//   node scripts/purge-extension-rate-limits.mjs --all                     # every active session, all tenants
 //   node scripts/purge-extension-rate-limits.mjs --email ... --task-types linkedin:search_companies,linkedin:fetch_company
 //
 // Env: DATABASE_URL (preferred) OR localhost defaults; REDIS_URL (optional).
@@ -35,12 +36,17 @@ for (let i = 0; i < args.length; i++) {
 const email = flags.email;
 const userIdArg = flags['user-id'];
 const tenantIdArg = flags['tenant-id'];
+const allUsers = !!flags.all;
 const taskTypesCsv = flags['task-types'];
 const dryRun = !!flags['dry-run'];
 
-if (!email && !userIdArg && !tenantIdArg) {
-  console.error('Usage: purge-extension-rate-limits.mjs --email <addr> | --user-id <uuid> | --tenant-id <uuid>');
+if (!email && !userIdArg && !tenantIdArg && !allUsers) {
+  console.error('Usage: purge-extension-rate-limits.mjs --email <addr> | --user-id <uuid> | --tenant-id <uuid> | --all');
   console.error('       [--task-types site:type,site:type] [--dry-run]');
+  process.exit(1);
+}
+if (allUsers && (email || userIdArg || tenantIdArg)) {
+  console.error('--all cannot be combined with --email / --user-id / --tenant-id');
   process.exit(1);
 }
 

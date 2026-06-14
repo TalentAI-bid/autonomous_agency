@@ -22,7 +22,31 @@ export const activityTypeEnum = pgEnum('crm_activity_type', [
   // so timeline filters and reply-rate analytics can tell them apart.
   'manual_email_sent',
   'manual_email_received',
+  // Sales Operations Platform — Stage 1 capture flow.
+  'contact_added',
+  'contact_tagged',
+  'contact_untagged',
+  'contact_marked_dnc',
+  'contact_reassigned',
+  'duplicate_capture_attempted',
 ]);
+
+/**
+ * Top-level grouping the dashboard timeline filters by. Stored as TEXT so
+ * future categories don't need a migration to the enum type. See
+ * timeline.service.ts:logEvent for the canonical type-→-category mapping
+ * used at call sites that don't pass one explicitly.
+ */
+export type CrmEventCategory =
+  | 'outreach'
+  | 'response'
+  | 'discovery'
+  | 'status_change'
+  | 'manual_note'
+  | 'meeting'
+  | 'system_action';
+
+export type CrmActorType = 'system' | 'user' | 'recipient' | 'integration';
 
 export const crmActivities = pgTable('crm_activities', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -32,6 +56,13 @@ export const crmActivities = pgTable('crm_activities', {
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
   masterAgentId: uuid('master_agent_id').references(() => masterAgents.id, { onDelete: 'set null' }),
   type: activityTypeEnum('type').notNull(),
+  // High-level grouping for timeline filters. Backfilled from `type` at
+  // migration time; logEvent() fills it on new writes.
+  eventCategory: text('event_category').$type<CrmEventCategory>().notNull().default('system_action'),
+  // Who caused the event. 'system' = automated pipeline; 'user' = dashboard
+  // action; 'recipient' = inbound from the other side (replies, opens);
+  // 'integration' = third-party webhook.
+  actorType: text('actor_type').$type<CrmActorType>().notNull().default('user'),
   title: varchar('title', { length: 500 }).notNull(),
   description: text('description'),
   metadata: jsonb('metadata').$type<Record<string, unknown>>(),
@@ -43,6 +74,7 @@ export const crmActivities = pgTable('crm_activities', {
   index('crm_activities_deal_idx').on(t.dealId),
   index('crm_activities_occurred_at_idx').on(t.occurredAt),
   index('crm_activities_type_idx').on(t.tenantId, t.type),
+  index('crm_activities_contact_occurred_idx').on(t.contactId, t.occurredAt),
 ]);
 
 export type CrmActivity = typeof crmActivities.$inferSelect;

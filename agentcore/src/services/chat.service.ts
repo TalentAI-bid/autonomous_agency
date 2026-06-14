@@ -12,6 +12,7 @@ import { flushEmailQueue } from '../tools/email-queue.tool.js';
 import { drainAllPipelineQueues } from './queue.service.js';
 import { resetSearchRateLimits } from '../tools/searxng.tool.js';
 import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js';
+import { extractJSONFromText } from '../utils/json-extract.js';
 import type { ChatMessage } from '../tools/together-ai.tool.js';
 import logger from '../utils/logger.js';
 
@@ -45,7 +46,7 @@ async function loadCompanyContext(tenantId: string) {
 }
 
 interface MissionIntent {
-  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid' | null;
+  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | null;
   targetRoles: string[];
   locations: string[];
   industries: string[];
@@ -61,7 +62,7 @@ async function classifyMissionIntent(tenantId: string, userMessage: string): Pro
 
 Output STRICT JSON matching this shape (no markdown, no explanation):
 {
-  "bdStrategy": "hiring_signal" | "industry_target" | "hybrid" | null,
+  "bdStrategy": "hiring_signal" | "industry_target" | "hybrid" | "local_business" | "local_hybrid" | null,
   "targetRoles": string[],
   "locations": string[],
   "industries": string[],
@@ -75,6 +76,8 @@ Classification rules:
 - "hiring_signal" when the user mentions hiring, jobs, recruitment, hires, team-growth, "companies hiring X", "who's hiring". The signal is that the user wants to find companies currently growing a specific role.
 - "industry_target" when the user mentions an industry/vertical/ICP/customer profile without any hiring verbs (e.g. "fintech startups", "SaaS companies in Berlin", "e-commerce SMBs").
 - "hybrid" when BOTH hiring verbs AND a clear industry are present.
+- "local_business" when the mission targets local/consumer-facing PLACES (restaurants, cafés, salons, shops, stores, clinics, gyms, hotels, "local businesses") in a city or area, without B2B-company language (e.g. "asian food restaurants in Riyadh", "beauty salons in Dubai").
+- "local_hybrid" when the mission targets BOTH local places AND B2B companies/industries (e.g. "hotel chains and local restaurants in Dubai").
 - null when the mission is too vague to pick one (e.g. "help me find leads").
 
 Confidence is a float 0..1. If confidence < 0.7, set bdStrategy=null. Values ≥ 0.9 indicate the strategy is stated explicitly or implied unambiguously.
@@ -139,7 +142,7 @@ function parseQuickReplies(
             typeof (c as { label?: unknown }).label === 'string' &&
             typeof (c as { replyText?: unknown }).replyText === 'string',
           )
-          .slice(0, 4);
+          .slice(0, 5); // 5 = the BD-strategy question's A-E chips
         if (valid.length > 0) return valid;
       }
     } catch (err) {
@@ -149,15 +152,24 @@ function parseQuickReplies(
 
   const lower = response.toLowerCase();
 
-  // 2. BD-strategy A/B/C heuristic (low-confidence fallback path)
+  // 2. BD-strategy A-E heuristic (low-confidence fallback path)
   const hasBdBlock =
     lower.includes('hiring signal') && lower.includes('industry target') && (lower.includes('hybrid') || lower.includes('a)') || lower.includes('a.') || lower.includes('**a)**'));
   if (hasBdBlock) {
-    return [
+    const chips: QuickReply[] = [
       { id: 'bd_a', label: 'A — Hiring Signals', replyText: 'A', variant: 'secondary' },
       { id: 'bd_b', label: 'B — Industry Target', replyText: 'B', variant: 'secondary' },
       { id: 'bd_c', label: 'C — Hybrid', replyText: 'C', variant: 'primary' },
     ];
+    // The D/E local options only render when the message actually offers them
+    // (newer prompt) — keeps the fallback consistent with older transcripts.
+    if (lower.includes('local business') || lower.includes('google maps')) {
+      chips.push(
+        { id: 'bd_d', label: 'D — Local Business (Maps)', replyText: 'D', variant: 'secondary' },
+        { id: 'bd_e', label: 'E — Local + Companies', replyText: 'E', variant: 'secondary' },
+      );
+    }
+    return chips;
   }
 
   // 3. Thin-search negotiation heuristic — only when we know a pending choice exists
@@ -203,7 +215,7 @@ function looksLikeAutonomyGrant(text: string): boolean {
  * detects either the chip letter ("A" / "B" / "C") or a typed strategy name
  * ("hiring", "industry", "hybrid", "both").
  */
-function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | null {
+function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | null {
   const t = content.trim().toLowerCase();
   if (!t || t.length > 80) return null;
   // Chip A / "Hiring" / "companies that are hiring"
@@ -212,6 +224,11 @@ function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industr
   if (/^b$|^b[.)]\s|^industry(\s+target)?$|^by\s+industry/.test(t)) return 'industry_target';
   // Chip C / "Hybrid" / "both"
   if (/^c$|^c[.)]\s|^hybrid$|^both(\s+strategies)?$/.test(t)) return 'hybrid';
+  // Chip E / "local hybrid" / "local + companies" — checked BEFORE D so
+  // "local hybrid" doesn't fall into D's `^local` arm.
+  if (/^e$|^e[.)]\s|^local\s*hybrid$|^local\s*\+\s*compan|^local\s+and\s+compan/.test(t)) return 'local_hybrid';
+  // Chip D / "local" / "local business" / "maps"
+  if (/^d$|^d[.)]\s|^local(\s+business(es)?)?$|^maps$|^google\s+maps$/.test(t)) return 'local_business';
   return null;
 }
 
@@ -261,8 +278,11 @@ export async function createConversation(tenantId: string, userId: string) {
   // Load company profile + products for context
   const { companyProfile, products: activeProducts } = await loadCompanyContext(tenantId);
 
-  // Build messages for the greeting
+  // Build messages for the greeting (new conversation — no existing agent yet)
   const systemPrompt = buildChatSystemPrompt({ emailListeners: listeners, emailAccounts: accounts, companyProfile, products: activeProducts });
+  // Note: createConversation has no masterAgentId yet, so the backfill prompt
+  // doesn't apply here — the LLM will ask for team-role keywords as part of
+  // the regular flow before emitting the proposal.
   const llmMessages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: 'Start the conversation' },
@@ -612,8 +632,9 @@ export async function sendMessage(
 
   if (proposalMatch) {
     try {
-      const cleaned = proposalMatch[1]!.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      proposalData = JSON.parse(cleaned);
+      // Use the string-aware extractor — NOT a naive comment strip, which
+      // corrupts `//` inside URLs (e.g. senderWebsite https://…).
+      proposalData = extractJSONFromText<Record<string, unknown>>(proposalMatch[1]!);
       messageType = 'pipeline_proposal';
     } catch (err) {
       logger.warn({ err }, 'Failed to parse pipeline proposal JSON from chat response');
@@ -649,6 +670,12 @@ export async function sendMessage(
     }
     if (config.emailListenerConfigId && !listeners.some(l => l.id === config.emailListenerConfigId)) {
       delete config.emailListenerConfigId;
+    }
+
+    // teamRoleKeywords now come from the strategist agent (config.salesStrategy.teamRoleKeywords),
+    // not from the chat proposal. Strip the field if the LLM emits it anyway.
+    if ('teamRoleKeywords' in config) {
+      delete config.teamRoleKeywords;
     }
 
     proposalData.config = config;
@@ -1000,8 +1027,9 @@ export async function* sendMessageStream(
 
   if (proposalMatch) {
     try {
-      const cleaned = proposalMatch[1]!.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      proposalData = JSON.parse(cleaned);
+      // Use the string-aware extractor — NOT a naive comment strip, which
+      // corrupts `//` inside URLs (e.g. senderWebsite https://…).
+      proposalData = extractJSONFromText<Record<string, unknown>>(proposalMatch[1]!);
       messageType = 'pipeline_proposal';
     } catch (err) {
       logger.warn({ err }, 'Failed to parse pipeline proposal JSON from chat stream');
@@ -1031,6 +1059,11 @@ export async function* sendMessageStream(
     }
     if (config.emailListenerConfigId && !listeners.some(l => l.id === config.emailListenerConfigId)) {
       delete config.emailListenerConfigId;
+    }
+    // teamRoleKeywords are owned by the strategist (config.salesStrategy.teamRoleKeywords).
+    // Drop the field if the LLM emits it in the proposal anyway.
+    if ('teamRoleKeywords' in config) {
+      delete config.teamRoleKeywords;
     }
     proposalData.config = config;
   }

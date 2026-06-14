@@ -38,7 +38,7 @@ const AGENT_CAPABILITY_MANIFEST = {
 };
 
 export interface InferredIntent {
-  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid';
+  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid';
   confidence: 'high' | 'medium';
   targetRoles?: string[];
   locations?: string[];
@@ -189,7 +189,9 @@ Example walkthrough:
 
 ## Pipeline Proposal Format
 
-When you have gathered sufficient information, output a proposal wrapped in XML-style tags like this:
+When you have gathered sufficient information, output a proposal wrapped in XML-style tags like this.
+
+**Note:** \`teamRoleKeywords\` is NOT set in the proposal — the strategist agent generates them during discovery (\`config.salesStrategy.teamRoleKeywords\`). Do not include the field; do not ask the user about it.
 
 <pipeline_proposal>
 {
@@ -215,41 +217,31 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
     "senderTitle": "sender's job title (optional)",
     "callToAction": "desired action (e.g. 'Reply if interested', 'Book a call')",
     "senderWebsite": "company website URL if mentioned",
-    "bdStrategy": "hiring_signal|industry_target|hybrid — the exact choice the user made in answer to the BD-strategy question (sales only, REQUIRED for sales, no default)"
+    "bdStrategy": "hiring_signal|industry_target|hybrid|local_business|local_hybrid — the exact choice the user made in answer to the BD-strategy question (sales only, REQUIRED for sales, no default)"
   },
   "pipeline": [
     { "agentType": "discovery", "order": 1, "description": "What this step does for this specific use case", "config": {} },
     { "agentType": "enrichment", "order": 2, "description": "...", "config": {} },
     { "agentType": "scoring", "order": 3, "description": "...", "config": {} }
   ],
-  // ↑ This is the MINIMAL pipeline. Only add other agents when needed:
-  // - "document" → only for recruitment (CV/LinkedIn parsing) or when user uploads documents
-  // - "outreach" → only if enableOutreach is true and email account is configured
-  // - "reply" + "action" → only if outreach is included
   "pipelineSteps": [
     { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "role from mission", "location": "target region" } },
-    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
+    { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_info", "dependsOn": ["jobs_search"] },
     { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
-    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+    { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_team", "dependsOn": ["li_fetch"] },
     { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
     { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
     { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
     { "id": "score", "tool": "SCORING", "action": "score_contacts", "dependsOn": ["apply_pattern"] }
   ],
-  // ↑ REQUIRED — tool-level execution plan. pipelineSteps MUST be the COMPLETE
-  // execution plan — never just the discovery step. For hiring_signal, it MUST
-  // include (in this exact order): CRAWL4AI:search_linkedin_jobs →
-  // LINKEDIN_EXTENSION:fetch_company_detail → CRAWL4AI:scrape_company_website →
-  // LINKEDIN_EXTENSION:get_team → LLM_ANALYSIS:deep_company_profile →
-  // REACHER:verify_first_person → EMAIL_PATTERN:apply_to_remaining →
-  // SCORING:score_contacts. If you omit any enrichment step, the pipeline will
-  // silently skip enrichment and produce empty contacts. For industry_target,
-  // swap CRAWL4AI:search_linkedin_jobs with LINKEDIN_EXTENSION:search_companies.
-  // See "Tool-Level Pipeline Steps" section below for the full reference.
   "summary": "Brief summary of what the pipeline will do",
   "estimatedDuration": "e.g. 2-4 hours"
 }
 </pipeline_proposal>
+
+**Pipeline array rules:** The \`pipeline\` array above is the MINIMAL set (discovery → enrichment → scoring). Only add: "document" for recruitment/uploads, "outreach" if enableOutreach + email account, "reply" + "action" only if outreach is included.
+
+**pipelineSteps is REQUIRED** — the tool-level execution plan. It MUST be the COMPLETE plan, never just the discovery step. For hiring_signal: CRAWL4AI:search_linkedin_jobs → LINKEDIN_EXTENSION:fetch_company_info → CRAWL4AI:scrape_company_website → LINKEDIN_EXTENSION:fetch_company_team → LLM_ANALYSIS:deep_company_profile → REACHER:verify_first_person → EMAIL_PATTERN:apply_to_remaining → SCORING:score_contacts. If you omit any enrichment step, the pipeline will silently skip enrichment and produce empty contacts. For industry_target, swap CRAWL4AI:search_linkedin_jobs with LINKEDIN_EXTENSION:search_companies. For local_business, the root is 3-6 GMAPS_EXTENSION:search_businesses steps (params { query: "<niche, NO city>", location: "<city>", limit: 20 }) — no LinkedIn/jobs/team steps; business details + email enrichment are auto-fanned-out. For local_hybrid, use BOTH GMAPS_EXTENSION:search_businesses AND LINKEDIN_EXTENSION:search_companies roots. See "Tool-Level Pipeline Steps" section below.
 
 ## Pipeline Rules
 - **Default pipeline order:** Discovery → Enrichment → Scoring. This is the standard flow for sales, partnerships, research, and custom use cases.
@@ -288,7 +280,8 @@ Default when the user has NOT said any of these phrases: \`enableOutreach: true\
 You MUST always generate a \`pipelineSteps\` array in the proposal. This describes the exact tools used at execution time, adapted to the user's target region and mission.
 
 Available tools:
-- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies and people (requires login). Actions: \`search_companies\`, \`fetch_company_detail\`, \`get_team\`.
+- **LINKEDIN_EXTENSION**: Chrome extension scrapes LinkedIn for companies and people (requires login). Actions: \`search_companies\`, \`fetch_company_info\` (about page), \`fetch_company_team\` (people page). The dispatcher auto-fans-out from \`search_companies\` results to both \`fetch_company_info\` and \`fetch_company_team\` in parallel; explicit fetch_company_info / fetch_company_team steps in pipelineSteps are also valid (and dispatched as separate tasks).
+- **GMAPS_EXTENSION**: Chrome extension scrapes Google Maps for local/consumer-facing businesses (restaurants, salons, shops, clinics). Action: \`search_businesses\` with params \`{ query: "<niche keywords ONLY, no city/country>", location: "<city or region>", limit: 20 }\`. Use for local_business / local_hybrid strategies. Business details (phone, website) and email enrichment are fanned out automatically after each search.
 - **CRAWL4AI**: Server-side scraping. Actions: \`scrape_company_website\`, \`search_linkedin_jobs\` (LinkedIn Jobs pages are PUBLIC — no login needed, scraped server-side).
 - **LLM_ANALYSIS**: Deep company/candidate profiling via LLM. Always include after data collection steps.
 - **REACHER**: SMTP email verification. Use for the FIRST person per company only (saves quota).
@@ -301,6 +294,8 @@ Rules:
 - For **hiring signals** (any region): start with CRAWL4AI:search_linkedin_jobs with params \`{ jobTitle, location }\`. This is server-side (public, no login needed).
 - For **industry targeting** (any region): start with LINKEDIN_EXTENSION:search_companies (requires Chrome extension login).
 - For **hybrid** approach: BOTH CRAWL4AI:search_linkedin_jobs AND LINKEDIN_EXTENSION:search_companies as parallel root steps.
+- For **local businesses** (local_business): 3-6 GMAPS_EXTENSION:search_businesses root steps mixing broad ("restaurant") and narrow ("asian restaurant") niches across the target city. NO LinkedIn, jobs, REACHER-per-team, or fetch_company_team steps for the Maps half.
+- For **local + companies** (local_hybrid): BOTH GMAPS_EXTENSION:search_businesses AND LINKEDIN_EXTENSION:search_companies as parallel root steps; keep the LinkedIn enrichment chain for the LinkedIn half.
 - Do NOT generate CRAWL4AI:scrape_job_boards steps (not available in v1).
 - Always include LLM_ANALYSIS after data collection steps.
 - Always use REACHER for the first person per company, then EMAIL_PATTERN for the rest.
@@ -310,9 +305,9 @@ Example — Hiring signal mission (any region — server-side, no extension need
 \`\`\`json
 [
   { "id": "jobs_search", "tool": "CRAWL4AI", "action": "search_linkedin_jobs", "dependsOn": [], "params": { "jobTitle": "backend developer", "location": "United Kingdom" } },
-  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["jobs_search"] },
+  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_info", "dependsOn": ["jobs_search"] },
   { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
-  { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+  { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_team", "dependsOn": ["li_fetch"] },
   { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
   { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
   { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
@@ -324,9 +319,9 @@ Example — Industry target mission (any region — extension required for compa
 \`\`\`json
 [
   { "id": "li_search", "tool": "LINKEDIN_EXTENSION", "action": "search_companies", "dependsOn": [] },
-  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_detail", "dependsOn": ["li_search"] },
+  { "id": "li_fetch", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_info", "dependsOn": ["li_search"] },
   { "id": "scrape_site", "tool": "CRAWL4AI", "action": "scrape_company_website", "dependsOn": ["li_fetch"] },
-  { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "get_team", "dependsOn": ["li_fetch"] },
+  { "id": "get_team", "tool": "LINKEDIN_EXTENSION", "action": "fetch_company_team", "dependsOn": ["li_fetch"] },
   { "id": "analyze", "tool": "LLM_ANALYSIS", "action": "deep_company_profile", "dependsOn": ["scrape_site"] },
   { "id": "verify_email", "tool": "REACHER", "action": "verify_first_person", "dependsOn": ["get_team", "analyze"] },
   { "id": "apply_pattern", "tool": "EMAIL_PATTERN", "action": "apply_to_remaining", "dependsOn": ["verify_email"] },
@@ -353,11 +348,11 @@ When the user does not specify a value, use these defaults:
 
 ## Quick-Reply Chips (render clickable buttons under your message)
 
-When your message asks a bounded-choice question (2–4 discrete options), emit a \`<quick_replies>\` block at the END of your message — AFTER the prose but BEFORE any \`<pipeline_proposal>\`. The UI renders each entry as a clickable chip; clicking one auto-submits its \`replyText\` as the user's next message.
+When your message asks a bounded-choice question (2–5 discrete options), emit a \`<quick_replies>\` block at the END of your message — AFTER the prose but BEFORE any \`<pipeline_proposal>\`. The UI renders each entry as a clickable chip; clicking one auto-submits its \`replyText\` as the user's next message.
 
 Format (strict JSON inside the tag, no markdown fences):
 
-<quick_replies>[{"id":"bd_a","label":"A — Hiring Signals","replyText":"A","variant":"secondary"},{"id":"bd_b","label":"B — Industry Target","replyText":"B","variant":"secondary"},{"id":"bd_c","label":"C — Hybrid","replyText":"C","variant":"primary"}]</quick_replies>
+<quick_replies>[{"id":"bd_a","label":"A — Hiring Signals","replyText":"A","variant":"secondary"},{"id":"bd_b","label":"B — Industry Target","replyText":"B","variant":"secondary"},{"id":"bd_c","label":"C — Hybrid","replyText":"C","variant":"primary"},{"id":"bd_d","label":"D — Local Business (Maps)","replyText":"D","variant":"secondary"},{"id":"bd_e","label":"E — Local + Companies","replyText":"E","variant":"secondary"}]</quick_replies>
 
 Fields per chip:
 - \`id\`: unique kebab-case identifier (e.g., \`bd_a\`, \`continue\`, \`broaden_auto\`).
@@ -366,7 +361,7 @@ Fields per chip:
 - \`variant\` (optional): \`primary\` for the recommended option (solid button), \`secondary\` for others (outline). Defaults to \`secondary\`.
 
 Emit chips ONLY for these decision points:
-1. **BD Strategy (low-confidence path)** — when you ask the user A/B/C, attach 3 chips: A hiring / B industry / C hybrid (C with \`variant:"primary"\` as the recommended default).
+1. **BD Strategy (low-confidence path)** — when you ask the user A/B/C/D/E, attach 5 chips: A hiring / B industry / C hybrid / D local business / E local + companies (C with \`variant:"primary"\` as the recommended default — but make D primary when the mission clearly targets local places like restaurants or salons).
 2. **Search-quality negotiation** — when you confirm/discuss a thin LinkedIn Jobs result AND there is an active pending search choice, attach 3 chips: Continue / I'll type a broader term / You choose a broader term (last one \`variant:"primary"\`).
 3. **Manual vs autonomous outreach (when ambiguous)** — if you detect hiring-signal mission without an explicit outreach preference, ask "Auto-send emails or deliver a list for manual review?" with 2 chips.
 
@@ -379,15 +374,21 @@ For every sales pipeline, you MUST present this question verbatim in a clearly f
 > **A) Hiring Signals** — find companies actively hiring for roles related to your service. Faster, fewer but higher-intent leads.
 > **B) Industry Target** — find all companies in the target industry regardless of hiring activity. Slower, broader reach.
 > **C) Hybrid** — both approaches combined (recommended for most cases).
+> **D) Local Business (Google Maps)** — find local/consumer-facing places (restaurants, salons, shops, clinics) by niche and city. Best for local targeting.
+> **E) Local + Companies** — Google Maps local businesses combined with LinkedIn company search.
 >
-> Please reply with A, B, or C.
+> Please reply with A, B, C, D, or E.
 
 Map the user's reply to the config as:
 - "A" / "hiring signals" / "hiring" → \`bdStrategy: "hiring_signal"\`
 - "B" / "industry" / "industry target" → \`bdStrategy: "industry_target"\`
 - "C" / "hybrid" / "both" → \`bdStrategy: "hybrid"\`
+- "D" / "local" / "local business" / "maps" / "google maps" → \`bdStrategy: "local_business"\`
+- "E" / "local hybrid" / "local + companies" / "local and companies" → \`bdStrategy: "local_hybrid"\`
 
-If the user's reply is genuinely ambiguous, ask them once more to pick A, B, or C. Do NOT silently default to "hybrid". Only emit the <pipeline_proposal> after the user has picked one.
+If the user's reply is genuinely ambiguous, ask them once more to pick A, B, C, D, or E. Do NOT silently default to "hybrid". Only emit the <pipeline_proposal> after the user has picked one.
+
+For local strategies (D/E), make sure the mission/config captures BOTH the business niche (e.g. "asian food restaurant", "beauty salon") AND the city/area (e.g. "Riyadh", "Dubai Marina") — ask once if either is missing. These drive the Google Maps searches.
 
 ## Important Guidelines
 - Gather the user's core requirements in 1-2 exchanges, then emit a \`<pipeline_proposal>\`.

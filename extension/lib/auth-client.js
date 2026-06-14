@@ -76,7 +76,12 @@ export async function signIn({ serverUrl, email, password }) {
     accessToken: data.accessToken,
     refreshToken: data.refreshToken,
     user: data.user,
+    // Multi-workspace: the popup shows "Connected as X · Processing N
+    // workspace(s)". `tenant` is the default workspace, kept for any UI that
+    // still reads it; `workspaces` is the full membership list.
     tenant: data.tenant,
+    workspaces: Array.isArray(data.workspaces) ? data.workspaces : [],
+    defaultWorkspaceId: data.defaultWorkspaceId ?? data.tenant?.id ?? null,
     serverUrl: origin,
     apiKey: null,
     expiresAt,
@@ -100,7 +105,11 @@ export async function signIn({ serverUrl, email, password }) {
   const latest = await getSession();
   await setSession({ ...latest, apiKey });
 
-  return { user: session.user, tenant: session.tenant };
+  return {
+    user: session.user,
+    tenant: session.tenant,
+    workspaces: session.workspaces,
+  };
 }
 
 export async function refreshSession() {

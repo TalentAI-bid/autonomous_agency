@@ -179,11 +179,30 @@ export async function processFollowupSend(job: Job<FollowupSendJobData>): Promis
   }
 
   // ─── 6. Resolve email account + threading headers ─────────────────────
+  // Prefer the agent's configured outbound account (Agent → Settings →
+  // Outbound email account). Fall back to the global priority picker only
+  // when the agent has no preference or the configured account is gone/inactive.
   let account: EmailAccount | null = null;
-  try {
-    account = await selectEmailAccount(tenantId);
-  } catch {
-    account = null;
+  const configuredId = (agent?.config as Record<string, unknown> | undefined)
+    ?.emailAccountId as string | undefined;
+  if (configuredId) {
+    const [acc] = await withTenant(tenantId, async (tx) => {
+      return tx.select().from(emailAccounts)
+        .where(and(
+          eq(emailAccounts.id, configuredId),
+          eq(emailAccounts.tenantId, tenantId),
+          eq(emailAccounts.isActive, true),
+        ))
+        .limit(1);
+    });
+    if (acc) account = acc;
+  }
+  if (!account) {
+    try {
+      account = await selectEmailAccount(tenantId);
+    } catch {
+      account = null;
+    }
   }
   const fromEmail = account?.fromEmail ?? null;
   if (!fromEmail) {

@@ -5,12 +5,14 @@
 
 const DEFAULT_LIMITS = {
   linkedin: {
-    // batchSize / batchCooldownMs: after every `batchSize` tasks of this
-    // type within the daily window, add a `batchCooldownMs` pause before
-    // the next one. Without this, long runs (50+ companies) tripped
-    // LinkedIn's 429 rate limit even with the per-task minDelay enforced.
-    search_companies:  { dailyCap: 30, minDelayMs: 4000, batchSize: 5, batchCooldownMs: 60000 },
-    fetch_company:     { dailyCap: 100, minDelayMs: 8000, batchSize: 10, batchCooldownMs: 60000 },
+    // Per-task minDelayMs is enforced by waitForSlot's slot-reservation math.
+    // Batch cadence (batchSize/batchCooldownMs) was removed: the service
+    // worker's single-flight taskQueueTail already serialises tasks, and
+    // the server staggers dispatchAfter on bulk fanouts, so the extra
+    // batch counter only ever produced spurious 60s cooldowns that
+    // fail-fast'd the global sentinel and tanked auto-fanned-out fetches.
+    search_companies:  { dailyCap: 30, minDelayMs: 4000 },
+    fetch_company:     { dailyCap: 100, minDelayMs: 8000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },
@@ -98,23 +100,37 @@ export class RateLimiter {
     // saw last=0 and proceeded immediately, tripping LinkedIn 429s.
     const now = Date.now();
     const last = this.lastAction[key] ?? 0;
+    const prevReserved = this.reservedCounts[key] ?? 0;
     const jitterPct = 0.3;
     const jitter = (Math.random() * 2 - 1) * jitterPct * limit.minDelayMs;
     const required = limit.minDelayMs + jitter;
 
     // Batch cadence: after every `batchSize` reservations, add a longer
     // cooldown so LinkedIn gets breathing room on long runs.
-    const reservedIdx = this.reservedCounts[key] ?? 0;
-    this.reservedCounts[key] = reservedIdx + 1;
+    this.reservedCounts[key] = prevReserved + 1;
     const batchSize = limit.batchSize ?? 0;
     const batchCooldownMs = limit.batchCooldownMs ?? 0;
-    const inBatchEnd = batchSize > 0 && reservedIdx > 0 && reservedIdx % batchSize === 0;
+    const inBatchEnd = batchSize > 0 && prevReserved > 0 && prevReserved % batchSize === 0;
     const extraCooldown = inBatchEnd ? batchCooldownMs : 0;
 
     const nextSlot = Math.max(now, last + required) + extraCooldown;
-    this.lastAction[key] = nextSlot;
-
     const waitMs = nextSlot - now;
+
+    // Long waits (batch cooldown) cannot be done via setTimeout in an MV3
+    // service worker — Chrome can idle-kill the SW mid-await, taking the
+    // whole single-flight queue chain with it. Roll back the reservation
+    // and throw so the caller can schedule a chrome.alarms-based cooldown
+    // and fail-fast subsequent tasks until the alarm fires.
+    if (waitMs > 5000) {
+      this.lastAction[key] = last;
+      this.reservedCounts[key] = prevReserved;
+      const err = new Error('batch_cooldown_pending');
+      err.code = 'batch_cooldown_pending';
+      err.cooldownUntil = nextSlot;
+      throw err;
+    }
+
+    this.lastAction[key] = nextSlot;
     if (waitMs > 0) {
       await new Promise((r) => setTimeout(r, Math.ceil(waitMs)));
     }

@@ -20,7 +20,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { apiGet, apiPost } from '@/lib/api';
-import { Chrome, Copy, KeyRound, Trash2, Plug, PlugZap, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Chrome, Copy, KeyRound, Trash2, Plug, PlugZap, AlertTriangle, RotateCcw, OctagonX } from 'lucide-react';
 
 type ExtensionStatus = {
   hasKey: boolean;
@@ -28,6 +28,7 @@ type ExtensionStatus = {
   lastSeenAt: string | null;
   dailyTasksCount: Record<string, number>;
   dailyResetAt: string | null;
+  pendingTaskCount?: number;
 };
 
 type RecentTask = {
@@ -99,6 +100,16 @@ export default function ExtensionSettingsPage() {
     onError: () => toast({ title: 'Failed to reset rate limits', variant: 'destructive' }),
   });
 
+  const cancelPending = useMutation<{ cancelledCount: number }>({
+    mutationFn: () => apiPost<{ cancelledCount: number }>('/extension/tasks/cancel-pending'),
+    onSuccess: (data) => {
+      toast({ title: `Cancelled ${data.cancelledCount} queued task${data.cancelledCount === 1 ? '' : 's'}` });
+      qc.invalidateQueries({ queryKey: ['ext-status'] });
+      qc.invalidateQueries({ queryKey: ['ext-tasks-recent'] });
+    },
+    onError: () => toast({ title: 'Failed to stop queued tasks', variant: 'destructive' }),
+  });
+
   const [shownKey, setShownKey] = React.useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = React.useState(false);
 
@@ -166,6 +177,18 @@ export default function ExtensionSettingsPage() {
             >
               <KeyRound className="w-4 h-4 mr-2" />
               {status?.hasKey ? 'Rotate key' : 'Generate API key'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => cancelPending.mutate()}
+              disabled={cancelPending.isPending || !(status?.pendingTaskCount ?? 0)}
+              title="Cancel every queued and in-flight task for this workspace and tell the extension to stop now"
+            >
+              <OctagonX className="w-4 h-4 mr-2" />
+              {status?.pendingTaskCount
+                ? `Stop & clear ${status.pendingTaskCount} queued task${status.pendingTaskCount === 1 ? '' : 's'}`
+                : 'Stop & clear queued tasks'}
             </Button>
             {status?.hasKey && (
               <Button

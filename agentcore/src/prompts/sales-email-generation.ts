@@ -27,6 +27,7 @@ export interface EmailGenerationContext {
     competitors?: string[];
     recentFunding?: string;
     keyPeople?: Array<{ name: string; title: string }>;
+    openRoles?: Array<{ title: string; salary?: string; location?: string }>;
   };
   sender: {
     companyName?: string;

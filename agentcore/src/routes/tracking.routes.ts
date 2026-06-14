@@ -3,6 +3,7 @@ import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { emailsSent, contacts, campaignContacts } from '../db/schema/index.js';
 import { logActivity } from '../services/crm-activity.service.js';
+import { logEvent } from '../services/timeline.service.js';
 import logger from '../utils/logger.js';
 
 // 1x1 transparent GIF (43 bytes)
@@ -20,14 +21,61 @@ export default async function trackingRoutes(fastify: FastifyInstance) {
     setImmediate(async () => {
       try {
         // Only set openedAt if currently null (first-open tracking)
-        await db.update(emailsSent)
+        const updated = await db.update(emailsSent)
           .set({ openedAt: new Date() })
           .where(
             and(
               eq(emailsSent.trackingId, trackingId),
               isNull(emailsSent.openedAt),
             ),
-          );
+          )
+          .returning({
+            id: emailsSent.id,
+            campaignContactId: emailsSent.campaignContactId,
+            toEmail: emailsSent.toEmail,
+            subject: emailsSent.subject,
+          });
+
+        // Only log the open event on the FIRST open (when the update
+        // touched a row — repeat pixel loads return an empty result).
+        // Look up the contact/tenant chain so the event lands on the
+        // right contact's timeline.
+        if (updated.length > 0) {
+          const row = updated[0]!;
+          if (row.campaignContactId) {
+            const [cc] = await db
+              .select({ contactId: campaignContacts.contactId })
+              .from(campaignContacts)
+              .where(eq(campaignContacts.id, row.campaignContactId))
+              .limit(1);
+            if (cc?.contactId) {
+              const [c] = await db
+                .select({ tenantId: contacts.tenantId })
+                .from(contacts)
+                .where(eq(contacts.id, cc.contactId))
+                .limit(1);
+              if (c?.tenantId) {
+                try {
+                  await logEvent({
+                    tenantId: c.tenantId,
+                    contactId: cc.contactId,
+                    type: 'email_opened',
+                    eventCategory: 'response',
+                    actorType: 'recipient',
+                    title: `Email opened: ${row.subject ?? '(no subject)'}`,
+                    metadata: {
+                      trackingId,
+                      emailsSentId: row.id,
+                      toEmail: row.toEmail,
+                    },
+                  });
+                } catch (err) {
+                  logger.warn({ err, trackingId, contactId: cc.contactId }, 'Failed to log email_opened event');
+                }
+              }
+            }
+          }
+        }
       } catch (err) {
         logger.warn({ err, trackingId }, 'Failed to record email open');
       }

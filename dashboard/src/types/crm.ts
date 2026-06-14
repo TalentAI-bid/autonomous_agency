@@ -17,8 +17,19 @@ export interface CrmStage {
   isDefault: boolean;
   isWon: boolean;
   isLost: boolean;
+  /** Follow-up engine: leads in this stage get cadence-driven follow-up cards. */
+  followUpEligible: boolean;
+  /** Who set the flag: 'ai' classification or a 'user' override (permanent). */
+  followUpClassifiedBy?: 'ai' | 'user' | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type CadenceStrategy = 'fast' | 'mid' | 'slow';
+
+export interface FollowupCadence {
+  strategy: CadenceStrategy;
+  intervals: Record<CadenceStrategy, number[]>;
 }
 
 export interface Deal {

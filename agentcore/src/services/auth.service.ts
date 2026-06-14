@@ -17,6 +17,17 @@ export interface SessionPayload {
   role: UserRole;
 }
 
+// Extension JWT after the multi-workspace migration: tenant-less. The
+// dispatcher and middleware look up the active tenant from user_tenants
+// (default workspace) or the X-Active-Workspace header at request time.
+export interface ExtensionTokenPayload {
+  userId: string;
+  role: UserRole;
+  // Legacy field — only set when minted by the pre-multi-workspace code path.
+  // The auth middleware accepts both shapes during the grace period.
+  tenantId?: string;
+}
+
 let redis: Redis | null = null;
 
 function getRedis(): Redis {
@@ -66,31 +77,40 @@ export async function destroySession(token: string): Promise<void> {
   await getRedis().del(`session:${hashToken(token)}`);
 }
 
-// ─── Extension JWT + refresh token flow (unchanged — extension popup uses it) ─
+// ─── Extension JWT + refresh token flow ──────────────────────────────────────
+// Multi-workspace mode: tokens carry only userId; the active tenant is
+// resolved at request time from user_tenants (default workspace) or, for
+// scoped routes, from the X-Active-Workspace header. Old SessionPayload-shaped
+// arguments still work — the JWT just signs whatever is given — so callers can
+// migrate at their own pace and the auth middleware tolerates both shapes.
 
 export function generateAccessToken(
   fastify: FastifyInstance,
-  payload: SessionPayload,
+  payload: ExtensionTokenPayload | SessionPayload,
 ): string {
   return fastify.jwt.sign(payload, { expiresIn: ACCESS_TOKEN_EXPIRY });
 }
 
 export async function generateRefreshToken(
   userId: string,
-  tenantId: string,
+  tenantId?: string,
 ): Promise<string> {
   const token = crypto.randomBytes(48).toString('hex');
+  // Store only userId by default; tenantId is preserved when provided so any
+  // legacy caller still gets the same blob shape it used to read.
+  const blob: { userId: string; tenantId?: string } = { userId };
+  if (tenantId) blob.tenantId = tenantId;
   await getRedis().setex(
     `refresh:${hashToken(token)}`,
     REFRESH_TOKEN_EXPIRY_SECONDS,
-    JSON.stringify({ userId, tenantId }),
+    JSON.stringify(blob),
   );
   return token;
 }
 
 export async function verifyRefreshToken(
   token: string,
-): Promise<{ userId: string; tenantId: string } | null> {
+): Promise<{ userId: string; tenantId?: string } | null> {
   const data = await getRedis().get(`refresh:${hashToken(token)}`);
   if (!data) return null;
   return JSON.parse(data);
@@ -98,12 +118,12 @@ export async function verifyRefreshToken(
 
 export async function rotateRefreshToken(
   oldToken: string,
-): Promise<{ newToken: string; userId: string; tenantId: string } | null> {
+): Promise<{ newToken: string; userId: string; tenantId?: string } | null> {
   const payload = await verifyRefreshToken(oldToken);
   if (!payload) return null;
   await invalidateRefreshToken(oldToken);
-  const newToken = await generateRefreshToken(payload.userId, payload.tenantId);
-  return { newToken, ...payload };
+  const newToken = await generateRefreshToken(payload.userId);
+  return { newToken, userId: payload.userId, tenantId: payload.tenantId };
 }
 
 export async function invalidateRefreshToken(token: string): Promise<void> {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Chrome,
   Download,
@@ -18,11 +18,14 @@ import {
   History,
   ArrowRight,
   AlertTriangle,
+  OctagonX,
+  PlugZap,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 type TabKey = 'install' | 'shortcuts' | 'whatsnew';
 
@@ -122,6 +125,8 @@ const CHANGELOG = [
 
 export default function LinkedInExtensionPage() {
   const router = useRouter();
+  const qc = useQueryClient();
+  const { toast } = useToast();
   const [tab, setTab] = useState<TabKey>('install');
   const latestQ = useQuery<LatestExtensionRelease>({
     queryKey: ['ext-latest'],
@@ -132,6 +137,25 @@ export default function LinkedInExtensionPage() {
   });
   const latest = latestQ.data;
   const downloadHref = latest?.downloadUrl ?? latest?.zipUrl;
+
+  // Live connection + queue depth so the user can stop the extension from the
+  // page the sidebar actually opens (the detailed controls live under
+  // Settings → Extension via "Manage connection").
+  const statusQ = useQuery<{ connected: boolean; pendingTaskCount?: number }>({
+    queryKey: ['ext-status'],
+    queryFn: () => apiGet<{ connected: boolean; pendingTaskCount?: number }>('/extension/status'),
+    refetchInterval: 5000,
+  });
+  const pendingTaskCount = statusQ.data?.pendingTaskCount ?? 0;
+
+  const cancelPending = useMutation<{ cancelledCount: number }>({
+    mutationFn: () => apiPost<{ cancelledCount: number }>('/extension/tasks/cancel-pending'),
+    onSuccess: (d) => {
+      toast({ title: `Cancelled ${d.cancelledCount} queued task${d.cancelledCount === 1 ? '' : 's'}` });
+      qc.invalidateQueries({ queryKey: ['ext-status'] });
+    },
+    onError: () => toast({ title: 'Failed to stop queued tasks', variant: 'destructive' }),
+  });
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-10">
@@ -188,6 +212,32 @@ export default function LinkedInExtensionPage() {
               Manage connection
               <ArrowRight className="w-4 h-4" />
             </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="gap-2"
+              onClick={() => cancelPending.mutate()}
+              disabled={cancelPending.isPending || !pendingTaskCount}
+              title="Cancel every queued and in-flight task for this workspace and tell the extension to stop now"
+            >
+              <OctagonX className="w-4 h-4" />
+              {pendingTaskCount
+                ? `Stop & clear ${pendingTaskCount} queued task${pendingTaskCount === 1 ? '' : 's'}`
+                : 'Stop & clear queued tasks'}
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
+            {statusQ.data?.connected && (
+              <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                <PlugZap className="w-3.5 h-3.5" /> Extension connected
+              </span>
+            )}
+            <span className="tabular-nums">
+              {pendingTaskCount
+                ? `${pendingTaskCount} task${pendingTaskCount === 1 ? '' : 's'} queued for this workspace`
+                : 'No tasks queued'}
+            </span>
           </div>
 
           {latestQ.isError && (

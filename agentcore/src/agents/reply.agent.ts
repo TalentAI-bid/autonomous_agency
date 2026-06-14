@@ -2,15 +2,15 @@ import { eq, and } from 'drizzle-orm';
 import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { replies, emailsSent, campaignContacts, contacts, masterAgents, emailAccounts, emailListenerConfigs } from '../db/schema/index.js';
-import { enqueueEmail } from '../tools/email-queue.tool.js';
 import { logActivity, ensureDeal, moveDealStage, findStageBySlug } from '../services/crm-activity.service.js';
+import { recordResponse } from '../services/prospect-stage.service.js';
+import { microTriage } from '../services/triage.service.js';
 import { buildSystemPrompt, buildUserPrompt, type ReplyAnalysis } from '../prompts/reply.prompt.js';
 import {
   buildSystemPrompt as inboundSystemPrompt,
   buildUserPrompt as inboundUserPrompt,
   type InboundEmailAnalysis,
 } from '../prompts/inbound-email.prompt.js';
-import { buildSystemPrompt as outreachSystemPrompt } from '../prompts/outreach.prompt.js';
 import { emailIntelligenceEngine } from '../tools/email-intelligence.js';
 import logger from '../utils/logger.js';
 
@@ -30,61 +30,20 @@ export class ReplyAgent extends BaseAgent {
     replyBody: string;
     promptInstruction: string;
   }): Promise<boolean> {
-    try {
-      // Load configured email account from master agent config
-      let responseFromEmail = opts.fromEmail;
-      let emailAccountId: string | undefined;
-      const [masterAgent] = await withTenant(this.tenantId, async (tx) => {
-        return tx.select({
-          config: masterAgents.config,
-          description: masterAgents.description,
-          mission: masterAgents.mission,
-          useCase: masterAgents.useCase,
-        }).from(masterAgents)
-          .where(and(eq(masterAgents.id, opts.masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
-          .limit(1);
-      });
-      const agentConfig = (masterAgent?.config as Record<string, unknown>) ?? {};
-      const configuredEmailAccountId = agentConfig.emailAccountId as string | undefined;
-      const emailRules = (agentConfig.emailRules as string[]) ?? undefined;
-      const autoResponseContext = masterAgent ? {
-        useCase: masterAgent.useCase,
-        description: masterAgent.description ?? undefined,
-        mission: masterAgent.mission ?? undefined,
-        valueProposition: (agentConfig.valueProposition as string) ?? undefined,
-        emailRules,
-      } : undefined;
-      if (configuredEmailAccountId) {
-        const [emailAccount] = await withTenant(this.tenantId, async (tx) => {
-          return tx.select().from(emailAccounts)
-            .where(and(eq(emailAccounts.id, configuredEmailAccountId), eq(emailAccounts.tenantId, this.tenantId), eq(emailAccounts.isActive, true)))
-            .limit(1);
-        });
-        if (emailAccount) {
-          responseFromEmail = emailAccount.fromEmail;
-          emailAccountId = emailAccount.id;
-        }
-      }
-
-      const responseText = await this.callClaude(
-        outreachSystemPrompt('professional', autoResponseContext),
-        opts.promptInstruction,
-      );
-      await enqueueEmail({
+    // AUTO-REPLY DISABLED. Replies are classified, logged to CRM, and re-triaged
+    // into the queue, but no email is sent automatically — the user reviews and
+    // sends from the queue / inbox. Previously this path was firing replies to
+    // MAILER-DAEMON bounces and no-reply@ confirmation emails with malformed
+    // bodies. See queue triage / inbox copilot for the human-in-the-loop path.
+    logger.info(
+      {
         tenantId: this.tenantId,
-        contactId: opts.contactId,
-        emailAccountId,
-        fromEmail: responseFromEmail,
-        toEmail: opts.toEmail,
-        subject: `Re: ${opts.subject ?? ''}`,
-        body: `<p>${responseText.replace(/\n/g, '<br>')}</p>`,
         masterAgentId: opts.masterAgentId,
-      });
-      return true;
-    } catch (err) {
-      logger.warn({ err, tenantId: this.tenantId }, 'Failed to enqueue auto-response');
-      return false;
-    }
+        toEmail: opts.toEmail,
+      },
+      'sendAutoResponse skipped — auto-reply disabled',
+    );
+    return false;
   }
   async execute(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { replyId, masterAgentId } = input as { replyId: string; masterAgentId: string };
@@ -351,15 +310,22 @@ export class ReplyAgent extends BaseAgent {
 
     // CRM: Log activity and move deal stage based on classification
     if (contactId) {
+      let timelineEventId: string | undefined;
       try {
-        await logActivity({
+        const { id: eventId } = await (await import('../services/timeline.service.js')).logEvent({
           tenantId: this.tenantId,
           contactId,
-          masterAgentId,
           type: 'email_replied',
+          eventCategory: 'response',
+          actorType: 'recipient',
+          masterAgentId,
           title: `Reply classified as: ${analysis.classification}`,
           metadata: { replyId, classification: analysis.classification, sentiment: analysis.sentiment },
         });
+        timelineEventId = eventId;
+
+        // Mirror to prospect_stages: promote to 'engaged' if not already past it.
+        await recordResponse({ tenantId: this.tenantId, contactId, channel: 'email' });
 
         // Move deal stage for certain classifications
         const dealResult = await ensureDeal({ tenantId: this.tenantId, contactId, masterAgentId });
@@ -376,6 +342,13 @@ export class ReplyAgent extends BaseAgent {
         }
       } catch (err) {
         logger.warn({ err, contactId }, 'Failed to update CRM for reply');
+      }
+
+      // Re-triage: an inbound reply may promote/supersede the user's pending action.
+      try {
+        await microTriage({ tenantId: this.tenantId, contactId, triggerEventId: timelineEventId });
+      } catch (err) {
+        logger.warn({ err, contactId }, 'microTriage failed after reply classification');
       }
     }
 

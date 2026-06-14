@@ -6,6 +6,7 @@ import { scrape } from '../tools/crawl4ai.tool.js';
 import { buildCopilotSystemPrompt, buildProductSuggestPrompt } from '../prompts/copilot.prompt.js';
 import { updateTenant } from './tenant.service.js';
 import { NotFoundError, ValidationError, ConflictError } from '../utils/errors.js';
+import { extractJSONFromText } from '../utils/json-extract.js';
 import type { ChatMessage } from '../tools/together-ai.tool.js';
 import { db } from '../config/database.js';
 import logger from '../utils/logger.js';
@@ -184,8 +185,7 @@ export async function* sendCopilotMessageStream(
 
   if (profileMatch) {
     try {
-      const cleaned = profileMatch[1]!.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      profileData = JSON.parse(cleaned);
+      profileData = extractJSONFromText<Record<string, unknown>>(profileMatch[1]!);
     } catch (err) {
       logger.warn({ err }, 'Failed to parse company profile JSON from copilot response');
     }
@@ -197,8 +197,7 @@ export async function* sendCopilotMessageStream(
 
   if (productsMatch) {
     try {
-      const cleaned = productsMatch[1]!.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      productsData = JSON.parse(cleaned);
+      productsData = extractJSONFromText<Array<Record<string, unknown>>>(productsMatch[1]!);
     } catch (err) {
       logger.warn({ err }, 'Failed to parse products JSON from copilot response');
     }

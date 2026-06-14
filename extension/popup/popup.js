@@ -71,10 +71,18 @@ async function refresh() {
     els.usageSection.hidden = false;
 
     const user = state.user || {};
+    const workspaces = Array.isArray(state.workspaces) ? state.workspaces : [];
     const tenant = state.tenant || {};
+    // Multi-workspace: a single extension session drains tasks across every
+    // workspace the user is a member of, so we show the count instead of a
+    // single workspace name. Falls back to the legacy single-tenant label
+    // when the server didn't send a workspaces[] (older agentcore builds).
+    const sub = workspaces.length > 0
+      ? `Processing ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'}`
+      : (tenant.name || '');
     els.userLine.innerHTML = `
       <strong>${escapeHtml(user.name || user.email || 'Signed in')}</strong>
-      <span class="tenant">${escapeHtml(tenant.name || '')}</span>
+      <span class="tenant">${escapeHtml(sub)}</span>
     `;
 
     els.pauseBtn.hidden = !!state.paused;

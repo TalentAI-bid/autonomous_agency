@@ -8,7 +8,7 @@ import authPlugin from './middleware/auth.js';
 import tenantPlugin from './middleware/tenant.js';
 import rateLimitPlugin from './middleware/rate-limit.js';
 import realtimePlugin, { startRealtimeRelay } from './websocket/realtime.js';
-import extensionWsPlugin, { startExtensionRelay } from './websocket/extension.js';
+import extensionWsPlugin, { startExtensionRelay, clearOrphanSessionsOnBoot } from './websocket/extension.js';
 import { closeAllQueues } from './queues/queues.js';
 import { closeAllWorkers, registerTenantWorkers, scheduleAgentJobs } from './queues/workers.js';
 import { closeRedisConnections } from './queues/setup.js';
@@ -27,6 +27,7 @@ import tenantRoutes from './routes/tenant.routes.js';
 import masterAgentRoutes from './routes/master-agent.routes.js';
 import agentRoutes from './routes/agent.routes.js';
 import contactRoutes from './routes/contact.routes.js';
+import queueRoutes from './routes/queue.routes.js';
 import companyRoutes from './routes/company.routes.js';
 import campaignRoutes from './routes/campaign.routes.js';
 import documentRoutes from './routes/document.routes.js';
@@ -53,6 +54,7 @@ import copilotRoutes from './routes/copilot.routes.js';
 import exportRoutes from './routes/export.routes.js';
 import fitScoreRoutes from './routes/fit-score.routes.js';
 import followupRoutes from './routes/followup.routes.js';
+import studioRoutes from './routes/studio.routes.js';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -165,7 +167,11 @@ async function buildApp() {
   await fastify.register(masterAgentRoutes, { prefix: '/api/master-agents' });
   await fastify.register(agentRoutes, { prefix: '/api/agents' });
   await fastify.register(contactRoutes, { prefix: '/api/contacts' });
+  // Sales Ops Stage 4 — daily queue + prospect-actions endpoints. Mounted
+  // under /api/queue with the /actions/:id/<verb> sub-resource.
+  await fastify.register(queueRoutes, { prefix: '/api/queue' });
   await fastify.register(companyRoutes, { prefix: '/api/companies' });
+  await fastify.register(studioRoutes, { prefix: '/api/studio' });
   await fastify.register(campaignRoutes, { prefix: '/api/campaigns' });
   await fastify.register(documentRoutes, { prefix: '/api/documents' });
   await fastify.register(analyticsRoutes, { prefix: '/api/analytics' });
@@ -211,6 +217,15 @@ async function start() {
   await startRealtimeRelay();
   await startExtensionRelay();
 
+  // Clear any extension_sessions rows still flagged connected=true from a
+  // prior process death. Without this, the dispatcher would dispatch tasks
+  // to a dead in-memory socket and the message would vanish.
+  try {
+    await clearOrphanSessionsOnBoot();
+  } catch (err) {
+    logger.warn({ err }, 'Failed to clear orphan extension sessions on boot');
+  }
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutting down gracefully...');
@@ -243,8 +258,10 @@ async function start() {
     // dispatchAfter just passed (search_companies / fetch_company fan-outs
     // are staggered into batches of 10, see enqueueExtensionTaskBatch).
     try {
-      const { startScheduledDispatcher } = await import('./services/extension-dispatcher.js');
+      const { startScheduledDispatcher, startStuckDispatchedWatchdog } =
+        await import('./services/extension-dispatcher.js');
       startScheduledDispatcher();
+      startStuckDispatchedWatchdog();
     } catch (err) {
       logger.warn({ err }, 'Failed to start scheduled extension dispatcher');
     }

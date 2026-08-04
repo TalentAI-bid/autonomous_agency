@@ -164,3 +164,6 @@ Screenshot 2026-04-26 105509.png
 
 # CRX signing key (never commit)
 extension-private.pem
+
+# Internal cost analysis (pricing / infra details — keep out of the repo)
+COST_PER_LEAD_ANALYSIS.md

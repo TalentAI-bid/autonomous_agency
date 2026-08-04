@@ -59,6 +59,8 @@ export interface ProspectListRow {
   linkedinUrl?: string | null;
   companyName?: string | null;
   title?: string | null;
+  headline?: string | null;
+  about?: string | null;
   location?: string | null;
   score?: number | null;
   status: string;

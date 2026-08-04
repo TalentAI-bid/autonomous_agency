@@ -9,9 +9,11 @@
 @layer base {
   :root {
     /* ─── Tweakable knobs ─────────────────────────────────────────── */
-    --accent-h: 221;
-    --accent-c: 0.18;
-    --accent-l: 0.52;
+    /* Emerald-teal brand (#10b981). Hue 162 ≈ emerald; lightness kept
+       dark enough (0.62) that solid buttons hold readable white text. */
+    --accent-h: 162;
+    --accent-c: 0.14;
+    --accent-l: 0.62;
     --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
     --accent-weak: oklch(0.97 0.03 var(--accent-h));
     --accent-mid: oklch(0.90 0.08 var(--accent-h));
@@ -69,19 +71,19 @@
     --card-foreground: 60 6% 16%;
     --popover: 0 0% 100%;
     --popover-foreground: 60 6% 16%;
-    --primary: 221 72% 42%;
+    --primary: 160 84% 39%;
     --primary-foreground: 0 0% 100%;
     --secondary: 50 10% 95%;
     --secondary-foreground: 60 6% 20%;
     --muted: 50 10% 95%;
     --muted-foreground: 50 4% 44%;
-    --accent-hsl: 221 72% 42%;
+    --accent-hsl: 160 84% 39%;
     --accent-foreground: 0 0% 100%;
     --destructive: 25 75% 52%;
     --destructive-foreground: 0 0% 100%;
     --border: 60 5% 88%;
     --input: 60 5% 88%;
-    --ring: 221 72% 42%;
+    --ring: 160 84% 39%;
     --radius: 3px;
     --sidebar: 48 14% 96%;
     --sidebar-foreground: 60 6% 20%;
@@ -152,6 +154,36 @@
   0%, 100% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--up) 20%, transparent); }
   50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--up) 8%, transparent); }
 }
+.pulse-dot { animation: pulse-soft 1.4s ease-in-out infinite; }
+@keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ─── Lead card (prospects / companies grid) ────────────────────── */
+.leads-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 1180px) { .leads-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px)  { .leads-grid { grid-template-columns: minmax(0, 1fr); } }
+.lead-card:hover {
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--ink) 8%, transparent);
+}
+.filter-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  font-size: 12.5px; color: var(--ink-2);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.filter-pill:hover { border-color: var(--line-strong); background: var(--hover); }
+.filter-pill select {
+  border: none; background: transparent; outline: none;
+  font: inherit; color: inherit; cursor: pointer; padding-right: 2px;
+}
 
 /* ─── App shell ─────────────────────────────────────────────────── */
 .app-shell {
@@ -177,8 +209,8 @@
 }
 .brand-mark {
   width: 22px; height: 22px;
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--accent);
+  color: #fff;
   display: grid; place-items: center;
   font-family: var(--ff-display);
   font-size: 14px;

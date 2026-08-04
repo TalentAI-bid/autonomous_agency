@@ -96,6 +96,11 @@ export async function scheduleAgentJobs(
   registerTenantWorkers(tenantId);
   const enabledAgents = (config.enabledAgents as string[]) ?? [];
   const enableOutreach = config.enableOutreach !== false; // default true for backward compat
+  // List-bounded agents (seeded from an uploaded company list) must never run
+  // discovery — skip the company-finding crons (master-orchestrate loop +
+  // reddit-monitor) so nothing new is invented. Enrichment/scoring/outreach
+  // still run normally off the seeded companies.
+  const isListBounded = Array.isArray(config.verificationList) && (config.verificationList as unknown[]).length > 0;
 
   // Schedule email-send repeatable job (every 10s) if outreach/email-send enabled AND outreach not disabled
   if (enableOutreach && (!enabledAgents.length || enabledAgents.includes('email-send') || enabledAgents.includes('outreach'))) {
@@ -113,7 +118,7 @@ export async function scheduleAgentJobs(
   }
 
   // Schedule reddit-monitor repeatable job (every 4 hours)
-  if (!enabledAgents.length || enabledAgents.includes('reddit-monitor')) {
+  if (!isListBounded && (!enabledAgents.length || enabledAgents.includes('reddit-monitor'))) {
     const redditMonitorQueue = getQueue(tenantId, 'reddit-monitor');
     const existingRedditJobs = await redditMonitorQueue.getRepeatableJobs();
     const staleRedditJob = existingRedditJobs.find(j => j.id === `reddit-monitor-${tenantId}`);
@@ -157,8 +162,11 @@ export async function scheduleAgentJobs(
     });
   }
 
-  // Schedule master-orchestrate repeatable job (every 60s while running)
-  if (!enabledAgents.length || enabledAgents.includes('discovery')) {
+  // Schedule master-orchestrate repeatable job (every 60s while running).
+  // Skipped for list-bounded agents — the orchestrate loop's job is discovery,
+  // which they must not do; enrichment is auto-dispatched on extension-task
+  // completion regardless.
+  if (!isListBounded && (!enabledAgents.length || enabledAgents.includes('discovery'))) {
     const discoveryQueue = getQueue(tenantId, 'discovery');
     const existingOrchJobs = await discoveryQueue.getRepeatableJobs();
     const staleOrchJob = existingOrchJobs.find(j => j.id === `master-orchestrate-${tenantId}-${agentId}`);

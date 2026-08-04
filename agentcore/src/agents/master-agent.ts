@@ -17,6 +17,14 @@ import { buildLinkedInCompanySearchURL } from '../services/linkedin-url.service.
 import logger from '../utils/logger.js';
 import { logPipelineError } from '../utils/pipeline-error.js';
 
+// list_verification pacing. Google Maps is the bottleneck (free plan: 200
+// searches/day), so Maps tasks are dispatched in batches of 20 spaced ~2h
+// apart (10 batches ≈ 200/day) via extensionTasks.dispatchAfter. LinkedIn is
+// unchanged — just a light stagger; its own 80/day cap throttles it.
+const LIST_VERIFICATION_GMAPS_BATCH_SIZE = 20;
+const LIST_VERIFICATION_BATCH_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const LIST_VERIFICATION_LINKEDIN_STAGGER_MS = 3000;
+
 export class MasterAgent extends BaseAgent {
   constructor(opts: { tenantId: string; masterAgentId: string }) {
     super({ ...opts, agentType: 'discovery' });
@@ -59,9 +67,52 @@ export class MasterAgent extends BaseAgent {
     const agentConfig = (agent.config as Record<string, unknown>) ?? {};
     const dryRun = inputDryRun ?? (agentConfig.dryRun as boolean) ?? false;
 
+    // ── Single execution gate: the LinkedIn/Chrome extension ──────────────
+    // The ONLY thing that stops an agent from running is a missing extension.
+    // If it isn't connected, tag the agent `paused` (pauseReason=extension_required)
+    // and return immediately — the WS reconnect handler auto-resumes exactly
+    // these agents (resumeExtensionPausedAgents) the moment the extension comes
+    // online. No data/action-plan completeness is checked; creation + run are
+    // otherwise unconditional.
+    {
+      const { isExtensionConnected } = await import('../services/extension-dispatcher.js');
+      const extensionOnline = await isExtensionConnected(this.tenantId);
+      if (!extensionOnline) {
+        await withTenant(this.tenantId, async (tx) => {
+          await tx
+            .update(masterAgents)
+            .set({
+              status: 'paused',
+              config: { ...agentConfig, pauseReason: 'extension_required' },
+              updatedAt: new Date(),
+            })
+            .where(eq(masterAgents.id, masterAgentId));
+        });
+        this.sendMessage(null, 'system_alert', {
+          action: 'extension_required',
+          severity: 'warning',
+          extensionConnected: false,
+          message:
+            'Connect the LinkedIn Chrome extension to start this agent. ' +
+            'Execution is paused until the extension is connected — it will resume automatically.',
+        });
+        logger.warn(
+          { masterAgentId, tenantId: this.tenantId },
+          'MasterAgent paused — LinkedIn extension not connected (single execution gate)',
+        );
+        return { masterAgentId, status: 'paused', dispatched: 0, dispatchedJobIds: [] };
+      }
+    }
+
     // Read enabled agents from config (null = all agents, for backwards compat)
     const enabledAgents = (agentConfig.enabledAgents as string[]) ?? null;
-    const hasDiscovery = !enabledAgents || enabledAgents.includes('discovery');
+    // List-bounded agents (seeded from an uploaded company list) must NEVER
+    // discover new companies — their target set is fixed to the file. Disable
+    // ALL discovery (query-gen, company-finder, the orchestrate loop, and the
+    // scheduled discovery/reddit crons) so nothing is invented.
+    const isListBounded = Array.isArray(agentConfig.verificationList)
+      && (agentConfig.verificationList as unknown[]).length > 0;
+    const hasDiscovery = (!enabledAgents || enabledAgents.includes('discovery')) && !isListBounded;
     const enableOutreach = agentConfig.enableOutreach !== false; // default true for backward compat
 
     let requirements: Record<string, unknown> = {};
@@ -80,7 +131,13 @@ export class MasterAgent extends BaseAgent {
     // not clobber config.salesStrategy / pipelineSteps with a stale rebuild.
     let strategyFreshlyGenerated = false;
 
-    if (hasDiscovery) {
+    // List-bounded agents must ENTER this block too: it holds the whole
+    // pipeline (requirements → pipelineContext → action plan + gate →
+    // strategist → dispatch loop → per-company list gathering), not just
+    // discovery. `hasDiscovery` stays false for them, so the genuinely
+    // discovery-only sub-parts (query-gen below, SearXNG health, company-finder
+    // dispatch) remain skipped — nothing is invented.
+    if (hasDiscovery || isListBounded) {
       // 3. Parse requirements using Together AI
       const requirementsMessages = [
         { role: 'system' as const, content: masterSystemPrompt() },
@@ -226,9 +283,10 @@ export class MasterAgent extends BaseAgent {
         logger.warn({ err, masterAgentId }, 'Failed to load company profile / products');
       }
 
-      // 3c-iii. Action plan — generate (if not yet present) and gate the rest
-      // of the pipeline on user completion. Without this, outreach goes out
-      // missing facts the agent can't infer (links, comp band, calendly, etc.).
+      // 3c-iii. Action plan — generate (if not yet present) as OPTIONAL, editable
+      // context. It no longer gates the run: the extension is the single execution
+      // gate (see top of execute). The plan's answers still fold into strategy +
+      // email prompts when present, but a run never waits on them.
       const existingPlan = (agent.actionPlan as ActionPlan | null) ?? null;
       let actionPlan: ActionPlan;
       if (!existingPlan) {
@@ -244,37 +302,6 @@ export class MasterAgent extends BaseAgent {
         };
       } else {
         actionPlan = existingPlan;
-      }
-
-      const planNeedsAnswers = actionPlan.status === 'pending';
-      if (planNeedsAnswers) {
-        // Persist plan + flip status; user must answer before pipeline proceeds.
-        await withTenant(this.tenantId, async (tx) => {
-          await tx.update(masterAgents).set({
-            actionPlan,
-            status: 'awaiting_action_plan',
-            config: { ...agentConfig, pipelineContext },
-            updatedAt: new Date(),
-          }).where(eq(masterAgents.id, masterAgentId));
-        });
-        const requiredOpen = actionPlan.items.filter(i => i.required && !i.answer).length;
-        this.sendMessage(null, 'system_alert', {
-          action: 'action_plan_required',
-          severity: 'warning',
-          requiredOpen,
-          totalItems: actionPlan.items.length,
-          message: `I need ${requiredOpen} answer${requiredOpen === 1 ? '' : 's'} from you before outreach can start. Please open the master agent and complete the Action Plan.`,
-        });
-        logger.info(
-          { masterAgentId, requiredOpen, totalItems: actionPlan.items.length },
-          'MasterAgent paused — action plan awaiting user answers',
-        );
-        return {
-          masterAgentId,
-          status: 'awaiting_action_plan',
-          actionPlan,
-          dispatched: 0,
-        };
       }
 
       // Action plan exists and is complete (or had nothing required) — persist
@@ -635,7 +662,40 @@ export class MasterAgent extends BaseAgent {
               const LINKEDIN_SCRAPE_DELAY_MS = 3000;
               let crawlIsFirstCall = true;
 
+              // ── List-bounded discovery ─────────────────────────────────────
+              // When the agent was seeded from an uploaded company list
+              // (config.verificationList — see `isListBounded` at the top of
+              // execute), its target set is FIXED to that list. We replace the
+              // strategist's broad discovery (which would invent new companies)
+              // with per-company LinkedIn/Maps/website lookups, but leave
+              // everything else (enrichment, scoring, outreach, queue) running
+              // normally — so it behaves like any other agent.
+              if (isListBounded) {
+                // Idempotent — if the action-plan gate already kicked off the
+                // gathering on an earlier run, this is a no-op.
+                const dispatched = await this.maybeDispatchListGathering(masterAgentId, agentConfig);
+                extensionTasksDispatched += dispatched;
+                logger.info(
+                  { masterAgentId, dispatched },
+                  'List-bounded discovery: per-company lookups instead of broad search',
+                );
+              }
+
               for (const step of pipelineSteps) {
+                // List-bounded agents skip the strategist's broad-discovery steps
+                // (search_companies / Maps / Crawl jobs) — those would discover
+                // NEW companies. Non-discovery steps still run normally.
+                if (
+                  isListBounded
+                  && (step.tool === 'LINKEDIN_EXTENSION' || step.tool === 'GMAPS_EXTENSION' || step.tool === 'CRAWL4AI')
+                ) {
+                  logger.debug(
+                    { masterAgentId, stepId: step.id, tool: step.tool, action: step.action },
+                    'List-bounded agent: skipping broad-discovery step (companies come from the uploaded list)',
+                  );
+                  continue;
+                }
+
                 // Skip steps that fillStrategyDefaults marked inactive (e.g. search steps
                 // without keywords that we refuse to auto-fill with broad terms).
                 if ((step as any).inactive) {
@@ -1151,7 +1211,8 @@ export class MasterAgent extends BaseAgent {
       // 5. Generate search queries — only needed for legacy SearXNG path.
       // When USE_COMPANY_FINDER=true, the company-finder agent runs its own
       // mission analysis against SITE_CONFIGS and does not consume `queries`.
-      if (!env.USE_COMPANY_FINDER) {
+      // Discovery-only: list-bounded agents (hasDiscovery=false) never search.
+      if (hasDiscovery && !env.USE_COMPANY_FINDER) {
         const queryMessages = [
           { role: 'system' as const, content: discoverySystemPrompt(agent.useCase) },
           {
@@ -1374,6 +1435,45 @@ export class MasterAgent extends BaseAgent {
             message: userMessage,
           });
         }
+      } else if (needsExtension && !extensionOnline) {
+        // Extension is REQUIRED for this region but not connected. Do NOT fall
+        // through to the crawler fallback — that silently scrapes job boards
+        // (Dice/Glassdoor) and produces companies with no contacts and a fake
+        // hiringSignal. Instead, pause and require the extension, mirroring the
+        // awaiting_action_plan "blocked, waiting on user" pattern above (~280).
+        const ds = pipelineContext?.sales?.salesStrategy?.dataSourceStrategy ?? null;
+        const message =
+          (ds?.userNotes as string | undefined) ??
+          'Connect the LinkedIn Chrome extension to start discovery for this region. ' +
+            'Discovery is paused until the extension is connected — then re-run the agent.';
+
+        await withTenant(this.tenantId, async (tx) => {
+          await tx
+            .update(masterAgents)
+            .set({
+              status: 'paused',
+              // Tag WHY we paused so the extension WS connect handler can
+              // auto-resume exactly these agents (and not ones paused for
+              // other reasons) the moment the extension reconnects.
+              config: { ...agentConfig, pipelineContext, pauseReason: 'extension_required' },
+              updatedAt: new Date(),
+            })
+            .where(eq(masterAgents.id, masterAgentId));
+        });
+
+        this.sendMessage(null, 'system_alert', {
+          action: 'extension_required',
+          severity: 'warning',
+          dataSourceStrategy: ds,
+          extensionConnected: false,
+          message,
+        });
+        logger.warn(
+          { masterAgentId, tenantId: this.tenantId, region: ds?.primaryRegion ?? null },
+          'MasterAgent paused — LinkedIn extension required but not connected; crawler fallback suppressed',
+        );
+
+        return { masterAgentId, status: 'paused', dispatched: 0, dispatchedJobIds: [] };
       } else if (env.USE_COMPANY_FINDER) {
         // New path: LLM-based agent selector picks company-finder and/or candidate-finder.
         // Keyword hints pulled from requirements + any opportunity-focused strategy queries.
@@ -1598,6 +1698,182 @@ export class MasterAgent extends BaseAgent {
   }
 
   /**
+   * Dispatch the uploaded-list data-gathering exactly once for a list-bounded
+   * agent. Idempotent via `config.listGatheringDispatchedAt`: the first run
+   * (often while the action plan is still pending) fires the LinkedIn/Maps/
+   * website lookups; later runs (e.g. after the action plan is completed and
+   * the full pipeline proceeds) see the stamp and skip, so we never re-search
+   * the same companies and burn quota. Returns the number of tasks enqueued.
+   */
+  private async maybeDispatchListGathering(
+    masterAgentId: string,
+    agentConfig: Record<string, unknown>,
+  ): Promise<number> {
+    const list = agentConfig.verificationList;
+    if (!Array.isArray(list) || list.length === 0) return 0;
+    if (agentConfig.listGatheringDispatchedAt) return 0; // already gathered
+
+    const dispatched = await this.dispatchListVerification(masterAgentId, agentConfig);
+    const stamp = new Date().toISOString();
+    (agentConfig as Record<string, unknown>).listGatheringDispatchedAt = stamp;
+    // Durable stamp so a re-run can't double-dispatch even if the surrounding
+    // code path returns before persisting the full config.
+    try {
+      await withTenant(this.tenantId, async (tx) => {
+        const [row] = await tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId))).limit(1);
+        const cfg = (row?.config as Record<string, unknown>) ?? {};
+        await tx.update(masterAgents)
+          .set({ config: { ...cfg, listGatheringDispatchedAt: stamp }, updatedAt: new Date() })
+          .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)));
+      });
+    } catch (err) {
+      logger.warn({ err, masterAgentId }, 'Failed to persist listGatheringDispatchedAt (non-fatal)');
+    }
+    return dispatched;
+  }
+
+  /**
+   * Dispatch the uploaded company list: for each company in the
+   * user-uploaded list (config.verificationList), enqueue a name-scoped
+   * LinkedIn company search and a name-scoped Google Maps search — both
+   * carrying `strictMatch` so the ingestion attaches the single best
+   * name-match to the pre-created row and creates nothing else. The provided
+   * source URL is crawled with Crawl4AI in the background (never LinkedIn /
+   * LinkedIn company search and a name-scoped Google Maps search — both
+   * carrying `strictMatch` so the ingestion attaches the single best
+   * name-match to the pre-created row and creates nothing else. The provided
+   * source URL is crawled with Crawl4AI in the background (never LinkedIn /
+   * Maps — guarded by isCrawlable). The real website found via LinkedIn is
+   * crawled later in handleCompanyInfoComplete (crawlWebsite flag).
+   *
+   * No geography filter — the agent investigates each named company directly.
+   * Returns the number of extension tasks enqueued.
+   */
+  private async dispatchListVerification(
+    masterAgentId: string,
+    agentConfig: Record<string, unknown>,
+  ): Promise<number> {
+    const list = (agentConfig.verificationList as Array<{
+      companyId: string;
+      name: string;
+      sourceUrl?: string | null;
+      notes?: string | null;
+    }> | undefined) ?? [];
+
+    if (list.length === 0) {
+      this.sendMessage(null, 'system_alert', {
+        action: 'list_verification_empty',
+        severity: 'warning',
+        message: 'No companies found on this agent — upload a CSV/Excel list before running.',
+      });
+      logger.warn({ masterAgentId }, 'list_verification: empty verificationList');
+      return 0;
+    }
+
+    const { enqueueExtensionTask, crawlAndStoreForCompany } = await import('../services/extension-dispatcher.js');
+
+    // Pacing via dispatchAfter is durable — the extension drainer releases each
+    // task when its time arrives, even across worker restarts. Maps is batched
+    // (20 per ~2h) to spread the 200/day free-plan quota; LinkedIn gets a light
+    // stagger and is throttled by its own 80/day cap (over-cap tasks stay
+    // pending and retry — nothing is dropped).
+    const now = Date.now();
+    let enqueued = 0;
+
+    for (let i = 0; i < list.length; i++) {
+      const entry = list[i]!;
+      if (!entry.companyId || !entry.name?.trim()) continue;
+      const name = entry.name.trim();
+      const linkedinDispatchAfter = new Date(now + i * LIST_VERIFICATION_LINKEDIN_STAGGER_MS);
+      const gmapsBatchIndex = Math.floor(i / LIST_VERIFICATION_GMAPS_BATCH_SIZE);
+      const gmapsDispatchAfter = new Date(now + gmapsBatchIndex * LIST_VERIFICATION_BATCH_INTERVAL_MS);
+
+      // LinkedIn — search by name, no geo facet. (Cap/behaviour unchanged.)
+      try {
+        await enqueueExtensionTask({
+          tenantId: this.tenantId,
+          masterAgentId,
+          site: 'linkedin',
+          type: 'search_companies',
+          params: {
+            searchUrl: buildLinkedInCompanySearchURL({ searchKeywords: [name] }),
+            limit: 5,
+            strictMatch: { companyId: entry.companyId, name },
+          },
+          priority: 7,
+          dispatchAfter: linkedinDispatchAfter,
+        });
+        enqueued++;
+      } catch (err) {
+        logger.warn({ err, masterAgentId, companyId: entry.companyId }, 'list_verification: linkedin enqueue failed');
+      }
+
+      // Google Maps — search by name, no location facet. Batched 20 per ~2h.
+      try {
+        await enqueueExtensionTask({
+          tenantId: this.tenantId,
+          masterAgentId,
+          site: 'gmaps',
+          type: 'search_businesses',
+          params: {
+            query: name,
+            limit: 5,
+            strictMatch: { companyId: entry.companyId, name },
+          },
+          priority: 7,
+          dispatchAfter: gmapsDispatchAfter,
+        });
+        enqueued++;
+      } catch (err) {
+        logger.warn({ err, masterAgentId, companyId: entry.companyId }, 'list_verification: gmaps enqueue failed');
+      }
+    }
+
+    // Crawl the provided source URLs in the background (best-effort, bounded
+    // concurrency) so execute() returns promptly. Each Crawl4AI call can take
+    // up to ~30s; awaiting a long list here would block the worker job.
+    const toCrawl = list.filter((e) => e.companyId && typeof e.sourceUrl === 'string' && e.sourceUrl!.trim());
+    if (toCrawl.length > 0) {
+      void (async () => {
+        const CONCURRENCY = 2;
+        for (let i = 0; i < toCrawl.length; i += CONCURRENCY) {
+          const batch = toCrawl.slice(i, i + CONCURRENCY);
+          await Promise.all(
+            batch.map((e) =>
+              crawlAndStoreForCompany(this.tenantId, e.companyId, 'sourceUrl', e.sourceUrl!.trim())
+                .catch((err) => logger.warn({ err, companyId: e.companyId }, 'list_verification: source-url crawl failed')),
+            ),
+          );
+        }
+        logger.info({ masterAgentId, count: toCrawl.length }, 'list_verification: source-url crawls complete');
+      })();
+    }
+
+    // Tell the user how the run is paced. Google Maps is dispatched in batches
+    // of 20 ~2h apart (≈200/day free-plan quota); over-cap searches stay queued
+    // and retry rather than being dropped.
+    const gmapsBatches = Math.ceil(list.length / LIST_VERIFICATION_GMAPS_BATCH_SIZE);
+    if (gmapsBatches > 1) {
+      const intervalHours = Math.round(LIST_VERIFICATION_BATCH_INTERVAL_MS / 3_600_000);
+      this.sendMessage(null, 'system_alert', {
+        action: 'list_verification_queued',
+        severity: 'info',
+        total: list.length,
+        gmapsBatches,
+        gmapsBatchSize: LIST_VERIFICATION_GMAPS_BATCH_SIZE,
+        message: `Queued ${list.length} companies for verification. Google Maps runs in ${gmapsBatches} batches of ${LIST_VERIFICATION_GMAPS_BATCH_SIZE}, ~${intervalHours}h apart (free plan: 200 Maps searches/day) — nothing is dropped, over-quota searches retry automatically. LinkedIn runs in parallel under its own cap.`,
+      });
+    }
+
+    logger.info(
+      { masterAgentId, companies: list.length, extensionTasksEnqueued: enqueued, sourceUrlCrawls: toCrawl.length },
+      'list_verification: dispatch complete',
+    );
+    return enqueued;
+  }
+
+  /**
    * Orchestration loop — called periodically by a repeatable BullMQ job.
    * Collects pipeline metrics, makes decisions, and adjusts the pipeline.
    */
@@ -1712,8 +1988,11 @@ export class MasterAgent extends BaseAgent {
         const salesStrategy = cfg.salesStrategy as SalesStrategy | undefined;
         const pendingQueries = salesStrategy?.opportunitySearchQueries;
         const alreadyDispatched = (cfg.dispatchedStrategyQueries as boolean) ?? false;
+        // List-bounded agents never run discovery — their companies come only
+        // from the uploaded list.
+        const orchListBounded = Array.isArray(cfg.verificationList) && (cfg.verificationList as unknown[]).length > 0;
 
-        if (pendingQueries?.length && !alreadyDispatched && metrics.discovered === 0) {
+        if (!orchListBounded && pendingQueries?.length && !alreadyDispatched && metrics.discovered === 0) {
           let jobIdx = 0;
           for (const sq of pendingQueries) {
             const searchQuery = typeof sq === 'string' ? sq : (sq as Record<string, unknown>).query as string;

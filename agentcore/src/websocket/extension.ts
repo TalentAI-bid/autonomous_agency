@@ -12,6 +12,8 @@ import {
   touchSessionLastSeen,
   drainPending,
   drainPendingForUser,
+  resumeExtensionPausedAgents,
+  resumeExtensionPausedAgentsForUser,
   onExtensionTaskComplete,
 } from '../services/extension-dispatcher.js';
 import logger from '../utils/logger.js';
@@ -105,9 +107,16 @@ async function extensionPlugin(fastify: FastifyInstance) {
       drainPending(session.tenantId, session.id).catch((err) =>
         logger.warn({ err, sessionId: session.id }, 'Failed to drain pending extension tasks (legacy)'),
       );
+      // Auto-resume any agents that paused waiting for the extension (now back).
+      resumeExtensionPausedAgents(session.tenantId).catch((err) =>
+        logger.warn({ err, sessionId: session.id }, 'Failed to auto-resume extension-paused agents (legacy)'),
+      );
     } else {
       drainPendingForUser(session.userId, session.id).catch((err) =>
         logger.warn({ err, sessionId: session.id, userId: session.userId }, 'Failed to drain pending extension tasks (multi-workspace)'),
+      );
+      resumeExtensionPausedAgentsForUser(session.userId).catch((err) =>
+        logger.warn({ err, sessionId: session.id, userId: session.userId }, 'Failed to auto-resume extension-paused agents (multi-workspace)'),
       );
     }
 

@@ -13,6 +13,14 @@ export const extensionTaskTypeEnum = pgEnum('extension_task_type', [
   // doesn't block the company-info save (and vice versa). The legacy
   // fetch_company type is kept for in-flight tasks during deploy.
   'fetch_company_info', 'fetch_company_team',
+  // Single-person profile re-scrape (user-triggered contact correction).
+  'fetch_profile',
+  // Review-then-send LinkedIn outreach: open the profile, type the DM /
+  // connection-note into LinkedIn's box, and leave it for the user to send.
+  'linkedin_message', 'linkedin_connect',
+  // Global LinkedIn People search (role + optional geography) — imports people
+  // across companies as leads, not scoped to one pipeline company.
+  'search_people',
 ]);
 
 export const extensionTaskStatusEnum = pgEnum('extension_task_status', [

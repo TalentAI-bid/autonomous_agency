@@ -69,7 +69,7 @@ export function useGenerateStudioMessage() {
 export function useMessagingConfig() {
   return useQuery({
     queryKey: ['studio', 'config'],
-    queryFn: () => apiGet<{ data: MessagingConfig }>('/studio/config'),
+    queryFn: () => apiGet<MessagingConfig>('/studio/config'),
     staleTime: 30_000,
   });
 }
@@ -78,7 +78,7 @@ export function useSaveMessagingConfig() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (config: MessagingConfig) =>
-      apiPut<{ data: MessagingConfig }>('/studio/config', config),
+      apiPut<MessagingConfig>('/studio/config', config),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['studio', 'config'] }),
   });
 }

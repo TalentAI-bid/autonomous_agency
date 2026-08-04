@@ -39,6 +39,7 @@ import crmRoutes from './routes/crm.routes.js';
 import mailboxRoutes from './routes/mailbox.routes.js';
 import scheduleRoutes from './routes/schedule.routes.js';
 import trackingRoutes from './routes/tracking.routes.js';
+import oauthRoutes from './routes/oauth.routes.js';
 import activityRoutes from './routes/activity.routes.js';
 import strategyRoutes from './routes/strategy.routes.js';
 import opportunityRoutes from './routes/opportunity.routes.js';
@@ -206,6 +207,11 @@ async function buildApp() {
   // (no /api prefix) because Chrome will call these URLs literally as they
   // appear in manifest.json `update_url`.
   await fastify.register(extensionDistributionRoutes, { prefix: '/extension' });
+
+  // OAuth 2.1 Authorization Server for the MCP server — root-level paths
+  // (/.well-known/oauth-authorization-server, /authorize, /token, /register)
+  // because OAuth clients (Claude) hit these at the host root.
+  await fastify.register(oauthRoutes);
 
   return fastify;
 }

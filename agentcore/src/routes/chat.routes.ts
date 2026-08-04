@@ -60,6 +60,7 @@ export default async function chatRoutes(fastify: FastifyInstance) {
       conversationId,
       content || 'I uploaded a document for you to analyze.',
       attachments.length > 0 ? attachments : undefined,
+      request.userId,
     );
     return { data: result };
   });
@@ -116,6 +117,7 @@ export default async function chatRoutes(fastify: FastifyInstance) {
         conversationId,
         content || 'I uploaded a document for you to analyze.',
         attachments.length > 0 ? attachments : undefined,
+        request.userId,
       );
 
       for await (const chunk of stream) {

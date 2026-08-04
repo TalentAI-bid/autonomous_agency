@@ -12,6 +12,7 @@ import { StageBadge } from '@/components/crm/stage-badge';
 import { AddActivityDialog } from '@/components/crm/add-activity-dialog';
 import { EmailComposeModal } from '@/components/contacts/email-compose-modal';
 import { EmailEditor } from '@/components/contacts/email-editor';
+import { EditContactModal } from '@/components/contacts/edit-contact-modal';
 import { SequencePanel } from '@/components/contacts/sequence-panel';
 import { GmapsBusinessCard } from '@/components/prospects/gmaps-business-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -101,6 +102,7 @@ export default function ContactDetailPage() {
                 {contact.score}
               </Badge>
             )}
+            <EditContactModal contact={contact} />
             {contact.email && (
               <Button variant="outline" size="sm" onClick={() => setEmailModalOpen(true)}>
                 <Send className="w-3.5 h-3.5 mr-1.5" /> Draft Email

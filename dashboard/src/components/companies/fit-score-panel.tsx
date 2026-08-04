@@ -6,6 +6,7 @@ import type { CompanyFitScoreVerdict } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useReScoreCompany } from '@/hooks/use-fit-score';
 import { useToast } from '@/hooks/use-toast';
 import { apiPost } from '@/lib/api';
@@ -46,7 +47,9 @@ function useRefetchInfo(companyId: string) {
 function useRefetchTeam(companyId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiPost<{ enqueued: boolean }>(`/companies/${companyId}/refetch-team`, {}),
+    // Optional role/keyword — fetch only employees whose title matches.
+    mutationFn: (keyword?: string) =>
+      apiPost<{ enqueued: boolean }>(`/companies/${companyId}/refetch-team`, keyword ? { keyword } : {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['companies'] }),
   });
 }
@@ -57,6 +60,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
   const refetchTeam = useRefetchTeam(companyId);
   const { toast } = useToast();
   const [showRationale, setShowRationale] = useState(true);
+  const [teamKeyword, setTeamKeyword] = useState('');
 
   const handleReScore = async () => {
     try {
@@ -81,9 +85,13 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
     }
   };
   const handleRefetchTeam = async () => {
+    const kw = teamKeyword.trim() || undefined;
     try {
-      await refetchTeam.mutateAsync();
-      toast({ title: 'Team refetch enqueued', description: 'The people-page scrape will run shortly.' });
+      await refetchTeam.mutateAsync(kw);
+      toast({
+        title: 'Team refetch enqueued',
+        description: kw ? `Fetching “${kw}” roles — runs shortly.` : 'The people-page scrape will run shortly.',
+      });
     } catch (err) {
       toast({ title: 'Refetch failed', description: err instanceof Error ? err.message : String(err) });
     }
@@ -98,6 +106,13 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
             <Button variant="outline" size="sm" onClick={handleRefetchInfo} disabled={refetchInfo.isPending}>
               <Download className="w-3 h-3 mr-1" /> Refetch info
             </Button>
+            <Input
+              value={teamKeyword}
+              onChange={(e) => setTeamKeyword(e.target.value)}
+              placeholder="role e.g. sales manager"
+              className="h-8 w-40 text-xs"
+              title="Optional: fetch only employees whose title matches this role"
+            />
             <Button variant="outline" size="sm" onClick={handleRefetchTeam} disabled={refetchTeam.isPending}>
               <Users className="w-3 h-3 mr-1" /> Refetch team
             </Button>
@@ -141,7 +156,14 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
           <Button variant="outline" size="sm" onClick={handleRefetchInfo} disabled={refetchInfo.isPending} title="Re-enqueue the about-page scrape">
             <Download className="w-3 h-3 mr-1" /> Info
           </Button>
-          <Button variant="outline" size="sm" onClick={handleRefetchTeam} disabled={refetchTeam.isPending} title="Re-enqueue the people-page scrape">
+          <Input
+            value={teamKeyword}
+            onChange={(e) => setTeamKeyword(e.target.value)}
+            placeholder="role e.g. sales manager"
+            className="h-8 w-40 text-xs"
+            title="Optional: fetch only employees whose title matches this role"
+          />
+          <Button variant="outline" size="sm" onClick={handleRefetchTeam} disabled={refetchTeam.isPending} title="Re-enqueue the people-page scrape (optionally filtered by role)">
             <Users className="w-3 h-3 mr-1" /> Team
           </Button>
           <Button variant="outline" size="sm" onClick={handleReScore} disabled={reScore.isPending}>

@@ -12,6 +12,8 @@ import logger from '../utils/logger.js';
 import { logPipelineError, formatRateLimitMessage } from '../utils/pipeline-error.js';
 import { logEvent } from './timeline.service.js';
 import { ingestGmapsBusiness } from './gmaps-lead.service.js';
+import type { GmapsBusinessInput } from './gmaps-lead.service.js';
+import { scrape } from '../tools/crawl4ai.tool.js';
 import { prospectStages } from '../db/schema/index.js';
 
 // ─── Rate limits (server-authoritative; client mirrors these) ──────────────
@@ -29,6 +31,10 @@ export type ExtensionTaskType =
   | 'fetch_company'
   | 'fetch_company_info'
   | 'fetch_company_team'
+  | 'fetch_profile'
+  | 'linkedin_message'
+  | 'linkedin_connect'
+  | 'search_people'
   | 'search_businesses'
   | 'fetch_business';
 
@@ -48,9 +54,22 @@ export const EXTENSION_SITE_LIMITS = {
     // the per-tab pacing matches the legacy combined adapter.
     fetch_company_info: { dailyCap: 400, minDelayMs: 8000 },
     fetch_company_team: { dailyCap: 400, minDelayMs: 8000 },
+    // Single-person profile re-scrape (user-triggered contact correction).
+    // Profile-page views are the most sensitive LinkedIn surface, so keep a
+    // conservative cap and the same 8s pacing as the team fetch.
+    fetch_profile: { dailyCap: 100, minDelayMs: 8000 },
+    // Review-then-send outreach: user-initiated, one at a time. Conservative.
+    linkedin_message: { dailyCap: 50, minDelayMs: 5000 },
+    linkedin_connect: { dailyCap: 50, minDelayMs: 5000 },
+    // Global people search — same surface as company search but conservative,
+    // since people-result pages are more aggressively throttled by LinkedIn.
+    search_people: { dailyCap: 80, minDelayMs: 4000 },
   },
   gmaps: {
-    search_businesses: { dailyCap: 20, minDelayMs: 2000 },
+    // Free plan: 200 Maps searches/day. Dispatched in batches of 20 by the
+    // list_verification path (see master-agent.ts) so the day's quota spreads
+    // across ~10 batches rather than firing at once.
+    search_businesses: { dailyCap: 200, minDelayMs: 2000 },
     fetch_business: { dailyCap: 200, minDelayMs: 2000 },
   },
   crunchbase: {
@@ -74,7 +93,9 @@ function looksLikeMissingLinkedInUrl(
   type: ExtensionTaskType,
   params: Record<string, unknown> | undefined,
 ): boolean {
-  if (type !== 'fetch_company_info' && type !== 'fetch_company_team') return false;
+  const urlRequired = type === 'fetch_company_info' || type === 'fetch_company_team' || type === 'fetch_profile'
+    || type === 'linkedin_message' || type === 'linkedin_connect';
+  if (!urlRequired) return false;
   const url = params?.linkedinUrl;
   return typeof url !== 'string' || url.trim().length === 0;
 }
@@ -94,8 +115,222 @@ function rejectMissingLinkedInUrl(
       linkedinUrl: task.params?.linkedinUrl,
       stack: new Error('linkedinUrl_missing_at_enqueue').stack,
     },
-    'CRITICAL: enqueueing fetch_company_info/_team task with no linkedinUrl — bug somewhere',
+    'CRITICAL: enqueueing fetch_company_info/_team/_profile task with no linkedinUrl — bug somewhere',
   );
+}
+
+// ─── Strict list-verification helpers ────────────────────────────────────────
+// Used by the `list_verification` bdStrategy. When a search task carries
+// `params.strictMatch = { companyId, name }`, the ingestion picks the SINGLE
+// best name-match from the results and attaches it to the pre-created company
+// row — never creating the other (decoy) results. No confident match → fail
+// loud (rawData.*NotFound) rather than fabricate.
+
+export interface StrictMatch {
+  companyId: string;
+  name: string;
+}
+
+/** Lowercase, strip accents, drop legal suffixes, collapse to single spaces. */
+export function normalizeCompanyName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // strip accents: Société → societe
+    .replace(/\b(inc|llc|ltd|limited|sa|sarl|sas|spa|srl|gmbh|ag|bv|nv|corp|co|company|group|holding|holdings|sa\.?r\.?l)\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** 1 = exact, 0.85 = substring, else token Jaccard. */
+export function nameMatchScore(a: string, b: string): number {
+  const na = normalizeCompanyName(a);
+  const nb = normalizeCompanyName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.85;
+  const sa = new Set(na.split(' ').filter(Boolean));
+  const sb = new Set(nb.split(' ').filter(Boolean));
+  if (sa.size === 0 || sb.size === 0) return 0;
+  const inter = [...sa].filter((t) => sb.has(t)).length;
+  const union = new Set([...sa, ...sb]).size;
+  return union === 0 ? 0 : inter / union;
+}
+
+export const STRICT_NAME_MATCH_THRESHOLD = 0.8;
+
+/**
+ * Pick the single best-matching candidate by company name, or null when the
+ * best score is below the confidence threshold.
+ */
+export function pickBestNameMatch<T extends Record<string, unknown>>(
+  targetName: string,
+  candidates: T[],
+  getName: (c: T) => string,
+): { match: T; score: number } | null {
+  let best: T | null = null;
+  let bestScore = 0;
+  for (const c of candidates) {
+    const score = nameMatchScore(targetName, getName(c));
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  if (best && bestScore >= STRICT_NAME_MATCH_THRESHOLD) {
+    return { match: best, score: bestScore };
+  }
+  return null;
+}
+
+/**
+ * Crawl4AI must NEVER be pointed at LinkedIn or Google Maps — those are
+ * scraped only through the authenticated browser extension. Returns false for
+ * those domains (and for anything that isn't a parseable http(s) URL).
+ */
+export function isCrawlable(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (host.includes('linkedin.com')) return false;
+    if (host.includes('maps.google') || host === 'goo.gl' || host.includes('maps.app.goo.gl')) return false;
+    if (/(^|\.)google\.[a-z.]+$/.test(host) && /\/maps/.test(u.pathname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Merge a small set of flags into companies.rawData for a row by id. */
+export async function markRawDataFlag(
+  tenantId: string,
+  companyId: string,
+  flags: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await withTenant(tenantId, async (tx) => {
+      const [row] = await tx
+        .select({ rawData: companies.rawData })
+        .from(companies)
+        .where(and(eq(companies.id, companyId), eq(companies.tenantId, tenantId)))
+        .limit(1);
+      const existing = (row?.rawData as Record<string, unknown> | null) ?? {};
+      await tx
+        .update(companies)
+        .set({ rawData: { ...existing, ...flags }, updatedAt: new Date() })
+        .where(and(eq(companies.id, companyId), eq(companies.tenantId, tenantId)));
+    });
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), companyId, flags: Object.keys(flags) },
+      'markRawDataFlag failed (non-fatal)',
+    );
+  }
+}
+
+// Crawl markdown can be large; cap what we persist into the JSONB row.
+const CRAWL_MARKDOWN_CAP = 40000;
+
+/**
+ * Crawl a URL with Crawl4AI and store the markdown under
+ * `companies.rawData.crawl[kind]`. Used by the list_verification path to crawl
+ * (a) the source URL provided in the uploaded list, and (b) the real website
+ * discovered via LinkedIn fetch_company_info. NEVER crawls LinkedIn/Maps
+ * (guarded by isCrawlable). Read-merge-write preserves sibling crawl keys and
+ * the rest of rawData. Returns true when non-empty markdown was captured.
+ */
+export async function crawlAndStoreForCompany(
+  tenantId: string,
+  companyId: string,
+  kind: 'sourceUrl' | 'website',
+  url: string,
+): Promise<boolean> {
+  if (!url || !isCrawlable(url)) return false;
+  let markdown = '';
+  try {
+    markdown = await scrape(tenantId, url);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), companyId, kind, url },
+      'list_verification: crawl4ai scrape failed (non-fatal)',
+    );
+  }
+  const record = {
+    url,
+    markdownLength: markdown.length,
+    fetchedAt: new Date().toISOString(),
+    markdown: markdown.slice(0, CRAWL_MARKDOWN_CAP),
+    ...(markdown.length > CRAWL_MARKDOWN_CAP ? { truncated: true } : {}),
+  };
+  try {
+    await withTenant(tenantId, async (tx) => {
+      const [row] = await tx
+        .select({ rawData: companies.rawData })
+        .from(companies)
+        .where(and(eq(companies.id, companyId), eq(companies.tenantId, tenantId)))
+        .limit(1);
+      const existing = (row?.rawData as Record<string, unknown> | null) ?? {};
+      const crawl = (existing.crawl as Record<string, unknown> | undefined) ?? {};
+      await tx
+        .update(companies)
+        .set({
+          rawData: { ...existing, crawl: { ...crawl, [kind]: record } },
+          updatedAt: new Date(),
+        })
+        .where(and(eq(companies.id, companyId), eq(companies.tenantId, tenantId)));
+    });
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), companyId, kind },
+      'list_verification: storing crawl result failed (non-fatal)',
+    );
+  }
+  return markdown.length > 0;
+}
+
+/**
+ * Map a raw Google Maps business object (from a search card or a place-detail
+ * fetch) into the GmapsBusinessInput shape `ingestGmapsBusiness` expects.
+ * `nameOverride` lets the strict list-verification path force the name onto
+ * the pre-created user_list company row (dedup is by exact name / domain).
+ */
+function gmapsBusinessToInput(
+  b: Record<string, unknown>,
+  params: Record<string, unknown>,
+  isDetail: boolean,
+  nameOverride?: string,
+): GmapsBusinessInput {
+  return {
+    name: (nameOverride ?? String(b.name ?? '')).trim(),
+    category: typeof b.category === 'string' ? b.category : undefined,
+    address: typeof b.address === 'string' ? b.address : undefined,
+    phone: typeof b.phone === 'string' ? b.phone : undefined,
+    website: typeof b.website === 'string' ? b.website : undefined,
+    rating: typeof b.rating === 'number' ? b.rating : null,
+    reviewCount: typeof b.reviewCount === 'number' ? b.reviewCount : null,
+    reviewsCount: typeof b.reviewsCount === 'number' ? b.reviewsCount : null,
+    mapsUrl: typeof b.mapsUrl === 'string' ? b.mapsUrl : undefined,
+    searchQuery: typeof params.query === 'string' ? params.query : undefined,
+    location: typeof params.location === 'string' ? params.location : undefined,
+    hours: (typeof b.hours === 'string' || (b.hours && typeof b.hours === 'object'))
+      ? (b.hours as string | Record<string, string>) : undefined,
+    priceLevel: typeof b.priceLevel === 'string' ? b.priceLevel : undefined,
+    description: typeof b.description === 'string' ? b.description : undefined,
+    serviceOptions: Array.isArray(b.serviceOptions) ? (b.serviceOptions as string[]) : undefined,
+    plusCode: typeof b.plusCode === 'string' ? b.plusCode : undefined,
+    coordinates: (b.coordinates && typeof b.coordinates === 'object')
+      ? (b.coordinates as { lat: number; lng: number }) : undefined,
+    menuLink: typeof b.menuLink === 'string' ? b.menuLink : undefined,
+    photoUrls: Array.isArray(b.photoUrls) ? (b.photoUrls as string[]) : undefined,
+    pricePerPerson: typeof b.pricePerPerson === 'string' ? b.pricePerPerson : undefined,
+    directionsUrl: typeof b.directionsUrl === 'string' ? b.directionsUrl : undefined,
+    reviewsHtml: typeof b.reviewsHtml === 'string' ? b.reviewsHtml : undefined,
+    ratingDistribution: Array.isArray(b.ratingDistribution)
+      ? (b.ratingDistribution as Array<{ label: string }>) : undefined,
+    aboutHtml: typeof b.aboutHtml === 'string' ? b.aboutHtml : undefined,
+    detailFetched: isDetail,
+  };
 }
 
 // ─── Enqueue ────────────────────────────────────────────────────────────────
@@ -187,6 +422,7 @@ export async function enqueueCompanyEnrichmentFanout(
   tenantId: string,
   masterAgentId: string | undefined,
   companies: Array<{ linkedinUrl: string; companyId?: string }>,
+  opts: { crawlWebsite?: boolean } = {},
 ): Promise<void> {
   if (companies.length === 0) return;
 
@@ -231,7 +467,7 @@ export async function enqueueCompanyEnrichmentFanout(
       masterAgentId,
       site: 'linkedin',
       type: 'fetch_company_info',
-      params: { linkedinUrl: c.linkedinUrl, companyId: c.companyId },
+      params: { linkedinUrl: c.linkedinUrl, companyId: c.companyId, ...(opts.crawlWebsite ? { crawlWebsite: true } : {}) },
       priority: 3,
     });
     for (const keyword of teamKeywords) {
@@ -341,10 +577,19 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
   });
   if (!task) return false;
 
+  // User-initiated one-off tasks (a dashboard button click: refetch team/info,
+  // re-scrape profile, stage a LinkedIn message) must run NOW regardless of the
+  // owning agent's automated-run state. They carry the agent's id only for
+  // attribution, so without this flag the paused/quota gate below would swallow
+  // them — the user clicks "Team" and nothing happens because the background
+  // agent is paused. They still respect the per-session daily cap.
+  const userInitiated = (task.params as { userInitiated?: boolean } | null)?.userInitiated === true;
+
   // Gate dispatch on the owning master agent's lifecycle. A task that still
   // carries a master_agent_id must not dispatch if that agent has been deleted
   // (row gone) or paused — otherwise queued tasks keep firing at the extension
-  // long after the agent is gone, with no way to stop them.
+  // long after the agent is gone, with no way to stop them. User-initiated
+  // tasks bypass the paused/quota skip (but a deleted agent still cancels them).
   if (task.masterAgentId) {
     const [agentRow] = await withTenant(tenantId, async (tx) => {
       return tx.select({ status: masterAgents.status })
@@ -362,7 +607,7 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
       logger.info({ taskId, masterAgentId: task.masterAgentId }, 'Cancelled dispatch — master agent deleted');
       return false;
     }
-    if (agentRow.status === 'paused' || agentRow.status === 'paused_quota') {
+    if (!userInitiated && (agentRow.status === 'paused' || agentRow.status === 'paused_quota')) {
       logger.info({ taskId, masterAgentId: task.masterAgentId, status: agentRow.status }, 'Skipped dispatch — master agent paused');
       return false;
     }
@@ -948,6 +1193,60 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
   if (site === 'linkedin' && type === 'search_companies') {
     const rawCompanies = (result.companies ?? []) as Array<Record<string, unknown>>;
     logger.info({ taskId: task.id, rawCount: rawCompanies.length }, 'ingest_linkedin_search_companies_raw');
+
+    // ── Strict list-verification path ──────────────────────────────────────
+    // `params.strictMatch` means this search was scoped to ONE known company
+    // from a user-uploaded list. Pick the single best name-match, attach its
+    // LinkedIn URL to the pre-created row, fan out info+team for that row ONLY,
+    // and never create the other (decoy) results. No confident match → fail
+    // loud (rawData.linkedinNotFound). Set for list-bounded agents (those
+    // seeded from an uploaded company list via config.verificationList).
+    const strict = (task.params as { strictMatch?: StrictMatch } | null)?.strictMatch;
+    if (strict?.companyId) {
+      const candidatesWithUrl = rawCompanies.filter(
+        (c) => typeof c.linkedinUrl === 'string' && (c.linkedinUrl as string).trim().length > 0
+          && typeof c.name === 'string' && (c.name as string).trim().length > 0,
+      );
+      const best = pickBestNameMatch(strict.name, candidatesWithUrl, (c) => String(c.name ?? ''));
+      if (best) {
+        const linkedinUrl = String(best.match.linkedinUrl);
+        await saveOrUpdateCompanyStatic(
+          task.tenantId,
+          {
+            id: strict.companyId,
+            name: strict.name,
+            domain: typeof best.match.website === 'string' ? extractDomain(best.match.website as string) : undefined,
+            industry: (best.match.industry as string) ?? undefined,
+            size: (best.match.size as string) ?? undefined,
+            linkedinUrl,
+            rawData: {
+              linkedinNotFound: false,
+              linkedinMatchScore: best.score,
+              linkedinMatchedName: best.match.name,
+            },
+          },
+          task.masterAgentId ?? undefined,
+        );
+        await enqueueCompanyEnrichmentFanout(
+          task.tenantId,
+          task.masterAgentId ?? undefined,
+          [{ linkedinUrl, companyId: strict.companyId }],
+          { crawlWebsite: true },
+        );
+        logger.info(
+          { taskId: task.id, companyId: strict.companyId, name: strict.name, score: best.score, linkedinUrl },
+          'list_verification: linkedin strict match',
+        );
+        return { extracted: rawCompanies.length, saved: 1 };
+      }
+      await markRawDataFlag(task.tenantId, strict.companyId, { linkedinNotFound: true });
+      logger.info(
+        { taskId: task.id, companyId: strict.companyId, name: strict.name, candidates: rawCompanies.length },
+        'list_verification: linkedin no confident match — flagged linkedinNotFound',
+      );
+      return { extracted: rawCompanies.length, saved: 0 };
+    }
+
     let saved = 0;
     // No keyword pre-save filter — every company with a name + LinkedIn URL is
     // saved. The buyer-fit scorer (LLM) ranks them downstream; the dashboard
@@ -1101,6 +1400,23 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
     return handleCompanyTeamComplete(task, result as Record<string, unknown>);
   }
 
+  if (site === 'linkedin' && type === 'fetch_profile') {
+    return handleProfileComplete(task, result as Record<string, unknown>);
+  }
+
+  if (site === 'linkedin' && type === 'search_people') {
+    return handlePeopleSearchComplete(task, result as Record<string, unknown>);
+  }
+
+  if (site === 'linkedin' && (type === 'linkedin_message' || type === 'linkedin_connect')) {
+    // Review-then-send: the adapter only stages the text in LinkedIn's box. The
+    // actual outreach is recorded via /api/studio/record-action when the USER
+    // clicks Send, so there is nothing to ingest from the task result here.
+    const status = (result as { status?: string } | null)?.status ?? 'unknown';
+    logger.info({ taskId: task.id, type, status }, 'linkedin_outreach_staged');
+    return { extracted: 0, saved: 0 };
+  }
+
   if (site === 'linkedin' && type === 'fetch_company') {
     // Legacy combined adapter — feed both handlers from a single payload so
     // tasks queued before the parallel split still get processed correctly.
@@ -1116,6 +1432,70 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
   if (site === 'gmaps') {
     const items = (result.businesses ?? (type === 'fetch_business' ? [result] : [])) as Array<Record<string, unknown>>;
     const params = (task.params ?? {}) as Record<string, unknown>;
+
+    // ── Strict list-verification path ──────────────────────────────────────
+    // `params.strictMatch` scopes this Maps search to ONE known company. Pick
+    // the single best name-match, ingest it onto the pre-created row (name
+    // override forces the dedup to land there), thread strictMatch through the
+    // place-detail fanout so the detail completion routes back here too. No
+    // confident match → fail loud (rawData.gmapsNotFound).
+    const strict = (params as { strictMatch?: StrictMatch }).strictMatch;
+    if (strict?.companyId) {
+      let chosen: Record<string, unknown> | undefined;
+      let score = 1;
+      if (type === 'fetch_business') {
+        chosen = items[0];
+      } else {
+        const named = items.filter((b) => typeof b.name === 'string' && (b.name as string).trim().length > 0);
+        const best = pickBestNameMatch(strict.name, named, (b) => String(b.name ?? ''));
+        chosen = best?.match;
+        score = best?.score ?? 0;
+      }
+      if (!chosen) {
+        await markRawDataFlag(task.tenantId, strict.companyId, { gmapsNotFound: true });
+        logger.info(
+          { taskId: task.id, companyId: strict.companyId, name: strict.name, candidates: items.length },
+          'list_verification: gmaps no confident match — flagged gmapsNotFound',
+        );
+        return { extracted: items.length, saved: 0 };
+      }
+      const isDetail = type === 'fetch_business';
+      const mapsUrl = typeof chosen.mapsUrl === 'string' ? chosen.mapsUrl : undefined;
+      try {
+        const ingest = await ingestGmapsBusiness(
+          task.tenantId,
+          task.masterAgentId ?? undefined,
+          gmapsBusinessToInput(chosen, params, isDetail, strict.name),
+        );
+        // Keep the user_list provenance + record the match; ingestGmapsBusiness
+        // flips source to 'gmaps_extension' and we never want a stale not-found.
+        await markRawDataFlag(task.tenantId, ingest.companyId, {
+          source: 'user_list',
+          listEntry: true,
+          gmapsNotFound: false,
+          gmapsMatchScore: score,
+        });
+        if (ingest.needsDetail && mapsUrl) {
+          await enqueueExtensionTask({
+            tenantId: task.tenantId,
+            masterAgentId: task.masterAgentId ?? undefined,
+            site: 'gmaps',
+            type: 'fetch_business',
+            params: { mapsUrl, strictMatch: strict },
+            priority: 6,
+          });
+        }
+        logger.info(
+          { taskId: task.id, companyId: strict.companyId, name: strict.name, score, isDetail },
+          'list_verification: gmaps strict match',
+        );
+        return { extracted: items.length, saved: 1 };
+      } catch (err) {
+        logger.warn({ err, taskId: task.id, companyId: strict.companyId }, 'list_verification: gmaps ingest failed');
+        return { extracted: items.length, saved: 0 };
+      }
+    }
+
     let saved = 0;
     const detailFanout: BatchTaskInput[] = [];
     for (const b of items) {
@@ -1127,37 +1507,11 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         // Shared with POST /api/extension/gmaps/capture — creates company +
         // business-contact + Lead-stage deal and dispatches enrichment when
         // the business has a website (Maps never shows emails).
-        const ingest = await ingestGmapsBusiness(task.tenantId, task.masterAgentId ?? undefined, {
-          name,
-          category: typeof b.category === 'string' ? b.category : undefined,
-          address: typeof b.address === 'string' ? b.address : undefined,
-          phone: typeof b.phone === 'string' ? b.phone : undefined,
-          website: typeof b.website === 'string' ? b.website : undefined,
-          rating: typeof b.rating === 'number' ? b.rating : null,
-          reviewCount: typeof b.reviewCount === 'number' ? b.reviewCount : null,
-          reviewsCount: typeof b.reviewsCount === 'number' ? b.reviewsCount : null,
-          mapsUrl,
-          searchQuery: typeof params.query === 'string' ? params.query : undefined,
-          location: typeof params.location === 'string' ? params.location : undefined,
-          // Place-detail-only fields (present on fetch_business results).
-          hours: (typeof b.hours === 'string' || (b.hours && typeof b.hours === 'object'))
-            ? (b.hours as string | Record<string, string>) : undefined,
-          priceLevel: typeof b.priceLevel === 'string' ? b.priceLevel : undefined,
-          description: typeof b.description === 'string' ? b.description : undefined,
-          serviceOptions: Array.isArray(b.serviceOptions) ? (b.serviceOptions as string[]) : undefined,
-          plusCode: typeof b.plusCode === 'string' ? b.plusCode : undefined,
-          coordinates: (b.coordinates && typeof b.coordinates === 'object')
-            ? (b.coordinates as { lat: number; lng: number }) : undefined,
-          menuLink: typeof b.menuLink === 'string' ? b.menuLink : undefined,
-          photoUrls: Array.isArray(b.photoUrls) ? (b.photoUrls as string[]) : undefined,
-          pricePerPerson: typeof b.pricePerPerson === 'string' ? b.pricePerPerson : undefined,
-          directionsUrl: typeof b.directionsUrl === 'string' ? b.directionsUrl : undefined,
-          reviewsHtml: typeof b.reviewsHtml === 'string' ? b.reviewsHtml : undefined,
-          ratingDistribution: Array.isArray(b.ratingDistribution)
-            ? (b.ratingDistribution as Array<{ label: string }>) : undefined,
-          aboutHtml: typeof b.aboutHtml === 'string' ? b.aboutHtml : undefined,
-          detailFetched: isDetail,
-        });
+        const ingest = await ingestGmapsBusiness(
+          task.tenantId,
+          task.masterAgentId ?? undefined,
+          gmapsBusinessToInput(b, params, isDetail),
+        );
         saved++;
         // Every business with a place URL gets one place-detail scrape (it has
         // phone/hours/menu the search card lacks). Fan out a fetch_business when
@@ -1228,9 +1582,26 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
 
 const JUNK_TITLE_REGEX = /^(status is (online|offline)|message|follow|connect|view profile|see more)$/i;
 
+// LinkedIn's followers / "Pages similaires" (similar pages) sidebar leaks into
+// the company-team scrape: those cards are page-followers or other companies,
+// NOT employees. They carry markers like "<Name> suit cette page" (FR: follows
+// this page) and titles full of "<industry> N abonnés" (followers) / "Page
+// Vitrine" / "Filiale". Reject a person when its name OR title carries any of
+// these markers — applied at ingest so junk never reaches contacts or rawData.
+const JUNK_PERSON_REGEX = /\b(?:suit|suivent)\s+cette\s+page\b|\bfollows?\s+this\s+page\b|\bpages?\s+(?:similaires|associées)\b|\bpage\s+vitrine\b|\bfiliale\b|\d[\d\s.,]*\s*(?:abonnés?|followers?)\b/i;
+
+export function isJunkPerson(name?: string | null, title?: string | null): boolean {
+  return JUNK_PERSON_REGEX.test(`${name ?? ''} ${title ?? ''}`);
+}
+
+// Strip a trailing follower-count clause ("... 85 860 abonnés") that LinkedIn
+// appends to similar-page subtitles, then drop the title entirely if it's pure
+// UI junk.
 function sanitizeTitle(raw: string | undefined | null): string | undefined {
   if (!raw) return undefined;
-  const trimmed = raw.trim();
+  let trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  trimmed = trimmed.replace(/\s*\d[\d\s.,]*\s*(?:abonnés?|followers?)\s*$/i, '').trim();
   if (!trimmed) return undefined;
   if (JUNK_TITLE_REGEX.test(trimmed)) return undefined;
   return trimmed;
@@ -1280,6 +1651,8 @@ export function sanitizePersonName(raw: string | undefined | null): string | nul
   if (/View\b/i.test(name)) return null;
   if (/\bprofile\b/i.test(name)) return null;
   if (/%[0-9A-Fa-f]{2}/.test(name)) return null;
+  // Reject followers/similar-page sidebar leaks ("Michael suit cette page").
+  if (JUNK_PERSON_REGEX.test(name)) return null;
   return name;
 }
 
@@ -1389,6 +1762,88 @@ export async function markSessionConnected(sessionId: string, connected: boolean
     .where(eq(extensionSessions.id, sessionId));
 }
 
+// ─── Auto-resume agents that paused waiting for the extension ────────────────
+//
+// When the master-agent needs the LinkedIn extension but none is connected it
+// pauses (master-agent.ts ~1444) with config.pauseReason='extension_required'
+// rather than falling back to the crawler. Resume was manual (POST /:id/start),
+// so a single disconnect stranded the agent. These helpers, called from the WS
+// connect handler the moment the extension reconnects, flip exactly those
+// agents back to running and re-trigger dispatch — no manual Run needed.
+//
+// The flip is an atomic conditional UPDATE (… WHERE status='paused' RETURNING):
+// only one of several concurrent reconnects wins the row, so execute() can't
+// double-fire. The 'pauseReason' key is stripped from the jsonb config on resume.
+async function resumeAgentRows(
+  rows: Array<{ id: string; tenantId: string; mission: string | null }>,
+): Promise<void> {
+  if (!rows.length) return;
+  const { MasterAgent } = await import('../agents/master-agent.js');
+  for (const row of rows) {
+    try {
+      const updated = await db
+        .update(masterAgents)
+        .set({
+          status: 'running',
+          config: sql`${masterAgents.config} - 'pauseReason'`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(masterAgents.id, row.id), eq(masterAgents.status, 'paused')))
+        .returning({ id: masterAgents.id });
+      if (!updated.length) continue; // another reconnect already resumed it
+      logger.info(
+        { masterAgentId: row.id, tenantId: row.tenantId },
+        'Auto-resuming agent on extension reconnect',
+      );
+      const agent = new MasterAgent({ tenantId: row.tenantId, masterAgentId: row.id });
+      agent
+        .execute({ masterAgentId: row.id, mission: row.mission ?? '' })
+        .catch((err) =>
+          logger.warn({ err, masterAgentId: row.id }, 'Auto-resume execute() failed'),
+        );
+    } catch (err) {
+      logger.warn({ err, masterAgentId: row.id }, 'Auto-resume update failed');
+    }
+  }
+}
+
+// Legacy per-tenant session reconnected → resume that tenant's extension-paused agents.
+export async function resumeExtensionPausedAgents(tenantId: string): Promise<void> {
+  const rows = await db
+    .select({ id: masterAgents.id, tenantId: masterAgents.tenantId, mission: masterAgents.mission })
+    .from(masterAgents)
+    .where(
+      and(
+        eq(masterAgents.tenantId, tenantId),
+        eq(masterAgents.status, 'paused'),
+        sql`${masterAgents.config}->>'pauseReason' = 'extension_required'`,
+      ),
+    );
+  await resumeAgentRows(rows);
+}
+
+// Multi-workspace session (tenantId null) reconnected → resume extension-paused
+// agents across every tenant the user belongs to.
+export async function resumeExtensionPausedAgentsForUser(userId: string): Promise<void> {
+  const tenantRows = await db
+    .select({ tenantId: userTenants.tenantId })
+    .from(userTenants)
+    .where(eq(userTenants.userId, userId));
+  const tenantIds = tenantRows.map((r) => r.tenantId);
+  if (!tenantIds.length) return;
+  const rows = await db
+    .select({ id: masterAgents.id, tenantId: masterAgents.tenantId, mission: masterAgents.mission })
+    .from(masterAgents)
+    .where(
+      and(
+        inArray(masterAgents.tenantId, tenantIds),
+        eq(masterAgents.status, 'paused'),
+        sql`${masterAgents.config}->>'pauseReason' = 'extension_required'`,
+      ),
+    );
+  await resumeAgentRows(rows);
+}
+
 // Touch lastSeenAt only — used as a real liveness signal from the WS ping
 // handler so stale lastSeenAt actually means the SW is dead, not just that
 // no reconnect happened. Caller throttles to ≤1 write per 10s per session.
@@ -1424,18 +1879,167 @@ export async function findSessionByApiKeyHash(apiKeyHash: string): Promise<{ id:
 // needed because only a boolean leaks.
 export async function isExtensionConnected(tenantId: string): Promise<boolean> {
   const { db } = await import('../config/database.js');
+  // Mirror the dispatcher's session-eligibility predicate (see ~line 619): with
+  // ENABLE_MULTI_WORKSPACE_DISPATCH on, a session reaches this tenant if its USER
+  // is a member via user_tenants — this is the ONLY predicate that recognises the
+  // new tenant-less (tenant_id = NULL) multi-workspace sessions. Without this the
+  // pause gate sees "no extension" for a tenant whose user is connected via a
+  // multi-workspace session, and the master-agent pauses while the extension is
+  // actually live and draining that tenant's tasks. Flag off → exact legacy behaviour.
+  const tenantMatch = env.ENABLE_MULTI_WORKSPACE_DISPATCH
+    ? exists(
+        db
+          .select({ one: sql<number>`1` })
+          .from(userTenants)
+          .where(and(
+            eq(userTenants.userId, extensionSessions.userId),
+            eq(userTenants.tenantId, tenantId),
+            inArray(userTenants.role, ['owner', 'admin', 'member']),
+          )),
+      )
+    : eq(extensionSessions.tenantId, tenantId);
+
   const [row] = await db
     .select({ id: extensionSessions.id })
     .from(extensionSessions)
     .where(
       and(
-        eq(extensionSessions.tenantId, tenantId),
+        tenantMatch!,
         eq(extensionSessions.connected, true),
         isNull(extensionSessions.revokedAt),
       ),
     )
     .limit(1);
   return !!row;
+}
+
+// ─── Single-profile re-scrape handler ───────────────────────────────────────
+//
+// Triggered by POST /api/contacts/:id/rescrape-linkedin → a `fetch_profile`
+// extension task that opens ONE person's /in/<handle>/ page. We deliberately
+// do NOT overwrite the live firstName/lastName/title — the scrape is stored as
+// a SUGGESTION on rawData.linkedinRescrape so the dashboard can pre-fill the
+// edit modal and let the user confirm (or override) before saving. This honors
+// "fail loud over fabricate": a bad scrape never silently clobbers good data.
+// ─── Global LinkedIn People search → import as leads ─────────────────────────
+// Unlike fetch_company_team (people of one known company), search_people returns
+// people across many companies. Save each as a contact with companyId = NULL
+// (companyName left blank — the card rarely exposes a clean employer). Dedup by
+// the (tenant_id, linkedin_url) unique constraint so re-running a search is safe.
+// Optional geo post-filter (best-effort: only drops a person when their card
+// location is present AND clearly outside the requested regions).
+async function handlePeopleSearchComplete(task: ExtensionTask, result: Record<string, unknown>): Promise<IngestSummary> {
+  const rawPeople = (Array.isArray(result.people) ? result.people : []) as Array<{
+    name?: string; title?: string; linkedinUrl?: string; location?: string;
+  }>;
+  const params = (task.params as { geographyFilter?: { regions?: string[] }; keyword?: string } | null) ?? {};
+  const regions = (params.geographyFilter?.regions ?? []).filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
+  const keyword = typeof params.keyword === 'string' ? params.keyword : null;
+
+  let saved = 0;
+  const MAX_SAVE = 50; // a single user-initiated search shouldn't flood the pipeline
+  for (const person of rawPeople) {
+    if (saved >= MAX_SAVE) break;
+    const url = (person.linkedinUrl || '').split('?')[0];
+    if (!url) continue;
+
+    // Best-effort geo filter — keep when location is unknown (don't over-drop).
+    if (regions.length && person.location && !isLocationInRegions(person.location, regions)) continue;
+
+    const cleanName = sanitizePersonName(person.name);
+    if (!cleanName) continue;
+    const nameParts = cleanName.split(/\s+/);
+    const pFirstName = nameParts[0] || '';
+    const pLastName = nameParts.slice(1).join(' ');
+    if (!pFirstName || /^(view|profile)$/i.test(pFirstName)) continue;
+
+    try {
+      const [existing] = await withTenant(task.tenantId, async (tx) => {
+        return tx.select({ id: contacts.id }).from(contacts)
+          .where(and(eq(contacts.tenantId, task.tenantId), eq(contacts.linkedinUrl, url)))
+          .limit(1);
+      });
+      if (existing) continue; // dedup by linkedin_url across the whole tenant
+
+      const [inserted] = await withTenant(task.tenantId, async (tx) => {
+        return tx.insert(contacts).values({
+          tenantId: task.tenantId,
+          masterAgentId: task.masterAgentId ?? undefined,
+          firstName: pFirstName,
+          lastName: pLastName,
+          title: sanitizeTitle(person.title),
+          linkedinUrl: url,
+          companyId: null,
+          source: 'linkedin_profile',
+          sourceType: 'ai_discovery',
+          sourceMetadata: { discoverySource: 'linkedin_people_search', keyword },
+          rawData: { discoverySource: 'linkedin_people_search', keyword, ...person },
+        }).returning({ id: contacts.id });
+      });
+      if (!inserted) continue;
+      saved++;
+      try {
+        await withTenant(task.tenantId, async (tx) => {
+          await tx.insert(prospectStages).values({
+            contactId: inserted.id,
+            tenantId: task.tenantId,
+            currentStage: 'new',
+          }).onConflictDoNothing();
+        });
+      } catch (err) {
+        logger.warn({ err, contactId: inserted.id }, 'search_people: prospect_stages seed failed (non-fatal)');
+      }
+    } catch (err) {
+      logger.warn({ err, linkedinUrl: url }, 'search_people: contact insert failed');
+    }
+  }
+
+  logger.info({ taskId: task.id, extracted: rawPeople.length, saved, keyword, regions }, 'search_people complete');
+  return { extracted: rawPeople.length, saved };
+}
+
+async function handleProfileComplete(task: ExtensionTask, result: Record<string, unknown>): Promise<IngestSummary> {
+  const contactId = (task.params as { contactId?: string } | null)?.contactId;
+  if (!contactId) {
+    logger.error({ taskId: task.id }, 'fetch_profile result has no contactId in params');
+    return { extracted: 0, saved: 0 };
+  }
+
+  const name = sanitizePersonName(typeof result.name === 'string' ? result.name : undefined);
+  const title = sanitizeTitle(typeof result.title === 'string' ? result.title : undefined);
+
+  if (!name && !title) {
+    logger.warn({ taskId: task.id, contactId }, 'fetch_profile yielded no usable name/title');
+    // Still record the attempt so the dashboard poll stops waiting and can
+    // surface "couldn't read this profile" instead of spinning forever.
+  }
+
+  const suggestion = {
+    name: name ?? null,
+    title: title ?? null,
+    scrapedAt: new Date().toISOString(),
+  };
+
+  const saved = await withTenant(task.tenantId, async (tx) => {
+    const [existing] = await tx
+      .select({ rawData: contacts.rawData })
+      .from(contacts)
+      .where(eq(contacts.id, contactId))
+      .limit(1);
+    if (!existing) {
+      logger.warn({ taskId: task.id, contactId }, 'fetch_profile: contact not found');
+      return 0;
+    }
+    const rawData = { ...((existing.rawData as Record<string, unknown> | null) ?? {}), linkedinRescrape: suggestion };
+    await tx
+      .update(contacts)
+      .set({ rawData, updatedAt: new Date() })
+      .where(eq(contacts.id, contactId));
+    return 1;
+  });
+
+  logger.info({ taskId: task.id, contactId, name: suggestion.name, title: suggestion.title }, 'fetch_profile ingested');
+  return { extracted: name || title ? 1 : 0, saved };
 }
 
 // ─── Parallel-fetch completion handlers ─────────────────────────────────────
@@ -1461,7 +2065,7 @@ async function handleCompanyInfoComplete(
   c: Record<string, unknown>,
 ): Promise<{ extracted: number; saved: number }> {
   const name = String(c.name ?? '').trim();
-  const p = task.params as { linkedinUrl?: string; companyId?: string };
+  const p = task.params as { linkedinUrl?: string; companyId?: string; crawlWebsite?: boolean };
   if (!name && !p.companyId) {
     logger.debug({ taskId: task.id }, 'fetch_company_info: no name + no companyId, skipping');
     return { extracted: 0, saved: 0 };
@@ -1508,6 +2112,13 @@ async function handleCompanyInfoComplete(
     }
   }
 
+  // list_verification: crawl the real website discovered on the About page
+  // (skips LinkedIn/Maps domains). The source URL from the uploaded list is
+  // crawled separately at dispatch time.
+  if (p.crawlWebsite && typeof c.website === 'string' && c.website.trim()) {
+    await crawlAndStoreForCompany(task.tenantId, savedCompany.id, 'website', c.website.trim());
+  }
+
   logger.info(
     { taskId: task.id, companyId: savedCompany.id, name: savedCompany.name },
     'fetch_company_info complete',
@@ -1520,7 +2131,16 @@ async function handleCompanyTeamComplete(
   c: Record<string, unknown>,
 ): Promise<{ extracted: number; saved: number }> {
   const p = task.params as { linkedinUrl?: string; companyId?: string; keyword?: string };
-  const rawPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
+  const scrapedPeople = (c.people ?? []) as Array<{ name: string; title: string; linkedinUrl: string }>;
+  // Drop LinkedIn followers / "Pages similaires" sidebar leaks ("X suit cette
+  // page", titles full of "N abonnés") BEFORE they reach rawData or contacts.
+  const rawPeople = scrapedPeople.filter((person) => !isJunkPerson(person.name, person.title));
+  if (rawPeople.length < scrapedPeople.length) {
+    logger.info(
+      { taskId: task.id, companyId: p.companyId, dropped: scrapedPeople.length - rawPeople.length, kept: rawPeople.length },
+      'fetch_company_team: dropped followers/similar-page sidebar leaks',
+    );
+  }
   const taskKeyword = (typeof p.keyword === 'string' && p.keyword.trim()) ? p.keyword.trim() : null;
   // Defensive: also accept the extension echoing the keyword back on the
   // result payload — useful if dispatcher → extension param plumbing ever

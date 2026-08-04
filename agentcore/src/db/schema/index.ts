@@ -123,3 +123,5 @@ export type { Invitation, NewInvitation } from './invitations.js';
 
 export { pipelineErrors } from './pipeline-errors.js';
 export type { PipelineError, NewPipelineError } from './pipeline-errors.js';
+
+export { oauthClients } from './oauth-clients.js';

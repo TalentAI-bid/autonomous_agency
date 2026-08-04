@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { parseCompanyListFile, buildVerificationList, DEFAULT_TEAM_ROLE_KEYWORDS } from '../services/verification-list.service.js';
 import { extractJSON } from '../tools/together-ai.tool.js';
 import { removeAllEmailListenerJobs, removeAllEmailSendJobs } from '../services/email-poll-scheduler.service.js';
 import { flushEmailQueue } from '../tools/email-queue.tool.js';
@@ -70,6 +71,69 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     });
 
     return reply.status(201).send({ data: agent });
+  });
+
+  // POST /api/master-agents/:id/verification-list — upload a CSV/Excel company
+  // list and switch the agent into strict `list_verification` mode. Pre-creates
+  // one company row per entry (source='user_list') and stores the list on
+  // config.verificationList. Running the agent then enriches ONLY these
+  // companies (LinkedIn + Maps + Crawl4AI), discovering nothing new.
+  fastify.post<{ Params: { id: string } }>('/:id/verification-list', async (request, reply) => {
+    const { id } = request.params;
+    const [agent] = await withTenant(request.tenantId, async (tx) =>
+      tx.select({ id: masterAgents.id, config: masterAgents.config })
+        .from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1),
+    );
+    if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    const contentType = request.headers['content-type'] || '';
+    if (!contentType.includes('multipart/form-data')) {
+      throw new ValidationError('Expected a multipart/form-data file upload');
+    }
+    const data = await (request as any).file();
+    if (!data) throw new ValidationError('No file uploaded');
+    const chunks: Buffer[] = [];
+    for await (const chunk of data.file) chunks.push(chunk);
+    const fileBuffer = Buffer.concat(chunks);
+
+    let entries;
+    try {
+      entries = await parseCompanyListFile(request.tenantId, fileBuffer, data.filename ?? '', data.mimetype ?? '');
+    } catch (err) {
+      logger.warn({ err, agentId: id }, 'verification-list: file parse failed');
+      throw new ValidationError('Could not parse file — upload a .csv or .xlsx with a company-name column');
+    }
+    if (entries.length === 0) throw new ValidationError('No companies found in the uploaded file');
+
+    const verificationList = await buildVerificationList(request.tenantId, id, entries);
+    if (verificationList.length === 0) throw new ValidationError('None of the rows produced a valid company');
+
+    const existingConfig = (agent.config as Record<string, unknown> | null) ?? {};
+    const newConfig = {
+      ...existingConfig,
+      // The list is just data — the agent stays a NORMAL agent. Its presence
+      // makes the dispatch loop bound discovery to these companies instead of
+      // discovering new ones; everything else (strategist, scoring, outreach,
+      // queue) runs normally.
+      verificationList,
+      // Seed decision-maker titles for the LinkedIn team scrape unless the
+      // strategist already produced some.
+      teamRoleKeywords: (existingConfig.teamRoleKeywords as string[] | undefined) ?? DEFAULT_TEAM_ROLE_KEYWORDS,
+    };
+    await withTenant(request.tenantId, async (tx) => {
+      await tx.update(masterAgents)
+        .set({ config: newConfig, updatedAt: new Date() })
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)));
+    });
+
+    return reply.status(201).send({
+      data: {
+        count: verificationList.length,
+        companies: verificationList.map((v) => ({ companyId: v.companyId, name: v.name })),
+      },
+    });
   });
 
   // POST /api/master-agents/analyze-pipeline — AI pipeline analysis

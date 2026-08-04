@@ -236,6 +236,12 @@ export interface ContactDeepData {
     contributionLevel: string;
   };
   skipReason?: string;
+  /** Suggested name/role from a user-triggered LinkedIn profile re-scrape. */
+  linkedinRescrape?: {
+    name: string | null;
+    title: string | null;
+    scrapedAt: string;
+  };
 }
 
 export interface Document {

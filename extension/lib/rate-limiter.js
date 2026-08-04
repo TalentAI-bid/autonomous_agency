@@ -13,6 +13,14 @@ const DEFAULT_LIMITS = {
     // fail-fast'd the global sentinel and tanked auto-fanned-out fetches.
     search_companies:  { dailyCap: 30, minDelayMs: 4000 },
     fetch_company:     { dailyCap: 100, minDelayMs: 8000 },
+    // Single-person profile re-scrape — sensitive surface, keep 8s pacing.
+    // Server (EXTENSION_SITE_LIMITS) is authoritative for the daily cap.
+    fetch_profile:     { dailyCap: 100, minDelayMs: 8000 },
+    // Review-then-send outreach — user-initiated, one at a time.
+    linkedin_message:  { dailyCap: 50, minDelayMs: 5000 },
+    linkedin_connect:  { dailyCap: 50, minDelayMs: 5000 },
+    // Global people search — server cap (80) is authoritative; conservative pacing.
+    search_people:     { dailyCap: 80, minDelayMs: 4000 },
   },
   gmaps: {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },

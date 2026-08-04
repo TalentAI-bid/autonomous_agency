@@ -79,17 +79,13 @@ export function ActionPlanPanel({ masterAgentId }: Props) {
 
   async function handleSaveAndRun() {
     try {
-      const res = await update.mutateAsync({ answers });
-      if (res.status === 'idle') {
-        await startAgent.mutateAsync(masterAgentId);
-        toast({ title: 'Saved and started', description: 'Agent is now running.' });
-      } else {
-        toast({
-          title: 'Cannot start yet',
-          description: 'Fill in all required answers first.',
-          variant: 'destructive',
-        });
-      }
+      // The action plan is optional context now — saving answers never blocks the
+      // run. Whether the agent actually starts is decided server-side by the single
+      // execution gate (a connected LinkedIn extension); if it's offline the agent
+      // simply lands in "paused" and auto-resumes on reconnect.
+      await update.mutateAsync({ answers });
+      await startAgent.mutateAsync(masterAgentId);
+      toast({ title: 'Saved and started', description: 'Agent is now running.' });
     } catch (err) {
       toast({
         title: 'Failed to save & run',
@@ -116,8 +112,8 @@ export function ActionPlanPanel({ masterAgentId }: Props) {
               )}
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-1">
-              The agent needs these answers before it writes any outreach.
-              You can update them later — they fold into the agent strategy and email prompts.
+              Optional context — answering these sharpens the agent&apos;s strategy and email
+              prompts, but they never block the run. You can update them anytime.
             </p>
           </div>
           {!isComplete && (
@@ -170,7 +166,7 @@ export function ActionPlanPanel({ masterAgentId }: Props) {
           <Button
             size="sm"
             onClick={handleSaveAndRun}
-            disabled={update.isPending || startAgent.isPending || completion.done < completion.total}
+            disabled={update.isPending || startAgent.isPending}
           >
             Save & Run
           </Button>

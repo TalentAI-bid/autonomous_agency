@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { eq, and, desc, isNull, sql, gt, inArray } from 'drizzle-orm';
+import { eq, and, or, desc, isNull, sql, gt, inArray } from 'drizzle-orm';
 import { db, withTenant } from '../config/database.js';
 import { extensionSessions, extensionTasks, users, tenants, contacts, companies, masterAgents, crmActivities } from '../db/schema/index.js';
 import { userTenants } from '../db/schema/user-tenants.js';
@@ -16,7 +16,7 @@ import { pubRedis } from '../queues/setup.js';
 import { env } from '../config/env.js';
 import { readLatest } from './extension-distribution.routes.js';
 import { sanitizePersonName, EXTENSION_SITE_LIMITS, enqueueExtensionTaskBatch } from '../services/extension-dispatcher.js';
-import { saveOrUpdateCompanyStatic } from '../agents/shared/save-company.js';
+import { saveOrUpdateCompanyStatic, companyNameMatchesSql, companyRefMatchesSql } from '../agents/shared/save-company.js';
 import { dispatchJob } from '../services/queue.service.js';
 import { ensureDeal } from '../services/crm-activity.service.js';
 import { logEvent } from '../services/timeline.service.js';
@@ -506,6 +506,10 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
       name: z.string().min(1).max(200),
       title: z.string().max(255).optional(),
       companyName: z.string().max(255).optional(),
+      // The CURRENT-employer company URL scraped from the profile. Most reliable
+      // link key — display names vary ("Pi DATA CENTERS Pvt. Ltd." vs "Pi Data
+      // Centers"), so we match the company by its /company/<slug> first.
+      companyLinkedinUrl: z.string().url().max(500).optional(),
       linkedinUrl: z.string().url().max(500),
       masterAgentId: z.string().uuid().optional(),
       // What to do once the contact is ensured under the matching agent(s)/company:
@@ -518,7 +522,9 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
     authScope.post('/contacts/manual', async (request, reply) => {
       const parsed = manualContactSchema.safeParse(request.body);
       if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
-      const { name, title, companyName, linkedinUrl, masterAgentId: overrideAgentId, action } = parsed.data;
+      const { name, title, companyName, companyLinkedinUrl, linkedinUrl, masterAgentId: overrideAgentId, action } = parsed.data;
+      // Canonical /company/<slug> for URL-first company matching (display names vary).
+      const companySlug = (companyLinkedinUrl?.match(/\/company\/([^/?#]+)/i)?.[1] ?? '').toLowerCase() || null;
 
       const cleanName = sanitizePersonName(name);
       if (!cleanName) {
@@ -547,7 +553,7 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           try {
             const savedCompany = await saveOrUpdateCompanyStatic(
               request.tenantId,
-              { name: companyName.trim(), rawData: { source: 'linkedin_manual_extension' } },
+              { name: companyName.trim(), ...(companyLinkedinUrl ? { linkedinUrl: companyLinkedinUrl } : {}), rawData: { source: 'linkedin_manual_extension' } },
               overrideAgentId,
             );
             companyId = savedCompany.id;
@@ -584,7 +590,16 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
               eq(companies.tenantId, request.tenantId),
               eq(masterAgents.tenantId, request.tenantId),
               eq(masterAgents.createdBy, request.userId),
-              sql`LOWER(${companies.name}) = LOWER(${companyName.trim()})`,
+              // Match by the LinkedIn company id/slug FIRST (the SAME 6437312 on
+              // every employee's profile, whereas the display name varies:
+              // "Pi DATACENTERS" / "Pi DATA CENTERS Pvt. Ltd." / "Pi Data Centers"),
+              // then fall back to a trademark-insensitive name match.
+              companySlug
+                ? or(
+                    companyRefMatchesSql(companySlug),
+                    companyNameMatchesSql(companyName.trim()),
+                  )
+                : companyNameMatchesSql(companyName.trim()),
             ));
         });
         for (const m of matches) {
@@ -596,7 +611,25 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
             reason: 'company_match',
           });
         }
-        logger.info({ companyName, matches: targets.length }, 'manual_add_profile: company-match fan-out');
+        // Teach every matched company this LinkedIn id/slug so future adds (and
+        // other employees' profiles) match by id directly — even when matched by
+        // name this round. Idempotent append to rawData.linkedinCompanyIds.
+        if (companySlug) {
+          const matchedIds = [...new Set(matches.map((m) => m.companyId).filter((x): x is string => !!x))];
+          if (matchedIds.length) {
+            await withTenant(request.tenantId, async (tx) => {
+              await tx.update(companies)
+                .set({
+                  rawData: sql`jsonb_set(coalesce(${companies.rawData}, '{}'::jsonb), '{linkedinCompanyIds}', coalesce(${companies.rawData} -> 'linkedinCompanyIds', '[]'::jsonb) || ${JSON.stringify([companySlug])}::jsonb)`,
+                })
+                .where(and(
+                  inArray(companies.id, matchedIds),
+                  sql`NOT coalesce(${companies.rawData} -> 'linkedinCompanyIds', '[]'::jsonb) @> ${JSON.stringify([companySlug])}::jsonb`,
+                ));
+            });
+          }
+        }
+        logger.info({ companyName, companySlug, matches: targets.length }, 'manual_add_profile: company-match fan-out');
       }
 
       // No company-match results → fall back to the user's most-active agent.
@@ -631,7 +664,7 @@ export default async function extensionRoutes(fastify: FastifyInstance) {
           try {
             const savedCompany = await saveOrUpdateCompanyStatic(
               request.tenantId,
-              { name: companyName.trim(), rawData: { source: 'linkedin_manual_extension' } },
+              { name: companyName.trim(), ...(companyLinkedinUrl ? { linkedinUrl: companyLinkedinUrl } : {}), rawData: { source: 'linkedin_manual_extension' } },
               best.id,
             );
             companyId = savedCompany.id;

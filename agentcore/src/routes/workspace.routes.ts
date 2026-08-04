@@ -28,6 +28,7 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
       slug: tenants.slug,
       plan: tenants.plan,
       role: userTenants.role,
+      isDefault: userTenants.isDefault,
     })
       .from(userTenants)
       .innerJoin(tenants, eq(userTenants.tenantId, tenants.id))
@@ -49,7 +50,7 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
         slug: tenants.slug,
         plan: tenants.plan,
       }).from(tenants).where(eq(tenants.id, self.tenantId)).limit(1);
-      if (home) workspaces.push({ ...home, role: 'owner' });
+      if (home) workspaces.push({ ...home, role: 'owner', isDefault: false });
     }
 
     return { data: workspaces };
@@ -148,5 +149,48 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
         workspaces,
       },
     };
+  });
+
+  // PUT /api/workspaces/default — persist the user's active workspace without
+  // rebinding any session token. Used by the MCP server's use_workspace: its
+  // bearer is a tenant-less mcp_at_ OAuth token whose workspace is resolved from
+  // user_tenants.is_default (middleware/auth.ts:resolveActiveTenant), so setting
+  // the flag here is what makes the selection survive across MCP requests. Unlike
+  // /switch this issues NO new tai_ session token (that flow only matters for the
+  // dashboard's session-token rebinding).
+  fastify.put('/default', async (request, reply) => {
+    const parsed = switchWorkspaceSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid input', details: parsed.error.flatten() });
+    }
+
+    const { tenantId } = parsed.data;
+
+    const [membership] = await db.select({
+      role: userTenants.role,
+    })
+      .from(userTenants)
+      .where(and(eq(userTenants.userId, request.userId), eq(userTenants.tenantId, tenantId)))
+      .limit(1);
+
+    if (!membership) {
+      throw new ForbiddenError('You do not belong to this workspace');
+    }
+
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+    if (!tenant) throw new NotFoundError('Workspace', tenantId);
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(userTenants)
+        .set({ isDefault: false })
+        .where(eq(userTenants.userId, request.userId));
+      await tx
+        .update(userTenants)
+        .set({ isDefault: true })
+        .where(and(eq(userTenants.userId, request.userId), eq(userTenants.tenantId, tenantId)));
+    });
+
+    return { data: { id: tenant.id, name: tenant.name, slug: tenant.slug } };
   });
 }

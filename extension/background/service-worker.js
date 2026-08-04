@@ -38,8 +38,12 @@ let taskQueueTail = Promise.resolve();
 // floor (sustained ~1 hit/sec).
 const TASK_DELAYS_MS = {
   search_companies: 3000,
+  search_people: 3000,
   fetch_company_info: 2000,
   fetch_company_team: 3000,
+  fetch_profile: 3000,
+  linkedin_message: 3000,
+  linkedin_connect: 3000,
   fetch_company: 2500,
   fetch_business: 6000,
   default: 2000,
@@ -86,6 +90,14 @@ const ADAPTER_FILES = {
   // other. Legacy fetch_company stays for already-queued rows.
   'linkedin:fetch_company_info': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-info.js'],
   'linkedin:fetch_company_team': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-team.js'],
+  // Single-person profile re-scrape (user-triggered contact correction).
+  'linkedin:fetch_profile':      ['lib/scraper-utils.js', 'content/linkedin/fetch-profile.js'],
+  // Review-then-send outreach: open profile, type DM / connection-note, leave
+  // it for the user to click Send. One adapter, branches on params.channel.
+  'linkedin:linkedin_message':   ['lib/scraper-utils.js', 'content/linkedin/paste-outreach.js'],
+  'linkedin:linkedin_connect':   ['lib/scraper-utils.js', 'content/linkedin/paste-outreach.js'],
+  // Global People search (role + optional geography) — imports people as leads.
+  'linkedin:search_people':      ['lib/scraper-utils.js', 'content/linkedin/search-people.js'],
   // gmaps adapters are thin wrappers over the self-contained maps-core module
   // (designed to be cloned out into a standalone project) — inject core first.
   'gmaps:search_businesses':     ['content/gmaps/maps-core.js', 'content/gmaps/search-businesses.js'],
@@ -516,6 +528,16 @@ function buildUrl(site, type, params) {
     // some filtering happens client-side in LinkedIn's search ranking.
     return `https://www.linkedin.com/search/results/companies/?keywords=${keywords}%20${encodeURIComponent(params.location || '')}`;
   }
+  if (site === 'linkedin' && type === 'search_people') {
+    // Server is the source of truth for the people-search URL (built via
+    // linkedin-url.service buildLinkedInPeopleSearchURL with keywords + geoUrn).
+    if (typeof params.searchUrl === 'string' && params.searchUrl.startsWith('https://www.linkedin.com/')) {
+      return params.searchUrl;
+    }
+    // Fallback: keyword-only global people search.
+    const kw = encodeURIComponent(params.keyword || params.keywords || '');
+    return `https://www.linkedin.com/search/results/people/?keywords=${kw}&origin=FACETED_SEARCH`;
+  }
   if (site === 'linkedin' && type === 'fetch_company') {
     if (!isAbsoluteLinkedInUrl(params?.linkedinUrl)) {
       throw new Error(`fetch_company: invalid linkedinUrl=${JSON.stringify(params?.linkedinUrl)}`);
@@ -543,6 +565,24 @@ function buildUrl(site, type, params) {
       url += '?keywords=' + encodeURIComponent(params.keyword);
     }
     return url;
+  }
+  if (site === 'linkedin' && type === 'fetch_profile') {
+    // Re-scrape ONE person's /in/<handle>/ profile. Navigate to the bare
+    // profile URL (drop any query/sub-path) so the adapter lands on the top
+    // card. Reject non-absolute URLs for the same ERR_FILE_NOT_FOUND reason
+    // as the company adapters above.
+    if (!isAbsoluteLinkedInUrl(params?.linkedinUrl)) {
+      throw new Error(`fetch_profile: invalid linkedinUrl=${JSON.stringify(params?.linkedinUrl)}`);
+    }
+    return params.linkedinUrl.split('?')[0].replace(/\/?$/, '/');
+  }
+  if (site === 'linkedin' && (type === 'linkedin_message' || type === 'linkedin_connect')) {
+    // Review-then-send: land on the person's profile; the adapter opens the
+    // Message / Connect UI from there.
+    if (!isAbsoluteLinkedInUrl(params?.linkedinUrl)) {
+      throw new Error(`${type}: invalid linkedinUrl=${JSON.stringify(params?.linkedinUrl)}`);
+    }
+    return params.linkedinUrl.split('?')[0].replace(/\/?$/, '/');
   }
   if (site === 'gmaps' && type === 'search_businesses') {
     const q = encodeURIComponent([params.query, params.location].filter(Boolean).join(' '));
@@ -859,7 +899,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
-          sendResponse({ ok: false, error: body?.error || `http_${res.status}` });
+          // Fastify errors come back as { error: { message, code } } OR { error: "string" };
+          // flatten to a string so the content script never shows "[object Object]".
+          const errMsg = body?.error?.message
+            || (typeof body?.error === 'string' ? body.error : null)
+            || body?.message
+            || `http_${res.status}`;
+          sendResponse({ ok: false, error: errMsg, status: res.status });
           return;
         }
         sendResponse({ ok: true, ...(body?.data ?? {}) });

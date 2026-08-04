@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { setAuthInterceptors } from '@/lib/api';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -10,17 +10,24 @@ import { StatusBar } from '@/components/layout/status-bar';
 import { OnboardingBanner } from '@/components/layout/onboarding-banner';
 import { ActivityFab } from '@/components/copilot/activity-fab';
 import { useWebSocket } from '@/hooks/use-websocket';
+import { useSetupStatus } from '@/hooks/use-setup-status';
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   useWebSocket();
+  const pathname = usePathname();
+  const { showOnboarding } = useSetupStatus();
+  // On the first-run /dashboard onboarding page, drop the dense chrome so the
+  // clean onboarding view renders full-bleed (it carries its own top strip).
+  const onboardingFull = pathname === '/dashboard' && showOnboarding;
+
   return (
     <div className="app-shell">
       <Sidebar />
       <div className="main">
-        <Header />
-        <OnboardingBanner />
+        {!onboardingFull && <Header />}
+        {!onboardingFull && <OnboardingBanner />}
         <main style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>{children}</main>
-        <StatusBar />
+        {!onboardingFull && <StatusBar />}
       </div>
       <ActivityFab />
     </div>

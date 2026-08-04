@@ -36,6 +36,7 @@ export function useCreateContact() {
       email?: string;
       linkedinUrl?: string;
       title?: string;
+      companyId?: string;
       companyName?: string;
       location?: string;
       masterAgentId: string;  // required: contacts cannot be orphan (post-refactor)
@@ -54,6 +55,27 @@ export function useUpdateContact() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['contacts'] });
       qc.invalidateQueries({ queryKey: ['contacts', vars.id] });
+    },
+  });
+}
+
+export interface RescrapeContactResult {
+  taskId: string;
+  status: string;
+}
+
+/**
+ * Tell the browser extension to re-scrape this contact's LinkedIn profile.
+ * The result lands as a suggestion on the contact's rawData.linkedinRescrape
+ * (the edit modal polls the contact and pre-fills from it). Throws if the
+ * contact has no LinkedIn URL (400) or no extension is connected (409).
+ */
+export function useRescrapeContactLinkedin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiPost<RescrapeContactResult>(`/contacts/${id}/rescrape-linkedin`),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['contacts', id] });
     },
   });
 }

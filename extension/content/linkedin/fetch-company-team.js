@@ -124,12 +124,17 @@
   // org tab render different wrappers across redesigns, so try a cascade and
   // fall back to mapping each profile anchor to its closest container.
   // Mirrors CARD_SELECTORS in search-companies.js.
+  // NOTE: use attribute-CONTAINS for the org people card — the live DOM class is
+  // `org-people-profile-card__profile-card-spacing` (a BEM modifier), so the exact
+  // `.org-people-profile-card` never matched and the cascade fell through to the
+  // too-generic `li.artdeco-list__item` (which matched filter/empty rows → 0 people)
+  // or the lossy anchor fallback. The entity-lockup selector is the content wrapper.
   const PEOPLE_CARD_SELECTORS = [
     'li.reusable-search__result-container',
     'div[data-view-name="search-entity-result-universal-template"]',
     'div[data-chameleon-result-urn]',
-    'li.org-people-profile-card',
-    'div.org-people-profile-card',
+    'li[class*="org-people-profile-card"]',
+    'div[class*="org-people-profile-card"]',
     'ul.search-results__list > li',
     'div.search-results__list > div',
     'li.artdeco-list__item',
@@ -137,8 +142,12 @@
 
   function selectPeopleCards() {
     for (const sel of PEOPLE_CARD_SELECTORS) {
-      const found = document.querySelectorAll(sel);
-      if (found.length > 0) return { cards: Array.from(found), matchedSelector: sel };
+      // Only accept a selector whose matches actually contain a profile link —
+      // guards against generic selectors (artdeco-list__item) matching filter
+      // chips / empty rows and reporting "cards found" with 0 extractable people.
+      const found = Array.from(document.querySelectorAll(sel))
+        .filter((el) => el.querySelector && el.querySelector('a[href*="/in/"]'));
+      if (found.length > 0) return { cards: found, matchedSelector: sel };
     }
     // Generic fallback: every profile anchor → its closest plausible container.
     const seenCards = new Set();
@@ -150,6 +159,15 @@
     return { cards, matchedSelector: cards.length ? 'fallback_a_in_href' : null };
   }
 
+  // Followers / "Pages similaires" (similar pages) sidebar markers. Cards
+  // carrying these are page-followers or other companies, not employees:
+  //   FR "X suit/suivent cette page", "Pages similaires", "Page Vitrine"
+  //   "<industry> N abonnés", EN "follows this page" / "N followers".
+  const JUNK_CARD = /\b(?:suit|suivent)\s+cette\s+page\b|\bfollows?\s+this\s+page\b|\bpages?\s+(?:similaires|associées)\b|\bpage\s+vitrine\b|\d[\d\s.,]*\s*(?:abonnés?|followers?)\b/i;
+  // Right-rail / sidebar containers the employee list never lives in.
+  const SIDEBAR_SELECTOR =
+    'aside, .scaffold-layout__aside, section[class*="similar"], div[class*="similar"], div[class*="discover"], [class*="follows-this-page"], [class*="org-similar"]';
+
   function extractPagePeople(seen, people) {
     const { cards, matchedSelector } = selectPeopleCards();
     const firstAnchorHref =
@@ -157,12 +175,22 @@
     let added = 0;
 
     for (const card of cards) {
+      // Skip cards living in the followers / similar-pages right rail — those
+      // are not employees (locale-independent: matches on container class).
+      if (card.closest && card.closest(SIDEBAR_SELECTOR)) continue;
+
       const profileAnchor = findProfileAnchor(card);
       if (!profileAnchor) continue;
 
       const profileUrl = (profileAnchor.href || '').split('?')[0];
       if (!profileUrl || seen.has(profileUrl)) continue;
       seen.add(profileUrl);
+
+      // Text-level guard: even if a sidebar card escapes the container check
+      // (LinkedIn redesigns), reject it when its text carries follower /
+      // similar-page markers ("suit cette page", "N abonnés").
+      const cardText = (card.textContent || '').replace(/\s+/g, ' ');
+      if (JUNK_CARD.test(cardText)) continue;
 
       let pName = extractPersonName(card);
       if (!pName) continue;
@@ -187,16 +215,37 @@
         .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
         .filter((t) => t.length > 5 && t.length < 200);
 
-      const isPureName = (t) => pName && t.includes(pName)
-        && t.split(pName).join('').replace(/[·•\-|\s]/g, '').length < 3;
+      // Case-insensitive so a slug-derived name ("Sankalp Ks") still matches the
+      // visible name line ("Sankalp KS") and isn't mistaken for the title.
+      const isPureName = (t) => {
+        if (!pName) return false;
+        const lt = t.toLowerCase();
+        const ln = pName.toLowerCase();
+        return lt.includes(ln) && lt.split(ln).join('').replace(/[·•\-|\s]/g, '').length < 3;
+      };
       let title = '';
-      // Pass 1: prefer a granular occupation line with no degree/mutual markers
-      // in its RAW text (the subtitle is its own element, separate from the
-      // degree badge + "mutual connections" node).
-      for (const t of allText) {
-        if (DEGREE_RAW.test(t) || MUTUAL.test(t) || isPureName(t)) continue;
-        const cleaned = sanitizeTitle(t, pName);
-        if (cleaned.length >= 3) { title = cleaned; break; }
+      // Pass 0 (preferred): the structured occupation subtitle. Locale-independent
+      // (class-based) and unambiguous — it's a sibling of the title, never the name.
+      // Two layouts: org people-card uses `.artdeco-entity-lockup__subtitle`; the
+      // people-search result uses `.entity-result__primary-subtitle` (the location
+      // sits in `__secondary-subtitle`, which we deliberately do NOT pick here).
+      const lockupSubtitle = card.querySelector(
+        '.artdeco-entity-lockup__subtitle, .entity-result__primary-subtitle',
+      );
+      if (lockupSubtitle) {
+        const cleaned = sanitizeTitle((lockupSubtitle.textContent || '').replace(/\s+/g, ' ').trim(), pName);
+        if (cleaned.length >= 3 && !isPureName(cleaned)) title = cleaned;
+      }
+      // Pass 1 (fallback when no structured subtitle): prefer a granular
+      // occupation line with no degree/mutual markers in its RAW text (the
+      // subtitle is its own element, separate from the degree badge + "mutual
+      // connections" node).
+      if (!title) {
+        for (const t of allText) {
+          if (DEGREE_RAW.test(t) || MUTUAL.test(t) || isPureName(t)) continue;
+          const cleaned = sanitizeTitle(t, pName);
+          if (cleaned.length >= 3) { title = cleaned; break; }
+        }
       }
       // Pass 2 (fallback): clean a marker-laden line when no granular one exists.
       if (!title) {
@@ -275,6 +324,8 @@
     if (/\bprofil\b/i.test(t)) return false;          // FR "profil" (EN "profile" above)
     if (/Relation de\s+\d/i.test(t)) return false;    // FR connection-degree leak
     if (/degree connection/i.test(t)) return false;   // EN connection-degree leak
+    if (/\b(?:suit|suivent) cette page\b/i.test(t)) return false; // FR followers-sidebar leak
+    if (/\bfollows? this page\b/i.test(t)) return false;          // EN followers-sidebar leak
     if (/[·•]\s*\d/.test(t)) return false;            // visible degree badge leak ("· 3e")
     if (/%[0-9A-Fa-f]{2}/.test(t)) return false;
     return true;
@@ -357,6 +408,22 @@
   }
 
   function extractPersonName(card) {
+    // Structured entity-lockup (the modern org-people card): the visible name
+    // lives in .artdeco-entity-lockup__title. Locale-independent (class-based)
+    // and the most reliable source — prefer it over anchor-text/slug guesses,
+    // which mis-fire on non-English UIs (e.g. FR "Voir le profil de NAME" the
+    // English-only aria-label regex below can't read, forcing a slug fallback
+    // whose casing then leaks the name into the title field).
+    const lockupTitle = card.querySelector('.artdeco-entity-lockup__title');
+    if (lockupTitle) {
+      const titleAnchor = lockupTitle.querySelector('a[aria-label]');
+      if (titleAnchor) {
+        const cleaned = cleanLinkedInA11yText((titleAnchor.getAttribute('aria-label') || '').trim());
+        if (isValidName(cleaned)) return cleaned;
+      }
+      const txt = stripConnectionDegree((lockupTitle.textContent || '').trim().replace(/\s+/g, ' '));
+      if (isValidName(txt)) return txt;
+    }
     const hiddenSpan = card.querySelector(
       '.visually-hidden, .a11y-text, [class*="sr-only"], span[aria-label]',
     );
@@ -372,9 +439,15 @@
     }
     const profileAnchor = findProfileAnchor(card);
     if (profileAnchor) {
-      const ariaLabel = profileAnchor.getAttribute('aria-label') || '';
-      const match = ariaLabel.match(/View\s+(.+?)(?:'s\s+profile|\s+profile)/i);
-      if (match && isValidName(match[1])) return match[1].trim();
+      // Route the aria-label through cleanLinkedInA11yText, which handles BOTH
+      // apostrophe styles ("View Jane Doe’s profile") and the French phrasing
+      // ("Voir le profil de NAME") — the old inline regex only matched a straight
+      // "'s" and left a trailing "’s" on the name.
+      const ariaLabel = (profileAnchor.getAttribute('aria-label') || '').trim();
+      if (ariaLabel) {
+        const cleaned = cleanLinkedInA11yText(ariaLabel);
+        if (cleaned && cleaned !== ariaLabel && isValidName(cleaned)) return cleaned;
+      }
     }
     if (profileAnchor) {
       let text = (profileAnchor.textContent || '').trim().replace(/\s+/g, ' ');

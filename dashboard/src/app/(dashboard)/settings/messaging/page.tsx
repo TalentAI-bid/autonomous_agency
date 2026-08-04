@@ -31,8 +31,8 @@ export default function MessagingSettingsPage() {
   const [savedPreview, setSavedPreview] = useState<string | null>(null);
 
   useEffect(() => {
-    if (data?.data) {
-      setForm({ ...EMPTY, ...data.data });
+    if (data) {
+      setForm({ ...EMPTY, ...data });
     }
   }, [data]);
 
@@ -43,7 +43,7 @@ export default function MessagingSettingsPage() {
   async function handleSave() {
     try {
       const res = await save.mutateAsync(form);
-      const snippet = (res.data.value_prop ?? '').slice(0, 120);
+      const snippet = (res.value_prop ?? '').slice(0, 120);
       setSavedPreview(snippet ? `Your messages will now use: "${snippet}${snippet.length >= 120 ? '…' : ''}"` : null);
       toast({ title: 'Messaging configuration saved' });
     } catch (err: unknown) {

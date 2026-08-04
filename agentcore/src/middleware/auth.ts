@@ -114,6 +114,21 @@ async function authPlugin(fastify: FastifyInstance) {
     }
     const token = match[1]!.trim();
 
+    // OAuth path: opaque MCP access token (mcp_at_...). Tenant-less like the
+    // extension JWT — the active workspace is resolved from X-Active-Workspace
+    // (set by the MCP server's use_workspace) or the user's default.
+    if (token.startsWith('mcp_at_')) {
+      const { verifyOAuthAccessToken } = await import('../services/oauth.service.js');
+      const rec = await verifyOAuthAccessToken(token);
+      if (!rec) throw new UnauthorizedError('Invalid or expired token');
+      request.userId = rec.userId;
+      const headerTenant = ((request.headers['x-active-workspace'] as string | undefined) ?? '').trim();
+      const resolved = await resolveActiveTenant(rec.userId, headerTenant || undefined, rec.role);
+      request.tenantId = resolved.tenantId;
+      request.userRole = resolved.role;
+      return;
+    }
+
     // Primary path: opaque Redis session (dashboard login). Always carries
     // tenantId because the dashboard rebinds tokens on workspace switch.
     const session = await verifySession(token);

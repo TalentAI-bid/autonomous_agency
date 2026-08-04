@@ -181,9 +181,16 @@ export default function AgentDetailPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-xl font-bold">{agent.name}</h1>
-                <Badge variant={agent.status === 'running' ? 'success' : 'secondary'}>
-                  {agent.status}
-                </Badge>
+                {agent.status === 'paused' &&
+                (agent.config?.pauseReason as string | undefined) === 'extension_required' ? (
+                  <Badge variant="warning" title="Connect the LinkedIn extension to run this agent — it resumes automatically.">
+                    Paused · connect extension
+                  </Badge>
+                ) : (
+                  <Badge variant={agent.status === 'running' ? 'success' : 'secondary'}>
+                    {agent.status}
+                  </Badge>
+                )}
                 <QuotaBadge masterAgentId={id} compact />
               </div>
               <p className="text-sm text-muted-foreground mt-1">{agent.useCase}</p>
@@ -524,6 +531,12 @@ export default function AgentDetailPage() {
                   // Prefer the new continuous fitScore; fall back to nothing
                   // for unscored companies (they're still shown — never hidden).
                   const fitScore = (raw.fitScore as CompanyFitScoreVerdict | undefined);
+                  // list_verification mode flags (strict company-list enrichment).
+                  const isListEntry = raw.listEntry === true;
+                  const linkedinNotFound = raw.linkedinNotFound === true;
+                  const gmapsNotFound = raw.gmapsNotFound === true;
+                  const crawl = (raw.crawl as Record<string, { url?: string; markdownLength?: number }> | undefined) ?? {};
+                  const crawledCount = [crawl.sourceUrl, crawl.website].filter((c) => c && (c.markdownLength ?? 0) > 0).length;
 
                   return (
                     <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">
@@ -554,6 +567,27 @@ export default function AgentDetailPage() {
                             </Badge>
                           </div>
                         </div>
+
+                        {/* list_verification status row */}
+                        {isListEntry && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {linkedinNotFound ? (
+                              <Badge variant="outline" className="text-[10px] text-red-400 border-red-500/40">No LinkedIn match</Badge>
+                            ) : company.linkedinUrl ? (
+                              <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/40">LinkedIn ✓</Badge>
+                            ) : null}
+                            {gmapsNotFound ? (
+                              <Badge variant="outline" className="text-[10px] text-red-400 border-red-500/40">No Maps match</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/40">Maps ✓</Badge>
+                            )}
+                            {crawledCount > 0 && (
+                              <Badge variant="outline" className="text-[10px] text-sky-400 border-sky-500/40">
+                                {crawledCount === 2 ? 'Site + source crawled' : 'Site crawled'}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
 
                         {/* Hiring signal chip — shows what role this company is hiring for */}
                         {hiringSignal && openJob && (

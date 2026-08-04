@@ -26,6 +26,18 @@ module.exports = {
       },
     },
     {
+      name: 'agentcore-mcp',
+      cwd: '/opt/autonomous_agency/agentcore-mcp',
+      script: 'dist/index.js',
+      node_args: '--env-file=/opt/autonomous_agency/agentcore-mcp/.env',
+      exec_mode: 'fork',
+      instances: 1,
+      max_memory_restart: '512M',
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
+    {
       name: 'agentcore-dashboard',
       cwd: '/opt/autonomous_agency/dashboard',
       script: 'node_modules/.bin/next',

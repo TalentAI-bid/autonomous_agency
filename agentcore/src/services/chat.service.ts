@@ -4,6 +4,12 @@ import { conversations, conversationMessages, masterAgents, emailListenerConfigs
 import { complete, completeStream, extractJSON, SMART_MODEL } from '../tools/together-ai.tool.js';
 import { parsePDF } from '../tools/pdf-parser.tool.js';
 import { parseDOCX } from '../tools/docx-parser.tool.js';
+import {
+  isSpreadsheetFile,
+  parseCompanyListFile,
+  buildVerificationList,
+  DEFAULT_TEAM_ROLE_KEYWORDS,
+} from './verification-list.service.js';
 import { buildChatSystemPrompt, type InferredIntent } from '../prompts/chat-agent.prompt.js';
 import { applySearchChoice, type SearchChoicePayload } from './search-negotiation.service.js';
 import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
@@ -309,6 +315,7 @@ export async function sendMessage(
   conversationId: string,
   content: string,
   attachments?: Attachment[],
+  userId?: string,
 ) {
   // Verify conversation exists and belongs to tenant
   const [conversation] = await withTenant(tenantId, async (tx) => {
@@ -327,10 +334,16 @@ export async function sendMessage(
   });
   const maxOrder = maxResult?.maxOrder ?? -1;
 
-  // Process attachments
+  // Process attachments. CSV/Excel are treated as company verification lists
+  // (list_verification mode); PDF/DOCX are extracted to text for the LLM.
   let fileMetadata: Array<{ fileName: string; mimeType: string; extractedText: string; pages?: number }> = [];
+  const spreadsheets: Attachment[] = [];
   if (attachments?.length) {
     for (const file of attachments) {
+      if (isSpreadsheetFile(file.fileName, file.mimeType)) {
+        spreadsheets.push(file);
+        continue;
+      }
       const ext = file.fileName.toLowerCase().split('.').pop();
       let extractedText = '';
       let pages: number | undefined;
@@ -343,7 +356,7 @@ export async function sendMessage(
         const result = await parseDOCX(file.buffer);
         extractedText = result.text;
       } else {
-        throw new ValidationError(`Unsupported file type: .${ext}. Only PDF and DOCX are supported.`);
+        throw new ValidationError(`Unsupported file type: .${ext}. Upload PDF/DOCX (documents) or CSV/XLSX (company list).`);
       }
 
       fileMetadata.push({ fileName: file.fileName, mimeType: file.mimeType, extractedText, pages });
@@ -356,12 +369,18 @@ export async function sendMessage(
     return tx.insert(conversationMessages).values({
       conversationId,
       role: 'user',
-      type: fileMetadata.length > 0 ? 'file_upload' : 'text',
+      type: (fileMetadata.length > 0 || spreadsheets.length > 0) ? 'file_upload' : 'text',
       content,
       metadata: userMsgMetadata,
       orderIndex: maxOrder + 1,
     }).returning();
   });
+
+  // A spreadsheet attachment short-circuits the normal LLM proposal flow: we
+  // set up (or reuse) a list_verification agent and start it immediately.
+  if (spreadsheets.length > 0) {
+    return await runVerificationListFromChat(tenantId, userId, conversationId, conversation, spreadsheets);
+  }
 
   // Load messages, listeners, accounts, and company context in parallel
   const [allMessages, listeners, accounts, companyCtx] = await Promise.all([
@@ -720,6 +739,7 @@ export async function* sendMessageStream(
   conversationId: string,
   content: string,
   attachments?: Attachment[],
+  userId?: string,
 ): AsyncGenerator<string, void, unknown> {
   // Verify conversation exists and belongs to tenant
   const [conversation] = await withTenant(tenantId, async (tx) => {
@@ -738,10 +758,15 @@ export async function* sendMessageStream(
   });
   const maxOrder = maxResult?.maxOrder ?? -1;
 
-  // Process attachments
+  // Process attachments. CSV/Excel → company verification list; PDF/DOCX → text.
   let fileMetadata: Array<{ fileName: string; mimeType: string; extractedText: string; pages?: number }> = [];
+  const spreadsheets: Attachment[] = [];
   if (attachments?.length) {
     for (const file of attachments) {
+      if (isSpreadsheetFile(file.fileName, file.mimeType)) {
+        spreadsheets.push(file);
+        continue;
+      }
       const ext = file.fileName.toLowerCase().split('.').pop();
       let extractedText = '';
       let pages: number | undefined;
@@ -754,7 +779,7 @@ export async function* sendMessageStream(
         const result = await parseDOCX(file.buffer);
         extractedText = result.text;
       } else {
-        throw new ValidationError(`Unsupported file type: .${ext}. Only PDF and DOCX are supported.`);
+        throw new ValidationError(`Unsupported file type: .${ext}. Upload PDF/DOCX (documents) or CSV/XLSX (company list).`);
       }
 
       fileMetadata.push({ fileName: file.fileName, mimeType: file.mimeType, extractedText, pages });
@@ -767,12 +792,19 @@ export async function* sendMessageStream(
     return tx.insert(conversationMessages).values({
       conversationId,
       role: 'user',
-      type: fileMetadata.length > 0 ? 'file_upload' : 'text',
+      type: (fileMetadata.length > 0 || spreadsheets.length > 0) ? 'file_upload' : 'text',
       content,
       metadata: userMsgMetadata,
       orderIndex: maxOrder + 1,
     }).returning();
   });
+
+  // Spreadsheet → set up + start a list_verification agent, stream the result.
+  if (spreadsheets.length > 0) {
+    const { message } = await runVerificationListFromChat(tenantId, userId, conversationId, conversation, spreadsheets);
+    yield `event: done\ndata: ${JSON.stringify({ message, proposalData: null })}\n\n`;
+    return;
+  }
 
   // Load messages, listeners, accounts, and company context in parallel
   const [allMessages, listeners, accounts, companyCtx] = await Promise.all([
@@ -1296,6 +1328,145 @@ export async function approveProposal(tenantId: string, conversationId: string, 
   })();
 
   return { masterAgentId: agent.id };
+}
+
+/**
+ * Handle a CSV/Excel dropped into the setup chat: parse it into a company
+ * list, set up (or reuse) a strict `list_verification` master agent, start it,
+ * and return an assistant message summarising what happened. This is the
+ * chat-native path the user expects — no Settings-tab upload needed.
+ */
+async function runVerificationListFromChat(
+  tenantId: string,
+  userId: string | undefined,
+  conversationId: string,
+  conversation: { masterAgentId?: string | null; extractedConfig?: unknown },
+  spreadsheets: Attachment[],
+): Promise<{ message: typeof conversationMessages.$inferSelect }> {
+  const appendAssistant = async (text: string, type: 'text' | 'file_upload' | 'pipeline_proposal' | 'pipeline_approved' = 'text') => {
+    const [{ maxOrder }] = await withTenant(tenantId, async (tx) =>
+      tx.select({ maxOrder: max(conversationMessages.orderIndex) })
+        .from(conversationMessages)
+        .where(eq(conversationMessages.conversationId, conversationId)),
+    );
+    const [msg] = await withTenant(tenantId, async (tx) =>
+      tx.insert(conversationMessages).values({
+        conversationId,
+        role: 'assistant',
+        type,
+        content: text,
+        orderIndex: (maxOrder ?? 0) + 1,
+      }).returning(),
+    );
+    return msg!;
+  };
+
+  // Parse + merge entries from every uploaded sheet, dedup by name.
+  const merged: Array<{ name: string; sourceUrl?: string; notes?: string }> = [];
+  const seen = new Set<string>();
+  for (const f of spreadsheets) {
+    try {
+      const entries = await parseCompanyListFile(tenantId, f.buffer, f.fileName, f.mimeType);
+      for (const e of entries) {
+        const k = e.name.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        merged.push(e);
+      }
+    } catch (err) {
+      logger.warn({ err, fileName: f.fileName }, 'chat: verification list parse failed');
+    }
+  }
+
+  if (merged.length === 0) {
+    return { message: await appendAssistant(
+      "I couldn't find any company names in that file. Make sure it has a column with company names (e.g. \"Société\", \"Company\", or \"Name\") and re-upload.",
+    ) };
+  }
+
+  // Reuse the conversation's agent if it already has one; otherwise create a
+  // dedicated list_verification agent named after the uploaded file.
+  let masterAgentId = (conversation.masterAgentId as string | null | undefined) ?? null;
+  if (!masterAgentId) {
+    const base = (spreadsheets[0]?.fileName ?? 'Company list').replace(/\.[^.]+$/, '').trim() || 'Company list';
+    const [agent] = await withTenant(tenantId, async (tx) =>
+      tx.insert(masterAgents).values({
+        tenantId,
+        name: `Verification — ${base}`.slice(0, 255),
+        description: 'Strict verification of an uploaded company list',
+        mission: 'Verify and enrich the uploaded list of companies via LinkedIn, Google Maps, and their websites. Do not discover new companies.',
+        useCase: 'sales',
+        config: {},
+        createdBy: userId,
+      }).returning(),
+    );
+    masterAgentId = agent!.id;
+    await withTenant(tenantId, async (tx) =>
+      tx.update(conversations).set({ masterAgentId, updatedAt: new Date() }).where(eq(conversations.id, conversationId)),
+    );
+  }
+
+  // Pre-create company rows + build the list.
+  const verificationList = await buildVerificationList(tenantId, masterAgentId, merged);
+  if (verificationList.length === 0) {
+    return { message: await appendAssistant(
+      'I parsed the file but none of the rows produced a valid company. Please check the file and try again.',
+    ) };
+  }
+
+  // Persist the list + flip the agent into list_verification mode.
+  await withTenant(tenantId, async (tx) => {
+    const [row] = await tx.select({ config: masterAgents.config }).from(masterAgents)
+      .where(and(eq(masterAgents.id, masterAgentId!), eq(masterAgents.tenantId, tenantId))).limit(1);
+    const existingConfig = (row?.config as Record<string, unknown> | null) ?? {};
+    await tx.update(masterAgents).set({
+      config: {
+        ...existingConfig,
+        // List is data only — agent stays normal; dispatch binds discovery to it.
+        verificationList,
+        teamRoleKeywords: (existingConfig.teamRoleKeywords as string[] | undefined) ?? DEFAULT_TEAM_ROLE_KEYWORDS,
+      },
+      // Mirror approveProposal: mark running before execute(); the normal
+      // action-plan gate inside execute() will flip it to awaiting_action_plan
+      // if the agent still needs outreach answers.
+      status: 'running',
+      updatedAt: new Date(),
+    }).where(and(eq(masterAgents.id, masterAgentId!), eq(masterAgents.tenantId, tenantId)));
+  });
+
+  // Run it (fire-and-forget, same pattern as approveProposal).
+  registerTenantWorkers(tenantId);
+  const agentId = masterAgentId;
+  void (async () => {
+    const masterAgent = new MasterAgent({ tenantId, masterAgentId: agentId });
+    try {
+      await masterAgent.execute({ masterAgentId: agentId });
+      await masterAgent.close();
+      const [fresh] = await withTenant(tenantId, async (tx) =>
+        tx.select({ config: masterAgents.config }).from(masterAgents)
+          .where(and(eq(masterAgents.id, agentId), eq(masterAgents.tenantId, tenantId))).limit(1),
+      );
+      await scheduleAgentJobs(tenantId, agentId, (fresh?.config as Record<string, unknown>) ?? {});
+    } catch (err) {
+      await masterAgent.close().catch(() => {});
+      await withTenant(tenantId, async (tx) =>
+        tx.update(masterAgents).set({ status: 'error', updatedAt: new Date() })
+          .where(and(eq(masterAgents.id, agentId), eq(masterAgents.tenantId, tenantId))),
+      );
+      logger.error({ err, tenantId, agentId }, 'list_verification execute failed (chat upload)');
+    }
+  })();
+
+  const gmapsBatches = Math.ceil(verificationList.length / 20);
+  const summary = `Got it — I imported **${verificationList.length} companies** from your file and set up an agent for them. It works like any normal agent, but its target set is fixed to your list (it won't go find new companies). For each company it will:\n\n`
+    + `• find its LinkedIn page and pull company info + team\n`
+    + `• find it on Google Maps and pull the listing details\n`
+    + `• crawl any website link in your file, plus the real site found on LinkedIn\n\n`
+    + `…then score each one and draft outreach, surfacing them in your daily queue like usual. Google Maps runs in batches of 20 (~2h apart); LinkedIn runs in parallel. Results appear under this agent's Companies tab.\n\n`
+    + `If I still need a few outreach details from you (sender, calendar link, etc.), I'll ask in the agent's Action Plan before any messages go out. Note: LinkedIn & Maps lookups run through the connected Chrome extension — make sure it's connected.`
+    + (gmapsBatches > 1 ? `\n\n(${gmapsBatches} Maps batches queued.)` : '');
+
+  return { message: await appendAssistant(summary, 'text') };
 }
 
 export async function getConversation(tenantId: string, conversationId: string) {

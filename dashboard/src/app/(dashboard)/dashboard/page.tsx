@@ -16,6 +16,8 @@ import { StreamRow } from '@/components/ui/stream-row';
 import { AgentGlyph, type AgentType } from '@/components/ui/agent-glyph';
 import { Panel, PanelBody, PanelHead } from '@/components/ui/panel';
 import { ExportButton } from '@/components/shared/export-button';
+import { OnboardingView } from '@/components/dashboard/onboarding-view';
+import { useSetupStatus } from '@/hooks/use-setup-status';
 import type { Contact, MasterAgent } from '@/types';
 
 const LANES: AgentType[] = ['discovery', 'enrichment', 'scoring', 'outreach', 'reply', 'action'];
@@ -140,6 +142,7 @@ export default function DashboardPage() {
   const events = useRealtimeStore((s) => s.events);
   const agentMessages = useRealtimeStore((s) => s.agentMessages);
   const user = useAuthStore((s) => s.user);
+  const { showOnboarding } = useSetupStatus();
 
   const contacts = contactsRes?.data ?? [];
   const total = analytics?.contacts.total ?? 0;
@@ -172,6 +175,10 @@ export default function DashboardPage() {
 
   const feed = agentMessages.slice(0, 20);
   const eventFeed = events.slice(0, 20);
+
+  // First-run: no agent deployed yet → clean onboarding view. Once an agent is
+  // deployed this falls through to the live-ops dashboard below.
+  if (showOnboarding) return <OnboardingView />;
 
   return (
     <div className="page">

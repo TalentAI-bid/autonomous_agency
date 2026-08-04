@@ -6,6 +6,8 @@ import { useCompany } from '@/hooks/use-companies';
 import { useMasterAgent } from '@/hooks/use-agents';
 import { useContacts, useFindContactEmail } from '@/hooks/use-contacts';
 import { EmailEditor } from '@/components/contacts/email-editor';
+import { EditContactModal } from '@/components/contacts/edit-contact-modal';
+import { AddPersonModal } from '@/components/contacts/add-person-modal';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +18,7 @@ import {
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
   Mail, ExternalLink, Search, Linkedin,
   AlertTriangle, TrendingDown, FileText, Brain, ShieldAlert,
-  Loader2,
+  Loader2, Pencil, Plus,
 } from 'lucide-react';
 import Link from 'next/link';
 import type { CompanyDeepData, CompanyFitScoreVerdict, PainPoint } from '@/types';
@@ -246,12 +248,15 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         {/* People / Contacts */}
         <Card className="md:col-span-2">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="w-4 h-4" /> People
-              {companyContacts.length > 0 && (
-                <Badge variant="secondary" className="ml-1 text-xs">{companyContacts.length}</Badge>
-              )}
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Users className="w-4 h-4" /> People
+                {companyContacts.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-xs">{companyContacts.length}</Badge>
+                )}
+              </CardTitle>
+              <AddPersonModal masterAgentId={agentId} companyId={companyId} companyName={company.name} />
+            </div>
           </CardHeader>
           <CardContent>
             {companyContacts.length > 0 ? (
@@ -302,6 +307,14 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                           <Linkedin className="w-3.5 h-3.5" />
                         </a>
                       )}
+                      <EditContactModal
+                        contact={contact}
+                        trigger={
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit name / role">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                        }
+                      />
                       <Link href={`/agents/${agentId}/contacts/${contact.id}`}>
                         <Button variant="ghost" size="icon" className="h-7 w-7">
                           <ExternalLink className="w-3.5 h-3.5" />
@@ -312,7 +325,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No contacts discovered yet for this company</p>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">No contacts discovered yet for this company</p>
+                <AddPersonModal
+                  masterAgentId={agentId}
+                  companyId={companyId}
+                  companyName={company.name}
+                  trigger={
+                    <Button variant="outline" size="sm">
+                      <Plus className="w-3.5 h-3.5 mr-1.5" /> Add the first person
+                    </Button>
+                  }
+                />
+              </div>
             )}
           </CardContent>
         </Card>

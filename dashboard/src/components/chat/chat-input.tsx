@@ -10,7 +10,8 @@ interface ChatInputProps {
   disabled: boolean;
 }
 
-const ACCEPTED_TYPES = '.pdf,.docx';
+const ACCEPTED_TYPES = '.pdf,.docx,.csv,.xlsx,.xls';
+const ACCEPTED_EXTS = ['pdf', 'docx', 'csv', 'xlsx', 'xls'];
 
 export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [content, setContent] = useState('');
@@ -47,8 +48,8 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   function handleFileSelect(selectedFiles: FileList | null) {
     if (!selectedFiles) return;
     const newFiles = Array.from(selectedFiles).filter((f) => {
-      const ext = f.name.toLowerCase().split('.').pop();
-      return ext === 'pdf' || ext === 'docx';
+      const ext = f.name.toLowerCase().split('.').pop() ?? '';
+      return ACCEPTED_EXTS.includes(ext);
     });
     setFiles((prev) => [...prev, ...newFiles]);
   }
@@ -85,7 +86,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
       {/* Drag overlay */}
       {isDragging && (
         <div className="mb-3 rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 p-4 text-center text-sm text-primary">
-          Drop PDF or DOCX files here
+          Drop a document (PDF/DOCX) or a company list (CSV/XLSX) here
         </div>
       )}
 

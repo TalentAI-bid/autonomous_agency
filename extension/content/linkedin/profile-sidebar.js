@@ -215,6 +215,10 @@
     if (/^\d+\+?$/.test(text)) return true; // "500+", "1234"
     if (/^Contact info$/i.test(text)) return true;
     if (/^·$/.test(text)) return true;
+    // Connection-degree badge — "· 1er" / "· 2e" / "· 3e" (FR), "1st" / "2nd" /
+    // "3rd" (EN), optional leading middot/plus. These sit between the name and
+    // the real headline in the 2026 DOM and must NOT be mistaken for the role.
+    if (/^·?\s*\d{1,2}(?:er|e|ème|eme|st|nd|rd|th)\.?\+?$/i.test(text)) return true;
     return false;
   }
 
@@ -453,16 +457,170 @@
     return headline.trim();
   }
 
+  // ─── Experience section: the ground truth for current role + employer ────
+  // The top card is noisy — connection-degree badges ("· 2e") masquerade as the
+  // title and follower counts as the company. A person's CURRENT job lives in
+  // the Experience section as the entry whose date line ends in
+  // "Present"/"aujourd'hui"/etc. Reading role + company name + company URL from
+  // there gives a real title and a stable URL key for dedup.
+
+  // Find the Experience section across layouts AND languages. The 2026 SDUI
+  // tags it with componentkey/data-testid "…ExperienceTopLevelSection…"; older
+  // layouts use #experience; otherwise scan headings (FR "Expérience" must match
+  // — the old /experience/i regex missed the accented "é").
+  function findExperienceSection() {
+    const tagged = [...document.querySelectorAll(
+      '[componentkey*="ExperienceTopLevelSection"], [data-testid*="ExperienceTopLevelSection"]',
+    )].filter((el) => el.querySelector('[componentkey^="entity-collection-item"], a[href*="/company/"]'));
+    if (tagged.length) return tagged[0];
+
+    const legacy = document.getElementById('experience')
+      || document.querySelector('section[data-section="experience"]');
+    if (legacy) return legacy;
+
+    for (const h of document.querySelectorAll('section h2, section h3')) {
+      const t = (h.textContent || '').trim();
+      if (/^(exp[ée]rien|experience|berufserfahrung|erfahrung|experiencia|esperienza|ervaring|工作经历|職歴|경력)/i.test(t)) {
+        const s = h.closest('section');
+        if (s) return s;
+      }
+    }
+    return null;
+  }
+
+  function isCurrentDateLine(text) {
+    return /\b(present|présent|aujourd['’]hui|à ce jour|en cours|actuel|actualidad|actualmente|heute|attuale|adesso|heden|現在|至今|현재)\b/i.test(text || '');
+  }
+  // "nov. 2014 - aujourd'hui · 11 ans 8 mois" / "Apr 2025 - Present · 1 yr".
+  function looksLikeDateLine(text) {
+    if (!text) return false;
+    if (isCurrentDateLine(text)) return true;
+    return /\b(19|20)\d{2}\b/.test(text) && /[-–—]/.test(text);
+  }
+
+  // Parse every Experience entry into { title, companyName, companyUrl, current }.
+  // Current entries float to the top so the topmost = the person's main role now.
+  function parseExperience() {
+    const sec = findExperienceSection();
+    if (!sec) { console.warn(LOG, 'parseExperience: no experience section'); return []; }
+
+    const items = [...sec.querySelectorAll('[componentkey^="entity-collection-item"]')];
+    const scopes = items.length ? items : [sec];
+    const out = [];
+    for (const item of scopes) {
+      const link = item.querySelector('a[href*="/company/"]');
+      const href = link && (link.getAttribute('href') || '');
+      const m = href && href.match(/\/company\/([^/?#]+)/i);
+      const companyUrl = m ? `https://www.linkedin.com/company/${m[1]}/` : '';
+
+      // Visible text lines in order, skipping the long expandable description.
+      const lines = [];
+      for (const p of item.querySelectorAll('p')) {
+        if (p.closest('[data-testid="expandable-text-box"]')) continue;
+        const t = (p.innerText || p.textContent || '').trim().replace(/\s+/g, ' ');
+        if (t) lines.push(t);
+      }
+      if (!lines.length && !companyUrl) continue;
+
+      const dateIdx = lines.findIndex(looksLikeDateLine);
+      const current = dateIdx >= 0 ? isCurrentDateLine(lines[dateIdx]) : false;
+
+      // Single-role entry: [title, "Company · Full-time", dates, …].
+      // Grouped (multi-role) entry: [Company, …, <ul> of roles] — line 0 is the
+      // company; title is best-effort. The "· Full-time" suffix is sliced off.
+      let title = '';
+      let companyName = '';
+      if (dateIdx >= 2) {
+        title = lines[0];
+        companyName = lines[dateIdx - 1].split('·')[0].trim();
+      } else if (dateIdx === 1) {
+        companyName = lines[0].split('·')[0].trim();
+      } else {
+        title = lines[0] || '';
+        companyName = (lines[1] || '').split('·')[0].trim();
+      }
+
+      // Logo alt is a reliable company-name fallback ("Logo de Pi DATA CENTERS…").
+      if (!companyName && link) {
+        const badge = link.querySelector('[aria-label], img[alt]');
+        const alt = badge && (badge.getAttribute('aria-label') || badge.getAttribute('alt') || '');
+        const am = alt && alt.match(/(?:Logo\s+(?:de|of)\s+)?(.+)$/i);
+        if (am && am[1]) companyName = am[1].trim();
+      }
+
+      companyName = cleanLinkedInA11yText(companyName || '');
+      if (companyName.length > 100) companyName = '';
+      if (looksLikeJunkText(title) || title.length > 200) title = '';
+
+      out.push({ title, companyName, companyUrl, current, order: out.length });
+    }
+    out.sort((a, b) => (Number(b.current) - Number(a.current)) || (a.order - b.order));
+    console.log(LOG, 'parseExperience: entries', out.slice(0, 4));
+    return out;
+  }
+
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // The Experience section lives in the 2026 "cards below activity" block, which
+  // LinkedIn renders LAZILY — it is NOT in the DOM on a fresh profile until that
+  // region is scrolled near the viewport. So on a top-of-page click the section
+  // is absent and parseExperience reads nothing. Walk the page down in steps to
+  // trigger the lazy render, stopping as soon as the section appears, then leave
+  // the caller to scrape (the caller restores the user's scroll position).
+  async function ensureExperienceLoaded() {
+    if (findExperienceSection()) return true;
+    // The experience ANCHOR placeholder (and the empty section shell) exist in
+    // the DOM before the LazyColumn cards render. Scroll it into view repeatedly
+    // to trigger the lazy render, polling until the cards (entity items / company
+    // links) actually appear. ~4s budget, then give up and let the caller fall
+    // back to the top card.
+    const anchor = () => document.querySelector(
+      '[componentkey*="experience_top_anchor"], [componentkey*="ExperienceTopLevelSection"], [data-testid*="ExperienceTopLevelSection"]',
+    );
+    for (let i = 0; i < 14; i++) {
+      const a = anchor();
+      if (a && a.scrollIntoView) a.scrollIntoView({ block: 'center' });
+      else window.scrollTo(0, Math.min(document.body.scrollHeight, (i + 1) * window.innerHeight));
+      await wait(300);
+      if (findExperienceSection()) { await wait(300); return true; }
+    }
+    return !!findExperienceSection();
+  }
+
+  // The company's LinkedIn URL is the most reliable link key (display names vary).
+  // Prefer the current experience entry's /company/ link, then any /company/ link.
+  function extractCompanyLinkedinUrl() {
+    const sec = findExperienceSection();
+    const scopes = [sec, document.querySelector('main')].filter(Boolean);
+    for (const scope of scopes) {
+      const a = scope.querySelector('a[href*="/company/"]');
+      const href = a && (a.getAttribute('href') || '');
+      const m = href && href.match(/\/company\/([^/?#]+)/i);
+      if (m && m[1]) return `https://www.linkedin.com/company/${m[1]}/`;
+    }
+    return '';
+  }
+
   function scrapeProfile() {
     const name = extractProfileName();
     const headline = readHeadline();
-    const company = extractCurrentCompany();
-    const title = extractTitle(headline);
+    const topCompany = extractCurrentCompany();
+    const headlineTitle = extractTitle(headline);
+
+    // Experience section wins for the CURRENT role + employer; top card / headline
+    // are fallbacks when the section is missing or the role can't be read.
+    const exp = parseExperience();
+    const cur = exp.find((e) => e.current && (e.title || e.companyName)) || exp[0] || null;
+
+    const title = (cur && cur.title) || headlineTitle || '';
+    const companyName = (cur && cur.companyName) || topCompany.name || '';
+    const companyLinkedinUrl = (cur && cur.companyUrl) || extractCompanyLinkedinUrl() || '';
+
     const linkedinUrl = location.href.split('?')[0].split('#')[0];
-    const result = { name, title, companyName: company.name, linkedinUrl };
+    const result = { name, title, companyName, companyLinkedinUrl, linkedinUrl };
     console.log(LOG, 'scrapeProfile result', {
       ...result,
-      companySource: company.source,
+      companySource: cur ? (cur.current ? 'experience-current' : 'experience-top') : topCompany.source,
       headline,
     });
     return result;
@@ -838,8 +996,13 @@
       resultBox.className = 'tai-result';
       resultBox.textContent = '';
 
+      const startY = window.scrollY;
       try {
+        // Load the lazy Experience section so the CURRENT role + employer are
+        // readable, scrape while it's mounted, then restore the user's position.
+        await ensureExperienceLoaded();
         const fresh = scrapeProfile();
+        try { window.scrollTo(0, startY); } catch (_) {}
         if (!fresh.name) throw new Error('Could not read name from profile');
 
         // The manual endpoint expects `companyName` (not `company`).
@@ -847,13 +1010,19 @@
           name: fresh.name,
           title: fresh.title || undefined,
           companyName: fresh.companyName || undefined,
+          companyLinkedinUrl: fresh.companyLinkedinUrl || undefined,
           linkedinUrl: fresh.linkedinUrl,
           action,
         };
         console.log(LOG, 'manual_add_profile', payload);
         const res = await safeSendMessage({ kind: 'manual_add_profile', payload });
         if (!res || !res.ok) {
-          const err = new Error(res?.error || 'Save failed');
+          // res.error is always a string from the SW, but coerce defensively so a
+          // stray object can never surface as "[object Object]" to the user.
+          const reason = typeof res?.error === 'string'
+            ? res.error
+            : (res?.error?.message || 'Save failed');
+          const err = new Error(reason);
           err.status = res?.status;
           throw err;
         }
@@ -877,6 +1046,7 @@
         actionBtns.forEach((b) => { if (b !== btn) { b.disabled = false; } });
         console.log(LOG, 'manual_add_profile result', res);
       } catch (err) {
+        try { window.scrollTo(0, startY); } catch (_) {}
         console.warn(LOG, 'action failed', err);
         let message = err.message || 'Save failed';
         if (!signedIn || /unauth/i.test(message)) {

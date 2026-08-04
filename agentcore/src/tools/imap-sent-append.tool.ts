@@ -21,6 +21,46 @@ export interface AppendToSentResult {
 
 const SENT_CANDIDATES = ['Sent', 'INBOX.Sent', 'Sent Items', 'INBOX.Sent Items'];
 
+interface ImapConn {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+}
+
+/**
+ * Derive IMAP connection details from a send-only SMTP account, so we can copy
+ * outbound mail into the provider's Sent folder even when no dedicated IMAP
+ * listener (inbound-reply) config exists. Most providers (Hostinger, Gmail,
+ * Zoho, etc.) use the SAME mailbox credentials for SMTP and IMAP and expose
+ * IMAP at the `imap.<domain>` host on 993/TLS. Honors explicit overrides in
+ * account.config (imapHost / imapPort / imapSecure) when present.
+ */
+function imapConnFromAccount(account: EmailAccount): ImapConn | null {
+  if (!account.smtpUser || !account.smtpPass) return null;
+
+  const cfg = (account.config ?? {}) as Record<string, unknown>;
+  let host = typeof cfg.imapHost === 'string' && cfg.imapHost.trim() ? cfg.imapHost.trim() : undefined;
+  if (!host && account.smtpHost) {
+    // smtp.hostinger.com → imap.hostinger.com (replace the smtp. label only).
+    // Shared hosts that use the same hostname for both keep it unchanged.
+    host = account.smtpHost.replace(/(^|\.)smtp\./i, (_m, p1) => `${p1}imap.`);
+  }
+  if (!host) return null;
+
+  const port = typeof cfg.imapPort === 'number' ? cfg.imapPort : 993;
+  const secure = typeof cfg.imapSecure === 'boolean' ? cfg.imapSecure : true;
+
+  let pass: string;
+  try {
+    pass = decrypt(account.smtpPass);
+  } catch {
+    return null;
+  }
+  return { host, port, secure, user: account.smtpUser, pass };
+}
+
 async function resolveListener(
   tenantId: string,
   account: EmailAccount,
@@ -64,20 +104,44 @@ export async function appendToSentFolder(input: AppendToSentInput): Promise<Appe
     return { appended: false, reason: 'listener lookup failed' };
   }
 
-  if (!listener) {
-    logger.warn({ accountId: emailAccount.id, smtpUser: emailAccount.smtpUser }, 'IMAP append skipped: no active IMAP listener config for account');
-    return { appended: false, reason: 'no listener config' };
+  // Prefer a dedicated IMAP listener config; otherwise fall back to the
+  // account's own SMTP credentials against the provider's IMAP host. This is
+  // what makes Sent-folder copies work for send-only accounts with no inbound
+  // listener configured (the common case).
+  let conn: ImapConn | null = null;
+  if (listener) {
+    try {
+      conn = {
+        host: listener.host,
+        port: listener.port,
+        secure: listener.useTls,
+        user: listener.username,
+        pass: decrypt(listener.password),
+      };
+    } catch (err) {
+      logger.warn({ err, accountId: emailAccount.id }, 'IMAP append: failed to decrypt listener password');
+    }
+  }
+  if (!conn) {
+    conn = imapConnFromAccount(emailAccount);
+    if (conn) {
+      logger.info({ accountId: emailAccount.id, host: conn.host }, 'IMAP append: using account SMTP credentials (no listener config)');
+    }
+  }
+
+  if (!conn) {
+    logger.warn({ accountId: emailAccount.id, smtpUser: emailAccount.smtpUser }, 'IMAP append skipped: no listener config and no usable account IMAP credentials');
+    return { appended: false, reason: 'no imap credentials' };
   }
 
   let client: ImapFlowClient | null = null;
   try {
-    const password = decrypt(listener.password);
     const { ImapFlow } = await import('imapflow');
     client = new ImapFlow({
-      host: listener.host,
-      port: listener.port,
-      secure: listener.useTls,
-      auth: { user: listener.username, pass: password },
+      host: conn.host,
+      port: conn.port,
+      secure: conn.secure,
+      auth: { user: conn.user, pass: conn.pass },
       logger: false,
     });
 

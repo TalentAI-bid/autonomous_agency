@@ -74,6 +74,35 @@ export function buildLinkedInCompanySearchURL(params: BuildCompanySearchURLParam
   return url.toString();
 }
 
+// Build a GLOBAL LinkedIn People search URL (not company-scoped). Mirrors the
+// company-search builder but targets /search/results/people/ and uses the
+// `geoUrn` facet (people search's HQ-equivalent) instead of `companyHqGeo`.
+// Reuses the same GEO_URN_MAP — the numeric ids work for both facets.
+export function buildLinkedInPeopleSearchURL(params: {
+  keywords: string;
+  geographyFilter?: { regions: string[] };
+}): string {
+  const url = new URL('https://www.linkedin.com/search/results/people/');
+  if (params.keywords?.trim()) {
+    url.searchParams.set('keywords', params.keywords.trim());
+  }
+  if (params.geographyFilter?.regions?.length) {
+    const urns = params.geographyFilter.regions
+      .map((region) => resolveGeoUrn(region))
+      .filter((u): u is string => Boolean(u));
+    if (urns.length) {
+      url.searchParams.set('geoUrn', JSON.stringify(urns));
+    } else {
+      logger.warn(
+        { regions: params.geographyFilter.regions },
+        'linkedin-url: no geo URNs resolved for people search — running geographically unbounded',
+      );
+    }
+  }
+  url.searchParams.set('origin', 'FACETED_SEARCH');
+  return url.toString();
+}
+
 // Static map of major regions to LinkedIn geo URNs. Lowercase keys.
 // Verified URNs spot-checked against public LinkedIn search URLs (BE/DE/FR/GB/NL).
 // The "European Union / Europe" URN (91000000) is best-guess; verify before
@@ -115,6 +144,9 @@ const GEO_URN_MAP: Record<string, string> = {
   qatar: '104170880',
   kuwait: '103317225',
   morocco: '102787409',
+  // APAC — India geo URN (country-level). Verified against LinkedIn faceted
+  // company search (companyHqGeo=["102713980"] returns India-HQ companies).
+  india: '102713980',
 };
 
 // Regions the strategist may emit that don't yet have a verified geo URN.

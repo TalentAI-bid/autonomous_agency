@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, and, desc, lt, ilike, sql } from 'drizzle-orm';
 import { withTenant } from '../config/database.js';
-import { contacts, companies, masterAgents, outreachEmails, emailsSent, emailAccounts, prospectStages, userTenants } from '../db/schema/index.js';
+import { contacts, companies, masterAgents, outreachEmails, emailsSent, emailAccounts, emailQueue, prospectStages, userTenants } from '../db/schema/index.js';
 import type { EmailAccount } from '../db/schema/index.js';
 import { AppError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { selectEmailAccount, incrementQuota } from '../tools/email-queue.tool.js';
@@ -13,11 +13,13 @@ import { generateGmapsRecommendation } from '../services/gmaps-recommendation.se
 import { buildColdEmailSender } from '../services/messaging-config.service.js';
 import { findEmailByPattern, verifyEmailManual } from '../tools/email-finder.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
-import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
+import { logActivity, ensureDeal, moveDealStage, findStageBySlug } from '../services/crm-activity.service.js';
 import { ensureDefaultCampaign, enrollContactInSequence } from '../services/followup.service.js';
 import { logEvent, getContactTimeline } from '../services/timeline.service.js';
 import { checkAndIncrementCapture } from '../services/capture-rate-limit.service.js';
 import { recordTouch, recordResponse } from '../services/prospect-stage.service.js';
+import { enqueueExtensionTask, isExtensionConnected } from '../services/extension-dispatcher.js';
+import { buildLinkedInPeopleSearchURL } from '../services/linkedin-url.service.js';
 import logger from '../utils/logger.js';
 
 // Sales Operations Platform — capture / lookup / timeline / management.
@@ -117,6 +119,7 @@ const createContactSchema = z.object({
   email: z.string().email().optional(),
   linkedinUrl: z.string().url().max(500).optional(),
   title: z.string().max(255).optional(),
+  companyId: z.string().uuid().optional(),
   companyName: z.string().max(255).optional(),
   location: z.string().max(255).optional(),
   skills: z.array(z.string()).optional(),
@@ -331,6 +334,24 @@ export default async function contactRoutes(fastify: FastifyInstance) {
     if (parsed.data.status === 'replied' && prior.status !== 'replied') {
       try {
         await recordResponse({ tenantId: request.tenantId, contactId: id });
+        // Surface the contact on the deal-based kanban board: agent-discovered /
+        // never-touched contacts have no deal, so marking them replied would
+        // otherwise leave them invisible. Mirror ReplyAgent — ensure a deal and
+        // move it to the Replied column. ensureDeal dedups by contactId.
+        const deal = await ensureDeal({
+          tenantId: request.tenantId,
+          contactId: id,
+          masterAgentId: contact.masterAgentId ?? undefined,
+        });
+        const repliedStage = await findStageBySlug(request.tenantId, 'replied');
+        if (repliedStage) {
+          await moveDealStage({
+            tenantId: request.tenantId,
+            dealId: deal.id,
+            newStageId: repliedStage.id,
+            userId: request.userId,
+          });
+        }
         await logEvent({
           tenantId: request.tenantId,
           contactId: id,
@@ -363,6 +384,24 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         .limit(1);
     });
     if (!existing) throw new NotFoundError('Contact', id);
+
+    // 1b. Guard the tenant-wide unique-email index (contacts_tenant_email_unique).
+    // If ANOTHER contact already owns this address, the bare UPDATE below would
+    // throw a raw 500 (and we'd have wasted a Reacher slot first). Surface a clean
+    // 409 pointing at the existing contact instead. Same-row re-entry is allowed.
+    const [emailOwner] = await withTenant(request.tenantId, async (tx) => {
+      return tx.select({ id: contacts.id, firstName: contacts.firstName, lastName: contacts.lastName })
+        .from(contacts)
+        .where(and(eq(contacts.tenantId, request.tenantId), sql`LOWER(${contacts.email}) = ${email}`))
+        .limit(1);
+    });
+    if (emailOwner && emailOwner.id !== id) {
+      const who = [emailOwner.firstName, emailOwner.lastName].filter(Boolean).join(' ') || emailOwner.id;
+      return reply.status(409).send({
+        error: `That email is already used by another contact in this workspace (${who}).`,
+        conflictContactId: emailOwner.id,
+      });
+    }
 
     // 2. Verify against Reacher (1 daily slot)
     const verdict = await verifyEmailManual(email);
@@ -397,6 +436,149 @@ export default async function contactRoutes(fastify: FastifyInstance) {
 
     return { data: { contact: updated, status: verdict.status } };
   });
+
+  // POST /api/contacts/:id/rescrape-linkedin
+  // Tell the browser extension to open this one person's /in/<handle>/ profile
+  // and re-read their name + headline. The result lands as a SUGGESTION on
+  // contacts.rawData.linkedinRescrape (see handleProfileComplete) — it never
+  // overwrites the live name/title; the user confirms via the edit modal.
+  fastify.post<{ Params: { id: string } }>('/:id/rescrape-linkedin', async (request, reply) => {
+    const { id } = request.params;
+
+    const [contact] = await withTenant(request.tenantId, async (tx) => {
+      return tx
+        .select({ id: contacts.id, linkedinUrl: contacts.linkedinUrl, masterAgentId: contacts.masterAgentId })
+        .from(contacts)
+        .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+        .limit(1);
+    });
+    if (!contact) throw new NotFoundError('Contact', id);
+
+    const linkedinUrl = (contact.linkedinUrl ?? '').trim();
+    if (!linkedinUrl) {
+      return reply.status(400).send({
+        error: 'This contact has no LinkedIn URL to re-scrape. Add one in the edit form first, then retry.',
+      });
+    }
+
+    if (!(await isExtensionConnected(request.tenantId))) {
+      return reply.status(409).send({
+        error: 'No browser extension is connected. Open LinkedIn with the TalentAI extension enabled, then retry.',
+      });
+    }
+
+    const { taskId } = await enqueueExtensionTask({
+      tenantId: request.tenantId,
+      masterAgentId: contact.masterAgentId ?? undefined,
+      site: 'linkedin',
+      type: 'fetch_profile',
+      // userInitiated bypasses the paused-agent dispatch gate; priority 10 is
+      // the TOP of the queue (dispatcher orders by priority DESC), so this jumps
+      // ahead of background fan-outs (which sit at 3–7).
+      params: { linkedinUrl, contactId: id, userInitiated: true },
+      priority: 10,
+    });
+
+    logger.info({ contactId: id, taskId, tenantId: request.tenantId }, 'contact_rescrape_linkedin_enqueued');
+    return { data: { taskId, status: 'dispatched' } };
+  });
+
+  // POST /api/contacts/search-people — GLOBAL LinkedIn People search.
+  // Find people by role (+ optional region) across all companies and import
+  // them as leads (companyId = null). The server builds the people-search URL
+  // (keywords + geoUrn); the extension scrapes it; ingest saves contacts.
+  const searchPeopleSchema = z.object({
+    keywords: z.string().min(1).max(200),
+    regions: z.array(z.string().min(1).max(60)).max(10).optional(),
+    masterAgentId: z.string().uuid().optional(),
+  });
+  fastify.post('/search-people', async (request, reply) => {
+    const parsed = searchPeopleSchema.safeParse(request.body);
+    if (!parsed.success) throw new ValidationError('Invalid input', parsed.error.flatten());
+    const { keywords, regions, masterAgentId } = parsed.data;
+
+    if (!(await isExtensionConnected(request.tenantId))) {
+      return reply.status(409).send({
+        error: 'No browser extension is connected. Open LinkedIn with the TalentAI extension enabled, then retry.',
+      });
+    }
+
+    const geographyFilter = regions?.length ? { regions } : undefined;
+    const searchUrl = buildLinkedInPeopleSearchURL({ keywords, geographyFilter });
+
+    const { taskId } = await enqueueExtensionTask({
+      tenantId: request.tenantId,
+      masterAgentId,
+      site: 'linkedin',
+      type: 'search_people',
+      // userInitiated: jump the queue + bypass the paused-agent dispatch gate.
+      params: { searchUrl, keyword: keywords, geographyFilter, userInitiated: true },
+      priority: 10,
+    });
+
+    logger.info({ taskId, tenantId: request.tenantId, keywords, regions }, 'people_search_enqueued');
+    return { data: { taskId, status: 'dispatched', searchUrl } };
+  });
+
+  // POST /api/contacts/:id/linkedin-message — review-then-send LinkedIn DM.
+  // POST /api/contacts/:id/linkedin-connect — review-then-send connection note.
+  // Both enqueue a paste task: the extension opens the profile and types the
+  // text into LinkedIn's box, then LEAVES it for the user to click Send. The
+  // actual send is recorded via /api/studio/record-action on that click — we
+  // never click Send for the user (LinkedIn automation-detection safety).
+  for (const variant of [
+    { path: '/:id/linkedin-message', taskType: 'linkedin_message' as const, channel: 'linkedin_dm', field: 'message' },
+    { path: '/:id/linkedin-connect', taskType: 'linkedin_connect' as const, channel: 'linkedin_connection_request', field: 'note' },
+  ]) {
+    fastify.post<{ Params: { id: string }; Body: Record<string, unknown> }>(variant.path, async (request, reply) => {
+      const { id } = request.params;
+      const textRaw = (request.body as Record<string, unknown> | undefined)?.[variant.field];
+      const textTrimmed = typeof textRaw === 'string' ? textRaw.trim() : '';
+      if (!textTrimmed) throw new ValidationError(`${variant.field} is required`);
+
+      const [contact] = await withTenant(request.tenantId, async (tx) => {
+        return tx.select().from(contacts)
+          .where(and(eq(contacts.id, id), eq(contacts.tenantId, request.tenantId)))
+          .limit(1);
+      });
+      if (!contact) throw new NotFoundError('Contact', id);
+
+      const linkedinUrl = (contact.linkedinUrl ?? '').trim();
+      if (!linkedinUrl) {
+        return reply.status(400).send({
+          error: 'This contact has no LinkedIn URL. Add one (edit the contact) before sending a LinkedIn message.',
+        });
+      }
+      if (!(await isExtensionConnected(request.tenantId))) {
+        return reply.status(409).send({
+          error: 'No browser extension is connected. Open LinkedIn with the TalentAI extension enabled, then retry.',
+        });
+      }
+
+      // profileData lets the extension's Send-listener post to /api/studio/record-action
+      const profileData = {
+        name: [contact.firstName, contact.lastName].filter(Boolean).join(' ') || undefined,
+        company: contact.companyName ?? undefined,
+        title: contact.title ?? undefined,
+        location: contact.location ?? undefined,
+        linkedinUrl,
+      };
+
+      const { taskId } = await enqueueExtensionTask({
+        tenantId: request.tenantId,
+        masterAgentId: contact.masterAgentId ?? undefined,
+        site: 'linkedin',
+        type: variant.taskType,
+        // userInitiated bypasses the paused-agent gate; priority 10 = top of the
+        // queue (dispatcher orders by priority DESC), jumping background fan-outs.
+        params: { linkedinUrl, channel: variant.channel, [variant.field]: textTrimmed, profileData, userInitiated: true },
+        priority: 10,
+      });
+
+      logger.info({ contactId: id, taskId, taskType: variant.taskType, tenantId: request.tenantId }, 'linkedin_outreach_staged_enqueued');
+      return { data: { taskId, status: 'staged_dispatched' } };
+    });
+  }
 
   // DELETE /api/contacts/:id
   fastify.delete<{ Params: { id: string } }>('/:id', async (request) => {
@@ -702,6 +884,32 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         sentAt: new Date(),
       }).returning();
     });
+
+    // Mirror the send into email_queue (status 'sent') so it shows up in the
+    // Sent mailbox. GET /api/mailbox/sent reads exclusively from email_queue —
+    // the automated outreach worker populates it, but this manual path only
+    // wrote outreach_emails, so manual sends were invisible in Sent. Body is
+    // the plain text we sent (the mailbox renders it whitespace-pre-wrap).
+    // Non-fatal: the email is already delivered if this insert fails.
+    try {
+      await withTenant(request.tenantId, async (tx) => {
+        await tx.insert(emailQueue).values({
+          tenantId: request.tenantId,
+          contactId: id,
+          emailAccountId: account.id,
+          masterAgentId: contact.masterAgentId ?? undefined,
+          fromEmail: account.fromEmail,
+          toEmail: contact.email!,
+          subject,
+          body,
+          textBody: body,
+          status: 'sent',
+          sentAt: new Date(),
+        });
+      });
+    } catch (err) {
+      logger.warn({ err, contactId: id }, 'Failed to mirror manual send into email_queue (Sent mailbox)');
+    }
 
     // Update contact status to 'contacted' if still in earlier stage
     const earlyStatuses = ['discovered', 'enriched', 'scored'];

@@ -7,9 +7,7 @@ dashboard/.env.local
 dashboard/.env.development
 dashboard/.env.production
 dashboard/.env
-dashboard/next.config.js
 dashboard/next-env.d.ts
-dashboard/package-lock.json
 dashboard/README.md
 dashboard/yarn.lock
 

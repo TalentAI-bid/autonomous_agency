@@ -25,7 +25,7 @@ import { prospectStages } from '../db/schema/index.js';
 // across ALL the user's workspaces, not per-workspace; this matches reality
 // because the LinkedIn account is shared.
 
-export type ExtensionSite = 'linkedin' | 'gmaps' | 'crunchbase';
+export type ExtensionSite = 'linkedin' | 'gmaps' | 'crunchbase' | 'google';
 export type ExtensionTaskType =
   | 'search_companies'
   | 'fetch_company'
@@ -36,7 +36,8 @@ export type ExtensionTaskType =
   | 'linkedin_connect'
   | 'search_people'
   | 'search_businesses'
-  | 'fetch_business';
+  | 'fetch_business'
+  | 'search_serp';
 
 export const EXTENSION_SITE_LIMITS = {
   linkedin: {
@@ -75,6 +76,14 @@ export const EXTENSION_SITE_LIMITS = {
   crunchbase: {
     search_companies: { dailyCap: 10, minDelayMs: 5000 },
     fetch_company: { dailyCap: 50, minDelayMs: 5000 },
+  },
+  google: {
+    // Google web-search (SERP) scrape for the web_search discovery strategy.
+    // Google CAPTCHAs aggressively on velocity even in a real browser session,
+    // so this is deliberately conservative: ~40 dork searches/day, 6s apart.
+    // The result page returns many URLs per search, so a handful of dorks
+    // yields plenty of leads. A CAPTCHA reuses the blocked_by_popup re-pend.
+    search_serp: { dailyCap: 40, minDelayMs: 6000 },
   },
 } as const;
 
@@ -300,9 +309,11 @@ function gmapsBusinessToInput(
   params: Record<string, unknown>,
   isDetail: boolean,
   nameOverride?: string,
+  knownCompanyId?: string,
 ): GmapsBusinessInput {
   return {
     name: (nameOverride ?? String(b.name ?? '')).trim(),
+    knownCompanyId,
     category: typeof b.category === 'string' ? b.category : undefined,
     address: typeof b.address === 'string' ? b.address : undefined,
     phone: typeof b.phone === 'string' ? b.phone : undefined,
@@ -329,7 +340,7 @@ function gmapsBusinessToInput(
     ratingDistribution: Array.isArray(b.ratingDistribution)
       ? (b.ratingDistribution as Array<{ label: string }>) : undefined,
     aboutHtml: typeof b.aboutHtml === 'string' ? b.aboutHtml : undefined,
-    detailFetched: isDetail,
+    detailFetched: isDetail || b.detailFetched === true,
   };
 }
 
@@ -380,6 +391,61 @@ export async function enqueueExtensionTask(params: {
   });
 
   return { taskId };
+}
+
+// ─── GMaps enrichment for existing companies (dashboard button) ──────────────
+
+const GMAPS_ENRICH_BATCH_SIZE = 20;
+const GMAPS_ENRICH_BATCH_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2h — spread 200/day quota
+
+/**
+ * Enqueue one GMaps `search_businesses` task per company (search by name →
+ * phone/website/detail → generic-email crawl), with a Google-dork fallback when
+ * Maps has no confident match. Backs the "Enrich via Google Maps" button on an
+ * agent: it takes the agent's ALREADY-discovered companies and fills in
+ * phone/website/generic email WITHOUT converting the agent into a list-bounded
+ * one (its config is untouched — this is a one-shot enrichment, not a mode
+ * switch). Batched 20 per ~2h to respect the 200/day free-plan quota;
+ * `userInitiated` lets the tasks dispatch even while the agent is paused.
+ */
+export async function dispatchGmapsEnrichForCompanies(
+  tenantId: string,
+  masterAgentId: string,
+  companies: Array<{ companyId: string; name: string }>,
+  opts: { region?: string; userInitiated?: boolean } = {},
+): Promise<number> {
+  const region = (opts.region ?? '').trim();
+  const now = Date.now();
+  let enqueued = 0;
+  for (let i = 0; i < companies.length; i++) {
+    const entry = companies[i]!;
+    const name = entry.name?.trim();
+    if (!entry.companyId || !name) continue;
+    const batchIndex = Math.floor(i / GMAPS_ENRICH_BATCH_SIZE);
+    const dispatchAfter = new Date(now + batchIndex * GMAPS_ENRICH_BATCH_INTERVAL_MS);
+    try {
+      await enqueueExtensionTask({
+        tenantId,
+        masterAgentId,
+        site: 'gmaps',
+        type: 'search_businesses',
+        params: {
+          query: name,
+          limit: 5,
+          strictMatch: { companyId: entry.companyId, name },
+          dorkFallback: true,
+          region,
+          ...(opts.userInitiated ? { userInitiated: true } : {}),
+        },
+        priority: 10,
+        dispatchAfter,
+      });
+      enqueued++;
+    } catch (err) {
+      logger.warn({ err, masterAgentId, companyId: entry.companyId }, 'gmaps-enrich: enqueue failed');
+    }
+  }
+  return enqueued;
 }
 
 // ─── Bulk batched enqueue ───────────────────────────────────────────────────
@@ -794,6 +860,48 @@ export async function tryDispatch(tenantId: string, taskId: string): Promise<boo
 }
 
 // ─── Drain on reconnect ─────────────────────────────────────────────────────
+
+/**
+ * Tell every live extension session that can serve this tenant to STOP NOW —
+ * abort the in-flight scrape (close the tab), drop its in-memory task backlog,
+ * and go idle. Used by agent /stop + DELETE so scraping halts instantly instead
+ * of draining tasks the extension already received over the WS. Uses the same
+ * multi-workspace session match as tryDispatch so tenant_id=NULL sessions are
+ * reached. Fire-and-forget; never throws.
+ */
+export async function publishExtensionStop(tenantId: string, masterAgentId?: string): Promise<void> {
+  try {
+    const tenantMatch = env.ENABLE_MULTI_WORKSPACE_DISPATCH
+      ? exists(
+          db
+            .select({ one: sql<number>`1` })
+            .from(userTenants)
+            .where(and(
+              eq(userTenants.userId, extensionSessions.userId),
+              eq(userTenants.tenantId, tenantId),
+              inArray(userTenants.role, ['owner', 'admin', 'member']),
+            )),
+        )
+      : eq(extensionSessions.tenantId, tenantId);
+
+    const sessions = await db
+      .select({ id: extensionSessions.id })
+      .from(extensionSessions)
+      .where(and(
+        tenantMatch!,
+        eq(extensionSessions.connected, true),
+        isNull(extensionSessions.revokedAt),
+      ));
+
+    const payload = JSON.stringify({ type: 'stop_all', tenantId, masterAgentId: masterAgentId ?? null });
+    for (const s of sessions) {
+      await pubRedis.publish(`extension-dispatch:${s.id}`, payload);
+    }
+    logger.info({ tenantId, masterAgentId, sessions: sessions.length }, 'Published stop_all to extension sessions');
+  } catch (err) {
+    logger.error({ err, tenantId, masterAgentId }, 'Failed to publish stop_all to extension');
+  }
+}
 
 export async function drainPending(tenantId: string, sessionId: string): Promise<number> {
   const pending = await withTenant(tenantId, async (tx) => {
@@ -1453,10 +1561,42 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       }
       if (!chosen) {
         await markRawDataFlag(task.tenantId, strict.companyId, { gmapsNotFound: true });
-        logger.info(
-          { taskId: task.id, companyId: strict.companyId, name: strict.name, candidates: items.length },
-          'list_verification: gmaps no confident match — flagged gmapsNotFound',
-        );
+        // GMaps-enrichment-only agents ask for a Google-dork fallback: when Maps
+        // has no confident match, dork the web for the company's official site
+        // (`"Name" "Region"`) and enrich from there. Only on the search miss —
+        // never re-dork off a detail (fetch_business) miss.
+        const dorkFallback = (params as { dorkFallback?: boolean }).dorkFallback === true;
+        if (dorkFallback && type !== 'fetch_business') {
+          const region = typeof (params as { region?: string }).region === 'string'
+            ? (params as { region?: string }).region!.trim() : '';
+          const dork = region ? `"${strict.name}" "${region}"` : `"${strict.name}"`;
+          try {
+            await enqueueExtensionTask({
+              tenantId: task.tenantId,
+              masterAgentId: task.masterAgentId ?? undefined,
+              site: 'google',
+              type: 'search_serp',
+              params: {
+                dork,
+                limit: 10,
+                queryRationale: 'GMaps had no confident match — find the official website to enrich.',
+                strictMatch: strict,
+              },
+              priority: 6,
+            });
+            logger.info(
+              { taskId: task.id, companyId: strict.companyId, name: strict.name, dork },
+              'list_verification: gmaps miss — dork fallback enqueued',
+            );
+          } catch (err) {
+            logger.warn({ err, companyId: strict.companyId }, 'list_verification: dork fallback enqueue failed');
+          }
+        } else {
+          logger.info(
+            { taskId: task.id, companyId: strict.companyId, name: strict.name, candidates: items.length },
+            'list_verification: gmaps no confident match — flagged gmapsNotFound',
+          );
+        }
         return { extracted: items.length, saved: 0 };
       }
       const isDetail = type === 'fetch_business';
@@ -1465,7 +1605,7 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
         const ingest = await ingestGmapsBusiness(
           task.tenantId,
           task.masterAgentId ?? undefined,
-          gmapsBusinessToInput(chosen, params, isDetail, strict.name),
+          gmapsBusinessToInput(chosen, params, isDetail, strict.name, strict.companyId),
         );
         // Keep the user_list provenance + record the match; ingestGmapsBusiness
         // flips source to 'gmaps_extension' and we never want a stale not-found.
@@ -1575,6 +1715,10 @@ async function ingestResult(task: ExtensionTask, result: Record<string, unknown>
       }
     }
     return { extracted: items.length, saved };
+  }
+
+  if (site === 'google' && type === 'search_serp') {
+    return handleSerpComplete(task, result as Record<string, unknown>);
   }
 
   return { extracted: 0, saved: 0 };
@@ -2007,6 +2151,12 @@ async function handleProfileComplete(task: ExtensionTask, result: Record<string,
 
   const name = sanitizePersonName(typeof result.name === 'string' ? result.name : undefined);
   const title = sanitizeTitle(typeof result.title === 'string' ? result.title : undefined);
+  // Additive fields (fetch-profile.js now reverse-engineers the current
+  // employer from the Experience section). Older extension builds omit them —
+  // the branch below is skipped when they're absent, so this is backwards-safe.
+  const companyName = typeof result.companyName === 'string' ? result.companyName.trim() : '';
+  const companyLinkedinUrl = typeof result.companyLinkedinUrl === 'string'
+    ? normalizeLiCompanyUrlFromRaw(result.companyLinkedinUrl) : '';
 
   if (!name && !title) {
     logger.warn({ taskId: task.id, contactId }, 'fetch_profile yielded no usable name/title');
@@ -2020,26 +2170,310 @@ async function handleProfileComplete(task: ExtensionTask, result: Record<string,
     scrapedAt: new Date().toISOString(),
   };
 
-  const saved = await withTenant(task.tenantId, async (tx) => {
+  const outcome = await withTenant(task.tenantId, async (tx) => {
     const [existing] = await tx
-      .select({ rawData: contacts.rawData })
+      .select({ rawData: contacts.rawData, companyId: contacts.companyId })
       .from(contacts)
       .where(eq(contacts.id, contactId))
       .limit(1);
     if (!existing) {
       logger.warn({ taskId: task.id, contactId }, 'fetch_profile: contact not found');
-      return 0;
+      return { saved: 0, needsCompanyLink: false as const };
     }
     const rawData = { ...((existing.rawData as Record<string, unknown> | null) ?? {}), linkedinRescrape: suggestion };
     await tx
       .update(contacts)
       .set({ rawData, updatedAt: new Date() })
       .where(eq(contacts.id, contactId));
-    return 1;
+    // Only reverse-engineer the employer when the contact has no company yet
+    // (the google_serp discovery path) AND the profile gave us something to
+    // link. Already-linked contacts keep their company untouched.
+    return {
+      saved: 1,
+      needsCompanyLink: !existing.companyId && (!!companyLinkedinUrl || companyName.length >= 2),
+    };
   });
 
+  // ── Reverse-engineer + link the current employer (google_serp path) ────────
+  if (outcome.needsCompanyLink) {
+    try {
+      const derivedName = companyName.length >= 2
+        ? companyName
+        : (companyLinkedinUrl.match(LI_COMPANY_RE)?.[1] ?? '').replace(/[-_]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()).trim();
+      if (derivedName.length >= 2) {
+        const company = await saveOrUpdateCompanyStatic(
+          task.tenantId,
+          {
+            name: derivedName,
+            ...(companyLinkedinUrl ? { linkedinUrl: companyLinkedinUrl } : {}),
+            rawData: { discoverySource: 'google_serp_profile', reverseEngineeredFromContactId: contactId },
+          },
+          task.masterAgentId ?? undefined,
+        );
+        await withTenant(task.tenantId, async (tx) => {
+          await tx.update(contacts).set({ companyId: company.id, updatedAt: new Date() }).where(eq(contacts.id, contactId));
+        });
+        // Enrich the freshly-linked company (info+team) and the contact itself.
+        if (companyLinkedinUrl) {
+          await enqueueCompanyEnrichmentFanout(
+            task.tenantId,
+            task.masterAgentId ?? undefined,
+            [{ linkedinUrl: companyLinkedinUrl, companyId: company.id }],
+            { crawlWebsite: true },
+          );
+        }
+        await dispatchJob(task.tenantId, 'enrichment', {
+          contactId,
+          masterAgentId: task.masterAgentId ?? undefined,
+          source: 'google_serp_profile',
+        });
+        logger.info({ taskId: task.id, contactId, companyId: company.id, companyName: derivedName, companyLinkedinUrl }, 'fetch_profile: reverse-engineered + linked employer');
+      }
+    } catch (err) {
+      logger.warn({ err, taskId: task.id, contactId }, 'fetch_profile: employer reverse-engineer failed (non-fatal)');
+    }
+  }
+
   logger.info({ taskId: task.id, contactId, name: suggestion.name, title: suggestion.title }, 'fetch_profile ingested');
-  return { extracted: name || title ? 1 : 0, saved };
+  return { extracted: name || title ? 1 : 0, saved: outcome.saved };
+}
+
+// ─── Google SERP (web_search strategy) ──────────────────────────────────────
+// The extension returns { results: [{ url, title, snippet, position }] } from a
+// google.com/search dork. Routing is LinkedIn-only for now: company URLs → save
+// + enrich; person URLs → save contact + a fetch_profile that reverse-engineers
+// the employer (handleProfileComplete). Non-LinkedIn URLs are left in the task
+// result for a future open-web router. The scraper itself stays generic.
+
+const LI_COMPANY_RE = /linkedin\.com\/company\/([^/?#]+)/i;
+const LI_PERSON_RE = /linkedin\.com\/in\/([^/?#]+)/i;
+
+/**
+ * True only when the URL's HOST is linkedin.com (or a subdomain). The classify
+ * regexes above are unanchored substring matches, so without this a Google
+ * redirect / aggregator / a google.com page whose text merely contains
+ * "linkedin.com/company/…" would be saved as a LinkedIn company. Parse the host
+ * and require it to actually be LinkedIn.
+ */
+function isLinkedInHost(rawUrl: string): boolean {
+  try {
+    const h = new URL(rawUrl).hostname.toLowerCase();
+    return h === 'linkedin.com' || h.endsWith('.linkedin.com');
+  } catch {
+    return false;
+  }
+}
+
+// Megabrand / generic company slugs that rank high on broad dorks and are never
+// the local business we're after — skip so they don't pollute the pipeline.
+const SERP_COMPANY_SLUG_BLOCKLIST = new Set<string>([
+  'google', 'youtube', 'facebook', 'meta', 'linkedin', 'instagram', 'twitter', 'x',
+  'microsoft', 'apple', 'amazon', 'tiktok', 'whatsapp', 'gmail',
+]);
+
+/** Normalize any LinkedIn company URL/slug string to canonical form. */
+function normalizeLiCompanyUrlFromRaw(raw: string): string {
+  const m = raw.match(LI_COMPANY_RE);
+  return m ? `https://www.linkedin.com/company/${m[1].toLowerCase()}` : '';
+}
+
+// Social / aggregator / directory hosts that rank high on a "Name Region" web
+// dork but are never the company's OWN site — skip them when picking a website
+// to enrich (we want the domain that carries a generic inbox).
+const NON_WEBSITE_HOST_SUFFIXES = [
+  'linkedin.com', 'facebook.com', 'instagram.com', 'twitter.com', 'x.com',
+  'youtube.com', 'tiktok.com', 'pinterest.com', 'snapchat.com', 'threads.net',
+  'google.com', 'goo.gl', 'g.co', 'yelp.com', 'tripadvisor.com', 'wikipedia.org',
+  'foursquare.com', 'crunchbase.com', 'bloomberg.com', 'glassdoor.com',
+  'indeed.com', 'apple.com', 'play.google.com', 'maps.google.com', 'wa.me',
+  'booking.com', 'trustpilot.com', 'yellowpages.com', 'europages.com',
+];
+
+/** True when the URL is a real, enrichable company website (not social/aggregator). */
+function isEnrichableWebsite(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    return !NON_WEBSITE_HOST_SUFFIXES.some((s) => host === s || host.endsWith(`.${s}`));
+  } catch {
+    return false;
+  }
+}
+
+/** Strip "| LinkedIn" and follower-count tails from a SERP result title. */
+function cleanSerpTitle(title: string | undefined): string {
+  return (title ?? '')
+    .replace(/\s*[|–—-]\s*LinkedIn\s*$/i, '')
+    .replace(/\s*·?\s*[\d.,]+\s*(followers|abonn[ée]s).*$/i, '')
+    .trim();
+}
+
+async function handleSerpComplete(task: ExtensionTask, result: Record<string, unknown>): Promise<IngestSummary> {
+  const results = (Array.isArray(result.results) ? result.results : []) as Array<{
+    url?: string; title?: string; snippet?: string;
+  }>;
+  const dork = (task.params as { dork?: string } | null)?.dork ?? null;
+
+  // ── Strict dork-fallback path (GMaps-enrichment-only) ──────────────────────
+  // This SERP was fired because GMaps had no confident match for a known list
+  // company. Don't run the LinkedIn-only discovery routing — take the top
+  // organic non-social result as the company's official website and enrich it
+  // (ingestGmapsBusiness binds to the pre-created row by name, sets the domain,
+  // and dispatches the generic-email crawl). Fail loud (leave gmapsNotFound) if
+  // nothing usable turns up.
+  const strict = (task.params as { strictMatch?: StrictMatch } | null)?.strictMatch;
+  if (strict?.companyId) {
+    const website = results
+      .map((r) => (r.url ?? '').split('#')[0])
+      .find((u) => u && isEnrichableWebsite(u));
+    if (!website) {
+      logger.info(
+        { taskId: task.id, companyId: strict.companyId, name: strict.name, candidates: results.length },
+        'search_serp dork fallback: no usable website in results (fail-soft)',
+      );
+      return { extracted: results.length, saved: 0 };
+    }
+    try {
+      const ingest = await ingestGmapsBusiness(
+        task.tenantId,
+        task.masterAgentId ?? undefined,
+        { name: strict.name, website, knownCompanyId: strict.companyId },
+      );
+      await markRawDataFlag(task.tenantId, ingest.companyId, {
+        source: 'user_list',
+        listEntry: true,
+        gmapsNotFound: false,
+        dorkResolved: true,
+      });
+      logger.info(
+        { taskId: task.id, companyId: strict.companyId, name: strict.name, website },
+        'search_serp dork fallback: website resolved + enriched',
+      );
+      return { extracted: results.length, saved: 1 };
+    } catch (err) {
+      logger.warn({ err, taskId: task.id, companyId: strict.companyId }, 'search_serp dork fallback: ingest failed');
+      return { extracted: results.length, saved: 0 };
+    }
+  }
+
+  let saved = 0;
+  let companiesSaved = 0;
+  let contactsSaved = 0;
+  const MAX_SAVE = 60;
+  const seenCompany = new Set<string>();
+  const seenPerson = new Set<string>();
+
+  for (const r of results) {
+    if (saved >= MAX_SAVE) break;
+    const rawUrl = (r.url ?? '').split('#')[0];
+    if (!rawUrl) continue;
+    // Host must genuinely be LinkedIn — kills google.com / redirect / aggregator
+    // URLs that merely contain a "linkedin.com/company/…" substring.
+    if (!isLinkedInHost(rawUrl)) continue;
+
+    const companyMatch = rawUrl.match(LI_COMPANY_RE);
+    const personMatch = rawUrl.match(LI_PERSON_RE);
+
+    // ── Company result → save + fan out enrichment ──────────────────────────
+    if (companyMatch) {
+      const slug = companyMatch[1];
+      if (SERP_COMPANY_SLUG_BLOCKLIST.has(slug.toLowerCase())) continue;
+      const url = `https://www.linkedin.com/company/${slug.toLowerCase()}`;
+      if (seenCompany.has(url)) continue;
+      seenCompany.add(url);
+      const cleaned = cleanSerpTitle(r.title);
+      const name = cleaned.length >= 2
+        ? cleaned
+        : slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()).trim();
+      if (name.length < 2) continue;
+      try {
+        const company = await saveOrUpdateCompanyStatic(
+          task.tenantId,
+          { name, linkedinUrl: url, rawData: { discoverySource: 'google_serp', dork, serpTitle: r.title ?? null } },
+          task.masterAgentId ?? undefined,
+        );
+        await enqueueCompanyEnrichmentFanout(
+          task.tenantId,
+          task.masterAgentId ?? undefined,
+          [{ linkedinUrl: url, companyId: company.id }],
+          { crawlWebsite: true },
+        );
+        saved++; companiesSaved++;
+      } catch (err) {
+        logger.warn({ err, url }, 'search_serp: company save/fanout failed');
+      }
+      continue;
+    }
+
+    // ── Person result → save contact + reverse-engineer employer via profile ─
+    if (personMatch) {
+      const slug = personMatch[1];
+      const url = `https://www.linkedin.com/in/${slug}`;
+      if (seenPerson.has(url)) continue;
+      seenPerson.add(url);
+      // SERP title for /in/ is usually "First Last - Title - Company | LinkedIn".
+      const cleaned = cleanSerpTitle(r.title);
+      const segments = cleaned.split(/\s+[-–—]\s+/);
+      const cleanName = sanitizePersonName(segments[0]);
+      if (!cleanName) continue;
+      const nameParts = cleanName.split(/\s+/);
+      const pFirstName = nameParts[0] || '';
+      const pLastName = nameParts.slice(1).join(' ');
+      if (!pFirstName || /^(view|profile)$/i.test(pFirstName)) continue;
+      try {
+        const [existing] = await withTenant(task.tenantId, async (tx) => {
+          return tx.select({ id: contacts.id }).from(contacts)
+            .where(and(eq(contacts.tenantId, task.tenantId), eq(contacts.linkedinUrl, url)))
+            .limit(1);
+        });
+        if (existing) continue;
+        const [inserted] = await withTenant(task.tenantId, async (tx) => {
+          return tx.insert(contacts).values({
+            tenantId: task.tenantId,
+            masterAgentId: task.masterAgentId ?? undefined,
+            firstName: pFirstName,
+            lastName: pLastName,
+            title: sanitizeTitle(segments[1]),
+            linkedinUrl: url,
+            companyId: null,
+            source: 'web_search',
+            sourceType: 'ai_discovery',
+            sourceMetadata: { discoverySource: 'google_serp', dork },
+            rawData: { discoverySource: 'google_serp', dork, serpTitle: r.title ?? null, serpSnippet: r.snippet ?? null },
+          }).returning({ id: contacts.id });
+        });
+        if (!inserted) continue;
+        saved++; contactsSaved++;
+        try {
+          await withTenant(task.tenantId, async (tx) => {
+            await tx.insert(prospectStages).values({
+              contactId: inserted.id, tenantId: task.tenantId, currentStage: 'new',
+            }).onConflictDoNothing();
+          });
+        } catch (err) {
+          logger.warn({ err, contactId: inserted.id }, 'search_serp: prospect_stages seed failed (non-fatal)');
+        }
+        // Open the profile → handleProfileComplete reverse-engineers + links the
+        // employer once fetch-profile returns companyLinkedinUrl/companyName.
+        await enqueueExtensionTask({
+          tenantId: task.tenantId,
+          masterAgentId: task.masterAgentId ?? undefined,
+          site: 'linkedin',
+          type: 'fetch_profile',
+          params: { contactId: inserted.id, linkedinUrl: url, resolveCompany: true },
+          priority: 4,
+        });
+      } catch (err) {
+        logger.warn({ err, url }, 'search_serp: contact insert failed');
+      }
+      continue;
+    }
+    // Non-LinkedIn URL — left for a future open-web router.
+  }
+
+  logger.info({ taskId: task.id, extracted: results.length, saved, companiesSaved, contactsSaved, dork }, 'search_serp complete');
+  return { extracted: results.length, saved };
 }
 
 // ─── Parallel-fetch completion handlers ─────────────────────────────────────
@@ -2190,13 +2624,36 @@ async function handleCompanyTeamComplete(
     return { extracted: rawPeople.length, saved: 0 };
   }
 
+  // We only want the top few KEY people per company — not every employee.
+  // A company can receive several `fetch_company_team` calls (one per
+  // teamRoleKeyword), so the per-fetch cap alone would let a 3-keyword agent
+  // save 3×N contacts. Enforce a COMPANY-WIDE cap instead: count the team
+  // contacts already saved for this company and only top up to KEY_PEOPLE_CAP.
+  const KEY_PEOPLE_CAP = 3;
+  let alreadyForCompany = 0;
+  try {
+    const [countRow] = await withTenant(task.tenantId, async (tx) => {
+      const conds = [
+        eq(contacts.tenantId, task.tenantId),
+        eq(contacts.companyId, savedCompany.id),
+        sql`${contacts.sourceMetadata}->>'discoverySource' = 'linkedin_extension_people'`,
+      ];
+      if (task.masterAgentId) conds.push(eq(contacts.masterAgentId, task.masterAgentId));
+      return tx.select({ n: sql<number>`count(*)::int` }).from(contacts).where(and(...conds));
+    });
+    alreadyForCompany = countRow?.n ?? 0;
+  } catch (err) {
+    logger.debug({ err, companyId: savedCompany.id }, 'team cap: existing-count query failed (non-fatal) — treating as 0');
+  }
+  const remainingSlots = Math.max(0, KEY_PEOPLE_CAP - alreadyForCompany);
+
   // With keyword-scoped fetches the candidate pool is already role-filtered,
-  // so the title-score ranking is just a tiebreaker. Save up to 5 per
-  // keyword fetch (was 3 in the unfiltered world) since each fetch returns
-  // intentionally targeted hits.
+  // so the title-score ranking is just a tiebreaker for which of the top hits
+  // fills the remaining company slots.
   const rankedPeople = rankPeopleByTitle(rawPeople);
   let savedCount = 0;
-  for (const person of rankedPeople.slice(0, 5)) {
+  for (const person of rankedPeople) {
+    if (savedCount >= remainingSlots) break;
     const cleanName = sanitizePersonName(person.name);
     if (!cleanName) {
       logger.debug({ raw: person.name, linkedinUrl: person.linkedinUrl }, 'Skipping person with corrupted/invalid name');

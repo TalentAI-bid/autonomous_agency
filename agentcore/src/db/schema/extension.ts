@@ -4,7 +4,7 @@ import { users } from './users.js';
 import { masterAgents } from './master-agents.js';
 
 export const extensionSiteEnum = pgEnum('extension_site', [
-  'linkedin', 'gmaps', 'crunchbase',
+  'linkedin', 'gmaps', 'crunchbase', 'google',
 ]);
 
 export const extensionTaskTypeEnum = pgEnum('extension_task_type', [
@@ -21,6 +21,11 @@ export const extensionTaskTypeEnum = pgEnum('extension_task_type', [
   // Global LinkedIn People search (role + optional geography) — imports people
   // across companies as leads, not scoped to one pipeline company.
   'search_people',
+  // Google web-search (SERP) scrape: the extension opens google.com/search with
+  // an R1-generated dork and returns result URLs. Generic (returns all URLs);
+  // the server router (handleSerpComplete) interprets LinkedIn company/person
+  // URLs today, leaving open-web routing for later.
+  'search_serp',
 ]);
 
 export const extensionTaskStatusEnum = pgEnum('extension_task_status', [

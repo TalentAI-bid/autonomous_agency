@@ -4,6 +4,8 @@ import { withTenant } from '../config/database.js';
 import { contacts, companies, masterAgents, opportunities } from '../db/schema/index.js';
 import { logActivity } from '../services/crm-activity.service.js';
 import { buildSystemPrompt, buildUserPrompt, type ScoringResult } from '../prompts/scoring.prompt.js';
+import { SMART_MODEL } from '../tools/together-ai.tool.js';
+import type { SalesStrategy } from '../types/pipeline-context.js';
 import logger from '../utils/logger.js';
 
 export class ScoringAgent extends BaseAgent {
@@ -75,7 +77,27 @@ export class ScoringAgent extends BaseAgent {
     const certifications = raw.certifications as string[] | undefined;
     const dataCompleteness = raw.dataCompleteness as number | undefined;
 
-    // 4. Score with Together AI
+    // 3b. Build the structured ICP (sales) from the saved strategy so the
+    // contact is scored against the ICP, not free-text roles. companyBuyerFit
+    // is the parent company's buyer_fit_score, inherited as the companyFit anchor.
+    const salesStrategy = (config.salesStrategy as SalesStrategy | undefined);
+    const dmt = salesStrategy?.decisionMakerTargeting;
+    const ics = salesStrategy?.idealCustomerShape;
+    const companyBuyerFitScore = companyRecord
+      ? ((((companyRecord.rawData as Record<string, unknown>)?.fitScore as Record<string, unknown> | undefined)?.buyer_fit_score) as number | undefined)
+      : undefined;
+    const icp = (ctx?.useCase === 'sales' || agent?.useCase === 'sales')
+      ? {
+          titlePatterns: dmt?.titlePatterns,
+          seniorityLevels: dmt?.seniorityLevels,
+          departmentFocus: dmt?.departmentFocus,
+          buyerFunctions: ics?.buyerFunctions,
+          geographicScope: ics?.geographicScope,
+          companyBuyerFitScore,
+        }
+      : undefined;
+
+    // 4. Score with the LLM (deepseek for sales — parity with buyer-fit).
     const useCase = ctx?.useCase ?? agent?.useCase;
     const scoring = await this.extractJSON<ScoringResult>([
       { role: 'system', content: buildSystemPrompt(useCase) },
@@ -126,9 +148,10 @@ export class ScoringAgent extends BaseAgent {
             techGapScore: ((companyRecord.rawData as Record<string, unknown>)?.techGapScore as number) ?? undefined,
             outreachAngle: ((companyRecord.rawData as Record<string, unknown>)?.outreachAngle as string) ?? undefined,
           } : undefined,
+          icp,
         }),
       },
-    ]);
+    ], undefined, (useCase === 'sales') ? { model: SMART_MODEL, temperature: 0.1 } : undefined);
 
     let rawScore = Number(scoring.overall) || 0;
 

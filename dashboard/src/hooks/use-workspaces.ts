@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import type { Workspace, Tenant } from '@/types';
 
@@ -18,6 +18,14 @@ export function useCreateWorkspace() {
   return useMutation({
     mutationFn: (data: { name: string; slug?: string; productType?: string }) =>
       apiPost<Workspace>('/workspaces', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workspaces'] }),
+  });
+}
+
+export function useDeleteWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<{ success: boolean }>(`/workspaces/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspaces'] }),
   });
 }

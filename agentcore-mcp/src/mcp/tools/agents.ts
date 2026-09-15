@@ -24,9 +24,11 @@ export function registerAgentTools(server: McpServer, ctx: SessionCtx): void {
         mission: z.string().min(1).describe('What to research, e.g. "Find AI-inference cloud providers in the US hiring ML infra engineers"'),
         useCase: z.enum(['sales', 'recruitment']).describe('sales = find target companies; recruitment = find hiring companies/candidates'),
         strategy: z
-          .enum(['hiring_signal', 'industry_target', 'hybrid'])
+          .enum(['hiring_signal', 'industry_target', 'hybrid', 'web_search', 'local_business', 'local_hybrid'])
           .default('hybrid')
-          .describe('hiring_signal = companies actively hiring (LinkedIn Jobs); industry_target = companies by industry/ICP; hybrid = both'),
+          .describe(
+            'hiring_signal = companies actively hiring (LinkedIn Jobs); industry_target = companies by industry/ICP; hybrid = both; web_search = Google discovery (SERP dorks harvesting LinkedIn company/person URLs); local_business = Google Maps (local/brick-and-mortar); local_hybrid = Google Maps + LinkedIn-via-Google. Pick web_search/local_* only when the user explicitly wants that discovery source.',
+          ),
         locations: z.array(z.string()).optional().describe('Target countries/cities, e.g. ["United States","Germany"]'),
         autoStart: z.boolean().default(true).describe('Start researching immediately after creation'),
       },

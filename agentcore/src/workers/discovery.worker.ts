@@ -1,8 +1,11 @@
 import { Worker, type Job } from 'bullmq';
+import { and, eq } from 'drizzle-orm';
 import { createRedisConnection } from '../queues/setup.js';
 import { getQueueName, getQueue, QUEUE_CONFIGS } from '../queues/queues.js';
 import { DiscoveryAgent } from '../agents/discovery.agent.js';
 import { MasterAgent } from '../agents/master-agent.js';
+import { withTenant } from '../config/database.js';
+import { masterAgents } from '../db/schema/index.js';
 import { createTaskRecord, completeTaskRecord, failTaskRecord } from './index.js';
 import logger from '../utils/logger.js';
 
@@ -66,6 +69,25 @@ export function createDiscoveryWorker(tenantId: string): Worker {
     const maxAttempts = job.opts?.attempts ?? QUEUE_CONFIGS.discovery.defaultJobOptions.attempts;
     if (job.attemptsMade >= maxAttempts) {
       const masterAgentId = data.masterAgentId as string;
+      // Don't resurrect the loop for an agent the user stopped/deleted — /stop
+      // removes this repeatable on purpose. Only re-schedule while 'running'.
+      try {
+        const [agentRow] = await withTenant(tenantId, async (tx) => {
+          return tx.select({ status: masterAgents.status }).from(masterAgents)
+            .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, tenantId)))
+            .limit(1);
+        });
+        if (!agentRow || agentRow.status !== 'running') {
+          logger.info(
+            { tenantId, masterAgentId, status: agentRow?.status ?? 'missing' },
+            'Orchestrate job exhausted retries but agent not running — NOT re-scheduling',
+          );
+          return;
+        }
+      } catch (statusErr) {
+        logger.warn({ err: statusErr, tenantId, masterAgentId }, 'Failed to check agent status before orchestrate re-schedule — skipping re-schedule to be safe');
+        return;
+      }
       logger.error(
         { tenantId, masterAgentId, attempts: job.attemptsMade, error: err?.message },
         'Orchestrate job exhausted all retries — re-scheduling repeatable job to prevent permanent death',

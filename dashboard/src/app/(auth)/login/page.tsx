@@ -38,8 +38,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground">AgentCore</h1>
-          <p className="text-muted-foreground mt-1">AI-powered recruiting automation</p>
+          <h1 className="text-3xl font-bold text-foreground">KeenPipe</h1>
         </div>
         <Card>
           <CardHeader>

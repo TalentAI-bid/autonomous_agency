@@ -125,6 +125,12 @@ function buildMissionContextString(ctx: unknown): string | undefined {
 const PRIORITY_TITLES = ['cto', 'vp engineering', 'head of engineering', 'director of engineering', 'vp technology', 'head of technology', 'technical director', 'chief technology', 'engineering manager', 'head of product', 'dsi', 'directeur technique', 'responsable technique', 'directeur informatique'];
 const SKIP_TITLES = ['ceo', 'coo', 'cfo', 'chief executive', 'chief operating', 'chief financial', 'président', 'directeur général', 'pdg'];
 
+// Reacher email verification is deferred to the outreach stage (which only runs
+// for contacts that pass the ICP score gate), so we never spend the 600/day
+// Reacher cap on contacts that will be rejected. Flip to false to restore the
+// legacy "verify every enriched contact" behavior.
+const DEFER_EMAIL_TO_OUTREACH = true;
+
 /** Validate LLM-returned domain — reject industry descriptions, garbage strings */
 function isValidDomain(domain: string | undefined | null): string | undefined {
   if (!domain) return undefined;
@@ -775,11 +781,15 @@ export class EnrichmentAgent extends BaseAgent {
     }
 
     // ── Phase 3: Email discovery ───────────────────────────────────────────
+    // Reacher email verification is DEFERRED to the outreach stage so it runs
+    // only for contacts that pass the ICP score gate (a "verified lead" is a
+    // scored-in contact with a verified email). This preserves the 600/day
+    // Reacher cap for real leads. See OutreachAgent.execute (email find at top).
 
     let emailFound = contact.email;
     let emailVerified = contact.emailVerified ?? false;
 
-    if (!emailFound && contact.firstName && contact.lastName && contactCompanyName) {
+    if (!DEFER_EMAIL_TO_OUTREACH && !emailFound && contact.firstName && contact.lastName && contactCompanyName) {
       try {
         let domain = '';
         if (companyId) {
@@ -1456,7 +1466,7 @@ export class EnrichmentAgent extends BaseAgent {
         const teamDomain = (companyDomain || '').replace(/^www\./, '').toLowerCase();
         const domainLooksValid = teamDomain.includes('.') && !teamDomain.includes(' ');
 
-        if (domainLooksValid && priorityPeople.length > 0) {
+        if (!DEFER_EMAIL_TO_OUTREACH && domainLooksValid && priorityPeople.length > 0) {
           try {
             const cacheHit = hasCachedPattern(teamDomain);
             if (!cacheHit) {

@@ -262,7 +262,30 @@
     const title = readHeadline();
     const linkedinUrl = (params?.linkedinUrl || location.href.split('?')[0]);
 
-    console.log(LOG, 'done', { name, title });
-    return { linkedinUrl, name: name || null, title: title || null };
+    // Reverse-engineer the CURRENT employer (name + company LinkedIn URL) from
+    // the Experience section. Used by the google_serp discovery path to link
+    // the contact to a company; additive, so existing callers can ignore it.
+    // Best-effort — never fail the whole scrape if the Experience read throws.
+    let companyName = '';
+    let companyLinkedinUrl = '';
+    if (window.__liExperience) {
+      try {
+        await window.__liExperience.ensureLoaded();
+        const emp = window.__liExperience.scrapeCurrentEmployer();
+        companyName = emp.companyName || '';
+        companyLinkedinUrl = emp.companyLinkedinUrl || '';
+      } catch (err) {
+        console.warn(LOG, 'employer reverse-engineer failed (non-fatal)', err?.message ?? err);
+      }
+    }
+
+    console.log(LOG, 'done', { name, title, companyName, companyLinkedinUrl });
+    return {
+      linkedinUrl,
+      name: name || null,
+      title: title || null,
+      companyName: companyName || null,
+      companyLinkedinUrl: companyLinkedinUrl || null,
+    };
   };
 })();

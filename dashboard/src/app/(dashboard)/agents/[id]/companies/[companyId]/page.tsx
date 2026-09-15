@@ -23,6 +23,7 @@ import {
 import Link from 'next/link';
 import type { CompanyDeepData, CompanyFitScoreVerdict, PainPoint } from '@/types';
 import { FitScorePanel } from '@/components/companies/fit-score-panel';
+import { GmapsBusinessCard } from '@/components/prospects/gmaps-business-card';
 
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string; companyId: string }> }) {
   // Route is /agents/[id]/companies/[companyId] — `id` is the agent, `companyId` is the company.
@@ -199,6 +200,14 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </CardContent>
         </Card>
+
+        {/* Google Maps — phone / address / hours / reviews land on the company's
+            rawData via the "Enrich via Google Maps" button. Same rich card the
+            business-contact page uses, rendered straight from company.rawData so
+            the info lives on the company, not a separate "business" entity. */}
+        {(company.rawData as { source?: string } | null)?.source === 'gmaps_extension' && (
+          <GmapsBusinessCard sourceType="gmaps_business" meta={company.rawData as Record<string, unknown>} />
+        )}
 
         {/* Tech Stack */}
         <Card>

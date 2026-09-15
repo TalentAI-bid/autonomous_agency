@@ -208,6 +208,12 @@ export interface CompanyDeepData {
   masterAgentId?: string;
   contactEmail?: string;
   hiringContactEmails?: string[];
+  // Google Maps enrichment (from the "Enrich via Google Maps" button / gmaps agents).
+  phone?: string;
+  address?: string;
+  website?: string;
+  hours?: string | Record<string, string>;
+  mapsUrl?: string;
   jobListings?: Array<{
     title: string;
     skills: string[];

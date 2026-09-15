@@ -38,7 +38,7 @@ const AGENT_CAPABILITY_MANIFEST = {
 };
 
 export interface InferredIntent {
-  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid';
+  bdStrategy: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search';
   confidence: 'high' | 'medium';
   targetRoles?: string[];
   locations?: string[];
@@ -217,7 +217,7 @@ When you have gathered sufficient information, output a proposal wrapped in XML-
     "senderTitle": "sender's job title (optional)",
     "callToAction": "desired action (e.g. 'Reply if interested', 'Book a call')",
     "senderWebsite": "company website URL if mentioned",
-    "bdStrategy": "hiring_signal|industry_target|hybrid|local_business|local_hybrid — the exact choice the user made in answer to the BD-strategy question (sales only, REQUIRED for sales, no default)"
+    "bdStrategy": "hiring_signal|industry_target|hybrid|local_business|local_hybrid|web_search — the exact choice the user made in answer to the BD-strategy question (sales only, REQUIRED for sales, no default)"
   },
   "pipeline": [
     { "agentType": "discovery", "order": 1, "description": "What this step does for this specific use case", "config": {} },
@@ -352,7 +352,7 @@ When your message asks a bounded-choice question (2–5 discrete options), emit 
 
 Format (strict JSON inside the tag, no markdown fences):
 
-<quick_replies>[{"id":"bd_a","label":"A — Hiring Signals","replyText":"A","variant":"secondary"},{"id":"bd_b","label":"B — Industry Target","replyText":"B","variant":"secondary"},{"id":"bd_c","label":"C — Hybrid","replyText":"C","variant":"primary"},{"id":"bd_d","label":"D — Local Business (Maps)","replyText":"D","variant":"secondary"},{"id":"bd_e","label":"E — Local + Companies","replyText":"E","variant":"secondary"}]</quick_replies>
+<quick_replies>[{"id":"bd_a","label":"A — Hiring Signals","replyText":"A","variant":"secondary"},{"id":"bd_b","label":"B — Industry Target","replyText":"B","variant":"secondary"},{"id":"bd_c","label":"C — Hybrid","replyText":"C","variant":"primary"},{"id":"bd_d","label":"D — Local Business (Maps)","replyText":"D","variant":"secondary"},{"id":"bd_e","label":"E — Local + Companies","replyText":"E","variant":"secondary"},{"id":"bd_f","label":"F — Google Discovery","replyText":"F","variant":"secondary"}]</quick_replies>
 
 Fields per chip:
 - \`id\`: unique kebab-case identifier (e.g., \`bd_a\`, \`continue\`, \`broaden_auto\`).
@@ -376,6 +376,7 @@ For every sales pipeline, you MUST present this question verbatim in a clearly f
 > **C) Hybrid** — both approaches combined (recommended for most cases).
 > **D) Local Business (Google Maps)** — find local/consumer-facing places (restaurants, salons, shops, clinics) by niche and city. Best for local targeting.
 > **E) Local + Companies** — Google Maps local businesses combined with LinkedIn company search.
+> **F) Google Discovery** — find companies and decision-makers via Google web search using very pointed queries. Best when LinkedIn's own keyword search returns weak or irrelevant results for a complex, niche ICP.
 >
 > Please reply with A, B, C, D, or E.
 
@@ -385,6 +386,7 @@ Map the user's reply to the config as:
 - "C" / "hybrid" / "both" → \`bdStrategy: "hybrid"\`
 - "D" / "local" / "local business" / "maps" / "google maps" → \`bdStrategy: "local_business"\`
 - "E" / "local hybrid" / "local + companies" / "local and companies" → \`bdStrategy: "local_hybrid"\`
+- "F" / "google discovery" / "google search" / "web search" / "domain discovery" → \`bdStrategy: "web_search"\`
 
 If the user's reply is genuinely ambiguous, ask them once more to pick A, B, C, D, or E. Do NOT silently default to "hybrid". Only emit the <pipeline_proposal> after the user has picked one.
 

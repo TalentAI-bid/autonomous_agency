@@ -33,7 +33,7 @@ export const masterAgents = pgTable('master_agents', {
   config: jsonb('config').$type<Record<string, unknown>>(),
   actionPlan: jsonb('action_plan').$type<ActionPlan>(),
   reviewMode: reviewModeEnum('review_mode').default('manual').notNull(),
-  dailyRuntimeBudgetMs: integer('daily_runtime_budget_ms').default(3_600_000).notNull(),
+  dailyRuntimeBudgetMs: integer('daily_runtime_budget_ms').default(10_800_000).notNull(),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

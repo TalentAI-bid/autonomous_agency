@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { tenants, userTenants, users } from '../db/schema/index.js';
-import { createTenant } from '../services/tenant.service.js';
+import { createTenant, deleteTenant } from '../services/tenant.service.js';
 import { createSession, destroySession } from '../services/auth.service.js';
 import { NotFoundError, ForbiddenError } from '../utils/errors.js';
 
@@ -76,6 +76,45 @@ export default async function workspaceRoutes(fastify: FastifyInstance) {
     return reply.status(201).send({
       data: { id: tenant.id, name: tenant.name, slug: tenant.slug, role: 'owner' },
     });
+  });
+
+  // DELETE /api/workspaces/:id — permanently delete a workspace (owner only).
+  // Deletes the tenant row; all tenant-scoped data (agents, companies, contacts,
+  // deals, …) disappears via the ON DELETE CASCADE chain on tenant_id. Guards:
+  // owner-only, cannot delete the workspace you're currently in (switch first),
+  // and cannot delete your last remaining workspace.
+  fastify.delete('/:id', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) {
+      return reply.status(400).send({ error: 'Invalid workspace id' });
+    }
+    const { id } = params.data;
+
+    const [membership] = await db.select({ role: userTenants.role })
+      .from(userTenants)
+      .where(and(eq(userTenants.userId, request.userId), eq(userTenants.tenantId, id)))
+      .limit(1);
+
+    if (!membership) {
+      throw new ForbiddenError('You do not belong to this workspace');
+    }
+    if (membership.role !== 'owner') {
+      throw new ForbiddenError('Only the workspace owner can delete it');
+    }
+    if (id === request.tenantId) {
+      throw new ForbiddenError('Switch to another workspace before deleting this one');
+    }
+
+    const memberships = await db.select({ tenantId: userTenants.tenantId })
+      .from(userTenants)
+      .where(eq(userTenants.userId, request.userId));
+    if (memberships.length <= 1) {
+      throw new ForbiddenError('You cannot delete your only workspace');
+    }
+
+    await deleteTenant(id);
+
+    return { data: { success: true } };
   });
 
   // POST /api/workspaces/switch — switch active workspace

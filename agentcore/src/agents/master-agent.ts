@@ -7,8 +7,6 @@ import { AGENT_TYPES } from '../queues/queues.js';
 import { getQueueStatus } from '../services/queue.service.js';
 import { buildSystemPrompt as masterSystemPrompt, buildUserPrompt as masterUserPrompt } from '../prompts/master-agent.prompt.js';
 import { buildSystemPrompt as discoverySystemPrompt, buildUserPrompt as discoveryUserPrompt } from '../prompts/discovery.prompt.js';
-import { buildActionPlan, isActionPlanComplete } from '../prompts/action-plan.prompt.js';
-import type { ActionPlan } from '../db/schema/master-agents.js';
 import type { PipelineContext, SalesStrategy } from '../types/pipeline-context.js';
 import { checkSearxngHealth } from '../tools/searxng.tool.js';
 import { env } from '../config/env.js';
@@ -283,37 +281,9 @@ export class MasterAgent extends BaseAgent {
         logger.warn({ err, masterAgentId }, 'Failed to load company profile / products');
       }
 
-      // 3c-iii. Action plan — generate (if not yet present) as OPTIONAL, editable
-      // context. It no longer gates the run: the extension is the single execution
-      // gate (see top of execute). The plan's answers still fold into strategy +
-      // email prompts when present, but a run never waits on them.
-      const existingPlan = (agent.actionPlan as ActionPlan | null) ?? null;
-      let actionPlan: ActionPlan;
-      if (!existingPlan) {
-        const items = buildActionPlan(
-          agent.useCase as 'sales' | 'recruitment' | 'custom',
-          pipelineContext,
-          agentConfig,
-        );
-        actionPlan = {
-          status: isActionPlanComplete(items) ? 'completed' : 'pending',
-          items,
-          generatedAt: new Date().toISOString(),
-        };
-      } else {
-        actionPlan = existingPlan;
-      }
-
-      // Action plan exists and is complete (or had nothing required) — persist
-      // it without altering status, then continue with strategist + dispatch.
-      if (!existingPlan) {
-        await withTenant(this.tenantId, async (tx) => {
-          await tx.update(masterAgents).set({
-            actionPlan,
-            updatedAt: new Date(),
-          }).where(eq(masterAgents.id, masterAgentId));
-        });
-      }
+      // 3c-iii. (Removed) Action plan / "additional info" — the feature was
+      // deleted per user request. The run has no data-completeness step; the
+      // connected extension is the single execution gate.
 
       // 3d. Resolve sales strategy for this dispatch.
       //
@@ -563,7 +533,7 @@ export class MasterAgent extends BaseAgent {
               // LLM-derived value. Once the user picks "industry" / "hiring" /
               // "hybrid" in chat, that pick is the single source of truth.
               const userExplicit = (agentConfig as Record<string, unknown>).userExplicitBdStrategy as
-                | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | undefined;
+                | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | undefined;
               const bdStrategy = userExplicit ?? strategy.bdStrategy ?? 'hybrid';
               if (userExplicit) {
                 logger.info({ masterAgentId, userExplicit, strategistBdStrategy: strategy.bdStrategy }, 'Dispatch: using user-explicit bdStrategy');
@@ -609,20 +579,27 @@ export class MasterAgent extends BaseAgent {
                         && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
                       const isLiSearchRoot = s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
                       const isGmapsStep = s.tool === 'GMAPS_EXTENSION';
+                      const isGoogleStep = s.tool === 'GOOGLE_EXTENSION';
+                      // web_search owns Google-SERP discovery; every other lock
+                      // strips stray GOOGLE_EXTENSION steps so a stale strategy
+                      // can't fire them under the wrong strategy.
+                      if (userExplicit === 'web_search') {
+                        return isJobsRoot || isLiSearchRoot || isGmapsStep;
+                      }
                       if (userExplicit === 'industry_target') {
-                        return isJobsRoot || isGmapsStep;
+                        return isJobsRoot || isGmapsStep || isGoogleStep;
                       }
                       if (userExplicit === 'hiring_signal') {
-                        return isLiSearchRoot || isGmapsStep;
+                        return isLiSearchRoot || isGmapsStep || isGoogleStep;
                       }
                       if (userExplicit === 'hybrid') {
-                        return isGmapsStep;
+                        return isGmapsStep || isGoogleStep;
                       }
                       if (userExplicit === 'local_business') {
-                        return isJobsRoot || isLiSearchRoot;
+                        return isJobsRoot || isLiSearchRoot || isGoogleStep;
                       }
                       if (userExplicit === 'local_hybrid') {
-                        return isJobsRoot;
+                        return isJobsRoot || isGoogleStep;
                       }
                       return false;
                     })
@@ -901,6 +878,45 @@ export class MasterAgent extends BaseAgent {
                   logger.info(
                     { masterAgentId, stepId: step.id, query, location, queryRationale: step.params?.queryRationale },
                     'Pipeline step dispatched (GMAPS_EXTENSION search_businesses)',
+                  );
+                  continue;
+                }
+
+                // ── GOOGLE_EXTENSION: web-search (SERP) discovery. The
+                // strategist (DeepSeek/R1) bakes a pointed ICP "dork" into
+                // step.params.dork; the extension opens google.com/search,
+                // scrapes result URLs, and handleSerpComplete routes LinkedIn
+                // company/person URLs into the enrichment pipeline.
+                if (step.tool === 'GOOGLE_EXTENSION') {
+                  const dork = typeof step.params?.dork === 'string' ? step.params.dork.trim() : '';
+                  if (!dork) {
+                    logger.warn(
+                      { masterAgentId, stepId: step.id },
+                      'GOOGLE_EXTENSION step skipped — empty dork',
+                    );
+                    this.sendMessage(null, 'system_alert', {
+                      action: 'discovery_inputs_missing',
+                      severity: 'warning',
+                      path: `${step.tool}:${step.action}`,
+                      message: 'I could not enqueue Google search tasks — the strategist produced no query for this step. Try regenerating the strategy.',
+                    });
+                    continue;
+                  }
+                  await enqueueExtensionTask({
+                    tenantId: this.tenantId,
+                    masterAgentId,
+                    site: 'google',
+                    type: 'search_serp',
+                    params: {
+                      dork,
+                      limit: (step.params?.limit as number) ?? 30,
+                    },
+                    priority: 7,
+                  });
+                  extensionTasksDispatched++;
+                  logger.info(
+                    { masterAgentId, stepId: step.id, dork, queryRationale: step.params?.queryRationale },
+                    'Pipeline step dispatched (GOOGLE_EXTENSION search_serp)',
                   );
                   continue;
                 }
@@ -1346,10 +1362,14 @@ export class MasterAgent extends BaseAgent {
 
       if (pipelineSteps?.length) {
         const rootSteps = pipelineSteps.filter(s => s.dependsOn.length === 0);
-        const hasExtensionRoot = rootSteps.some(s => s.tool === 'LINKEDIN_EXTENSION');
+        // Any browser-driven discovery root (LinkedIn, Google Maps, or the new
+        // Google web-search) requires the connected extension.
+        const hasExtensionRoot = rootSteps.some(
+          s => s.tool === 'LINKEDIN_EXTENSION' || s.tool === 'GMAPS_EXTENSION' || s.tool === 'GOOGLE_EXTENSION',
+        );
         if (hasExtensionRoot && !needsExtension) {
           needsExtension = true;
-          logger.info({ masterAgentId }, 'Pipeline steps override: LINKEDIN_EXTENSION in root → needsExtension=true');
+          logger.info({ masterAgentId }, 'Pipeline steps override: extension-driven root → needsExtension=true');
         } else if (!hasExtensionRoot && needsExtension) {
           needsExtension = false;
           logger.info({ masterAgentId }, 'Pipeline steps override: no LINKEDIN_EXTENSION in root → needsExtension=false');
@@ -1778,6 +1798,19 @@ export class MasterAgent extends BaseAgent {
     // (20 per ~2h) to spread the 200/day free-plan quota; LinkedIn gets a light
     // stagger and is throttled by its own 80/day cap (over-cap tasks stay
     // pending and retry — nothing is dropped).
+    // GMaps-enrichment-only agent: enrich each listed company purely via Google
+    // Maps (search by name → phone/website/detail → generic-email crawl), with a
+    // Google-dork fallback when Maps has no confident match. Skips the LinkedIn
+    // half entirely. Everything else (seeding, discovery-skip guards, ingest,
+    // scoring/outreach) is the shared list_verification path.
+    const gmapsEnrichOnly = agentConfig.gmapsEnrichOnly === true;
+    // First configured location scopes the dork fallback ("Name" "Region"); the
+    // primary GMaps search stays name-only (a business name is globally unique
+    // enough, and Maps handles geography itself).
+    const region = (Array.isArray(agentConfig.locations) && (agentConfig.locations as string[]).length
+      ? String((agentConfig.locations as string[])[0] ?? '')
+      : '').trim();
+
     const now = Date.now();
     let enqueued = 0;
 
@@ -1790,26 +1823,31 @@ export class MasterAgent extends BaseAgent {
       const gmapsDispatchAfter = new Date(now + gmapsBatchIndex * LIST_VERIFICATION_BATCH_INTERVAL_MS);
 
       // LinkedIn — search by name, no geo facet. (Cap/behaviour unchanged.)
-      try {
-        await enqueueExtensionTask({
-          tenantId: this.tenantId,
-          masterAgentId,
-          site: 'linkedin',
-          type: 'search_companies',
-          params: {
-            searchUrl: buildLinkedInCompanySearchURL({ searchKeywords: [name] }),
-            limit: 5,
-            strictMatch: { companyId: entry.companyId, name },
-          },
-          priority: 7,
-          dispatchAfter: linkedinDispatchAfter,
-        });
-        enqueued++;
-      } catch (err) {
-        logger.warn({ err, masterAgentId, companyId: entry.companyId }, 'list_verification: linkedin enqueue failed');
+      // Skipped for GMaps-enrichment-only agents.
+      if (!gmapsEnrichOnly) {
+        try {
+          await enqueueExtensionTask({
+            tenantId: this.tenantId,
+            masterAgentId,
+            site: 'linkedin',
+            type: 'search_companies',
+            params: {
+              searchUrl: buildLinkedInCompanySearchURL({ searchKeywords: [name] }),
+              limit: 5,
+              strictMatch: { companyId: entry.companyId, name },
+            },
+            priority: 7,
+            dispatchAfter: linkedinDispatchAfter,
+          });
+          enqueued++;
+        } catch (err) {
+          logger.warn({ err, masterAgentId, companyId: entry.companyId }, 'list_verification: linkedin enqueue failed');
+        }
       }
 
       // Google Maps — search by name, no location facet. Batched 20 per ~2h.
+      // `dorkFallback` lets the ingest fall back to a Google dork when Maps has
+      // no confident match (GMaps-enrichment-only agents only).
       try {
         await enqueueExtensionTask({
           tenantId: this.tenantId,
@@ -1820,6 +1858,7 @@ export class MasterAgent extends BaseAgent {
             query: name,
             limit: 5,
             strictMatch: { companyId: entry.companyId, name },
+            ...(gmapsEnrichOnly ? { dorkFallback: true, region } : {}),
           },
           priority: 7,
           dispatchAfter: gmapsDispatchAfter,
@@ -1882,19 +1921,26 @@ export class MasterAgent extends BaseAgent {
 
     logger.info({ tenantId: this.tenantId, masterAgentId }, 'MasterAgent orchestration loop starting');
 
-    // 0. Load pipelineContext from master agent config for enrichment dispatches
+    // 0. Load pipelineContext from master agent config for enrichment dispatches.
+    //    Also read status here so a paused/stopped agent short-circuits the whole
+    //    loop — otherwise this repeatable job keeps re-dispatching discovery and
+    //    refilling the extension queue after the user hit Stop.
     let pipelineCtx: PipelineContext | undefined;
     try {
       const [agentRow] = await withTenant(this.tenantId, async (tx) => {
-        return tx.select({ config: masterAgents.config, useCase: masterAgents.useCase })
+        return tx.select({ config: masterAgents.config, useCase: masterAgents.useCase, status: masterAgents.status })
           .from(masterAgents)
           .where(and(eq(masterAgents.id, masterAgentId), eq(masterAgents.tenantId, this.tenantId)))
           .limit(1);
       });
-      if (agentRow) {
-        const cfg = (agentRow.config as Record<string, unknown>) ?? {};
-        pipelineCtx = (cfg.pipelineContext as PipelineContext) ?? { useCase: agentRow.useCase ?? undefined } as PipelineContext;
+      // Only 'running' agents orchestrate. paused / paused_quota / error /
+      // abandoned / idle (or a deleted row) → stop the refill loop immediately.
+      if (!agentRow || agentRow.status !== 'running') {
+        logger.info({ tenantId: this.tenantId, masterAgentId, status: agentRow?.status ?? 'missing' }, 'Orchestration skipped — agent not running');
+        return { skipped: 'agent_not_running', status: agentRow?.status ?? 'missing' };
       }
+      const cfg = (agentRow.config as Record<string, unknown>) ?? {};
+      pipelineCtx = (cfg.pipelineContext as PipelineContext) ?? { useCase: agentRow.useCase ?? undefined } as PipelineContext;
     } catch (err) {
       logger.warn({ err, masterAgentId }, 'Failed to load pipelineContext for orchestration');
     }

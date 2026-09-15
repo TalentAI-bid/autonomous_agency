@@ -4,6 +4,7 @@ import { BaseAgent } from './base-agent.js';
 import { withTenant } from '../config/database.js';
 import { contacts, companies, campaigns, campaignContacts, campaignSteps, emailsSent, masterAgents, emailAccounts, opportunities, outreachEmails } from '../db/schema/index.js';
 import { enqueueEmail } from '../tools/email-queue.tool.js';
+import { findEmailByPattern } from '../tools/email-finder.tool.js';
 import { wrapEmailBody, plainTextToHtml } from '../templates/email-template.js';
 import { logActivity, ensureDeal } from '../services/crm-activity.service.js';
 import { ensureDefaultCampaign, enrollContactInSequence } from '../services/followup.service.js';
@@ -51,8 +52,36 @@ export class OutreachAgent extends BaseAgent {
         .limit(1);
     });
     if (!contact) throw new Error(`Contact ${contactId} not found`);
+
+    // Email discovery is DEFERRED to here (post-score gate): only contacts that
+    // passed the ICP score reach outreach, so Reacher runs only for real leads
+    // (a "verified lead" = passed contact + verified email). Find + verify the
+    // email now if we don't have one; mutate the in-memory contact so the rest
+    // of the flow (which reads contact.email) works unchanged.
+    if (!contact.email && contact.firstName && contact.lastName && contact.companyId) {
+      try {
+        const [co] = await withTenant(this.tenantId, async (tx) =>
+          tx.select({ domain: companies.domain }).from(companies).where(eq(companies.id, contact.companyId!)).limit(1));
+        const domain = co?.domain ?? '';
+        if (domain) {
+          const patternResult = await findEmailByPattern(contact.firstName, contact.lastName, domain);
+          if (patternResult.email) {
+            contact.email = patternResult.email;
+            contact.emailVerified = patternResult.method === 'smtp_verified';
+            await withTenant(this.tenantId, async (tx) => {
+              await tx.update(contacts).set({
+                email: contact.email, emailVerified: contact.emailVerified, updatedAt: new Date(),
+              }).where(eq(contacts.id, contactId));
+            });
+            logger.info({ contactId, email: contact.email, method: patternResult.method }, 'OutreachAgent: email found via Reacher (post-score)');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, contactId }, 'OutreachAgent: deferred email discovery failed');
+      }
+    }
     if (!contact.email) {
-      logger.warn({ contactId }, 'OutreachAgent: no email address, skipping');
+      logger.warn({ contactId }, 'OutreachAgent: no email address after discovery, skipping');
       return { skipped: true, reason: 'no_email' };
     }
 

@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments } from '@/hooks/use-agents';
+import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments, useGmapsEnrichAgent } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { AgentMonitor } from '@/components/agents/agent-monitor';
@@ -13,13 +13,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, getStatusColor } from '@/lib/utils';
-import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store, Star, Phone } from 'lucide-react';
+import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store, Star, Phone, MapPin } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { ExportButton } from '@/components/shared/export-button';
 import { StrategyPanel } from '@/components/agents/strategy-panel';
 import { IcpSegmentationCard } from '@/components/agents/icp-segmentation-card';
-import { ActionPlanPanel } from '@/components/agents/action-plan-panel';
 import { QuotaBadge } from '@/components/agents/quota-badge';
 import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
@@ -78,6 +77,7 @@ export default function AgentDetailPage() {
   const { data: documentsData } = useAgentDocuments(id);
   const startAgent = useStartAgent();
   const stopAgent = useStopAgent();
+  const gmapsEnrich = useGmapsEnrichAgent();
   const { toast } = useToast();
   const allEvents = useRealtimeStore((s) => s.events);
   const events = useMemo(
@@ -109,6 +109,22 @@ export default function AgentDetailPage() {
       toast({ title: 'Agent stopped' });
     } catch {
       toast({ title: 'Failed to stop agent', variant: 'destructive' });
+    }
+  }
+
+  async function handleGmapsEnrich() {
+    try {
+      const res = await gmapsEnrich.mutateAsync(id);
+      toast({
+        title: `Google Maps enrichment queued for ${res.enqueued} companies`,
+        description: res.note,
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not queue Google Maps enrichment',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      });
     }
   }
 
@@ -260,9 +276,6 @@ export default function AgentDetailPage() {
 
       {activeTab === 'overview' && (
         <>
-          {/* Action plan — gates outreach until the user fills in the required answers */}
-          <ActionPlanPanel masterAgentId={id} />
-
           {/* Agent Monitor */}
           <AgentMonitor masterAgentId={id} />
 
@@ -501,6 +514,16 @@ export default function AgentDetailPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={handleGmapsEnrich}
+                disabled={gmapsEnrich.isPending || agentCompanies.length === 0}
+                title="Search each company on Google Maps by name and fill in phone, website and a generic email (info@/contact@). Falls back to a Google search when Maps has no match."
+                className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                {gmapsEnrich.isPending ? 'Queuing…' : 'Enrich via Google Maps'}
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   setShowOnlyWithData((v) => !v);
                   setCursorStack([null]);
@@ -537,6 +560,9 @@ export default function AgentDetailPage() {
                   const gmapsNotFound = raw.gmapsNotFound === true;
                   const crawl = (raw.crawl as Record<string, { url?: string; markdownLength?: number }> | undefined) ?? {};
                   const crawledCount = [crawl.sourceUrl, crawl.website].filter((c) => c && (c.markdownLength ?? 0) > 0).length;
+                  // Google Maps enrichment (phone/address land on the company's rawData).
+                  const gmapsPhone = typeof raw.phone === 'string' ? raw.phone : '';
+                  const gmapsAddress = typeof raw.address === 'string' ? raw.address : '';
 
                   return (
                     <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">
@@ -567,6 +593,24 @@ export default function AgentDetailPage() {
                             </Badge>
                           </div>
                         </div>
+
+                        {/* Google Maps contact details (phone / address) */}
+                        {(gmapsPhone || gmapsAddress) && (
+                          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                            {gmapsPhone && (
+                              <span className="inline-flex items-center gap-1.5">
+                                <Phone className="w-3 h-3 shrink-0" />
+                                {gmapsPhone}
+                              </span>
+                            )}
+                            {gmapsAddress && (
+                              <span className="inline-flex items-center gap-1.5">
+                                <MapPin className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{gmapsAddress}</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
 
                         {/* list_verification status row */}
                         {isListEntry && (

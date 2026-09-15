@@ -64,6 +64,22 @@ const COUNTRY_NAMES_IN_KEYWORDS_BANLIST = [
   'mena', 'middle east', 'gcc', 'north america',
 ];
 
+// Stopwords dropped when composing the deterministic web_search fallback dorks
+// from raw mission text (a last-resort path; the LLM normally writes the dorks).
+const DETERMINISTIC_DORK_STOPWORDS = new Set([
+  'find', 'companies', 'company', 'contacts', 'contact', 'people', 'leads',
+  'that', 'with', 'this', 'from', 'have', 'need', 'want', 'looking', 'target',
+  'based', 'using', 'their', 'them', 'they', 'about', 'into', 'over', 'more',
+  // Mission-boilerplate verbs/nouns — these describe the PIPELINE action, not the
+  // target's niche. Without them, "Identify gyms in Tunisia…" yields "identify"
+  // as the primary keyword instead of "gyms".
+  'identify', 'enrich', 'enriched', 'score', 'scored', 'scoring', 'provide',
+  'provided', 'list', 'lists', 'generate', 'build', 'fetch', 'gather', 'collect',
+  'deliver', 'outreach', 'manual', 'data', 'information', 'platform', 'prospect',
+  'prospects', 'prospecting', 'market', 'region', 'area', 'business', 'businesses',
+  'search', 'give', 'make', 'then', 'also', 'each', 'help', 'sell', 'selling',
+]);
+
 // User's broad market-level inputs the strategist must EXPAND into specific
 // sub-categories (e.g. "fintech" → "payment infrastructure"). If a broad term
 // reaches the search step verbatim, the strategist hasn't done its job.
@@ -186,6 +202,9 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
   const gmapsSearchSteps = (strategy.pipelineSteps ?? []).filter(
     (s) => s.tool === 'GMAPS_EXTENSION' && s.action === 'search_businesses',
   );
+  const serpSearchSteps = (strategy.pipelineSteps ?? []).filter(
+    (s) => s.tool === 'GOOGLE_EXTENSION' && s.action === 'search_serp',
+  );
   const bd = strategy.bdStrategy;
   if (bd === 'hiring_signal') {
     if (jobsSearchSteps.length < 1) {
@@ -202,13 +221,19 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
       );
     }
   } else if (bd === 'local_hybrid') {
+    // Local discovery = Google Maps + "LinkedIn via Google" (SERP dorks).
+    // Direct LinkedIn faceted search is intentionally NOT used here — it can't
+    // bound geography for many countries and returns worldwide junk for local
+    // businesses. So: ≥2 GMaps niche searches + ≥3 Google-SERP dorks.
     if (gmapsSearchSteps.length < 2) {
       errors.push(
         `too_few_gmaps_search_steps (have ${gmapsSearchSteps.length}, need ≥2 GMAPS_EXTENSION:search_businesses root steps for bdStrategy='local_hybrid')`,
       );
     }
-    if (liSearchSteps.length < 3) {
-      errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+    if (serpSearchSteps.length < 3) {
+      errors.push(
+        `too_few_serp_search_steps (have ${serpSearchSteps.length}, need ≥3 GOOGLE_EXTENSION:search_serp root steps for bdStrategy='local_hybrid')`,
+      );
     }
   } else if (bd === 'hybrid') {
     if (jobsSearchSteps.length < 1) {
@@ -218,6 +243,16 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
     }
     if (liSearchSteps.length < 3) {
       errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
+    }
+  } else if (bd === 'web_search') {
+    // Google-SERP discovery: dork variety beats volume (the google search cap
+    // is ~40/day, and each dork returns many result URLs), so 3-8 pointed
+    // dorks is the right shape. Discovery is Google-only — no LinkedIn/GMaps
+    // search or jobs root steps.
+    if (serpSearchSteps.length < 3) {
+      errors.push(
+        `too_few_serp_search_steps (have ${serpSearchSteps.length}, need ≥3 GOOGLE_EXTENSION:search_serp root steps for bdStrategy='web_search')`,
+      );
     }
   } else {
     // industry_target (and default for unset bdStrategy — preserves legacy behavior).
@@ -229,8 +264,20 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
   for (const step of strategy.pipelineSteps ?? []) {
     const isLinkedInSearch = step.tool === 'LINKEDIN_EXTENSION' && step.action === 'search_companies';
     const isGmapsSearch = step.tool === 'GMAPS_EXTENSION' && step.action === 'search_businesses';
+    const isSerpSearch = step.tool === 'GOOGLE_EXTENSION' && step.action === 'search_serp';
     const isAnalysisStep = step.tool === 'LLM_ANALYSIS' || step.tool === 'SCORING' || step.tool === 'CRAWL4AI';
     const params = step.params as PipelineStepParams | undefined;
+
+    if (isSerpSearch) {
+      // Contract: dork (the full Google query, geography baked in) + queryRationale.
+      if (typeof params?.dork !== 'string' || !params.dork.trim()) {
+        errors.push(`step ${step.id} missing params.dork`);
+      }
+      if (!params?.queryRationale) {
+        errors.push(`step ${step.id} missing params.queryRationale`);
+      }
+      continue;
+    }
 
     if (isGmapsSearch) {
       // Contract: query (niche only) + location (city/region) + queryRationale.
@@ -480,6 +527,41 @@ export function fillStrategyDefaults(strategy: SalesStrategy): SalesStrategy {
   return strategy;
 }
 
+/**
+ * Deterministic geography guard for the Google-Maps + LinkedIn-via-Google
+ * discovery paths. The reported bug: the agent generated Google dorks that
+ * never mentioned the user's country ("gyms in Tunisia" → worldwide results).
+ * Regardless of what the LLM emitted, force the mission geography into every
+ * GMAPS step's `location` and every Google `search_serp` dork. Idempotent —
+ * skips a step that already carries the geography, and never appends "Global".
+ * `geography` is the user's literal mission locations (pipelineContext.locations),
+ * the authoritative source that must NOT be substituted by a region library.
+ */
+export function enforceGeographyInDiscoverySteps(strategy: SalesStrategy, geography: string[]): void {
+  const geos = (geography ?? [])
+    .map((g) => (g ?? '').trim())
+    .filter((g) => g && g.toLowerCase() !== 'global');
+  if (!geos.length) return;
+  const primaryLoc = geos[0];
+  for (const step of strategy.pipelineSteps ?? []) {
+    const params = (step.params ?? {}) as PipelineStepParams;
+    if (step.tool === 'GMAPS_EXTENSION') {
+      if (!params.location || !String(params.location).trim()) {
+        params.location = primaryLoc;
+        step.params = params;
+      }
+    } else if (step.tool === 'GOOGLE_EXTENSION' && step.action === 'search_serp') {
+      const dork = String(params.dork ?? '').trim();
+      if (!dork) continue;
+      const hasGeo = geos.some((g) => dork.toLowerCase().includes(g.toLowerCase()));
+      if (!hasGeo) {
+        params.dork = `${dork} "${primaryLoc}"`;
+        step.params = params;
+      }
+    }
+  }
+}
+
 const redis = createRedisConnection();
 
 export class StrategistAgent extends BaseAgent {
@@ -512,6 +594,10 @@ export class StrategistAgent extends BaseAgent {
     let mission: string | undefined;
     let userExplicitBdStrategy: SalesStrategy['bdStrategy'] | undefined;
     let savedStrategy: SalesStrategy | undefined;
+    // Seller-side words that must never leak into a TARGET dork keyword (the
+    // mission text mentions the seller's own product, e.g. "…of Hydraway's
+    // water-monitoring platform" — "Hydraway" is the vendor, not the target).
+    let sellerExcludeTerms: string[] = [];
     try {
       const [agent] = await withTenant(this.tenantId, async (tx) => {
         return tx.select({ mission: masterAgents.mission, config: masterAgents.config }).from(masterAgents)
@@ -523,12 +609,20 @@ export class StrategistAgent extends BaseAgent {
       const explicit = cfg.userExplicitBdStrategy as string | undefined;
       if (
         explicit === 'hiring_signal' || explicit === 'industry_target' || explicit === 'hybrid'
-        || explicit === 'local_business' || explicit === 'local_hybrid'
+        || explicit === 'local_business' || explicit === 'local_hybrid' || explicit === 'web_search'
       ) {
         userExplicitBdStrategy = explicit;
         logger.info({ masterAgentId, userExplicitBdStrategy }, 'Strategist: user-locked bdStrategy detected');
       }
       savedStrategy = cfg.salesStrategy as SalesStrategy | undefined;
+      // Exclude ONLY the vendor's own name (unambiguously not the target). We
+      // deliberately do NOT exclude the seller's product keywords — those often
+      // overlap with the target niche (e.g. "gym water consumption" contains the
+      // very "gym" niche we want to keep).
+      sellerExcludeTerms = String(cfg.senderCompanyName ?? '')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length >= 4);
     } catch { /* continue without mission */ }
 
     // Defense-in-depth idempotency: the strategy is generated ONCE during
@@ -647,6 +741,7 @@ export class StrategistAgent extends BaseAgent {
       if (
         userExplicitBdStrategy === 'industry_target' || userExplicitBdStrategy === 'hybrid'
         || userExplicitBdStrategy === 'local_business' || userExplicitBdStrategy === 'local_hybrid'
+        || userExplicitBdStrategy === 'web_search'
       ) {
         strategy.dataSourceStrategy = {
           ...(strategy.dataSourceStrategy ?? { primaryRegion: '', availableSources: [], expectedQuality: 'medium', userNotes: '' }),
@@ -680,7 +775,8 @@ export class StrategistAgent extends BaseAgent {
       }
       if (!this.pipelineStepsMatchStrategy(strategy.pipelineSteps, userExplicitBdStrategy)) {
         const before = strategy.pipelineSteps?.map(s => `${s.tool}:${s.action}`) ?? [];
-        strategy.pipelineSteps = this.buildDeterministicPipelineSteps(userExplicitBdStrategy);
+        const geoForDorks = ctx.locations?.length ? ctx.locations : (strategy.idealCustomerShape?.geographicScope ?? []);
+        strategy.pipelineSteps = this.buildDeterministicPipelineSteps(userExplicitBdStrategy, mission, geoForDorks, sellerExcludeTerms);
         // Round 8 — tag provenance so dashboard debugging can distinguish
         // deterministic-fallback strategies from LLM-generated.
         strategy._source = 'deterministic';
@@ -732,6 +828,16 @@ export class StrategistAgent extends BaseAgent {
         strategy.pipelineSteps = undefined;
       }
     }
+
+    // Geography guard — force the user's literal mission location into every
+    // Google dork + GMaps step so discovery is actually bounded to (e.g.)
+    // Tunisia instead of the whole world. Uses pipelineContext.locations (the
+    // user's input) so a region-library substitution in the LLM output can't
+    // drop the country. No-op for non-local/non-web_search strategies.
+    enforceGeographyInDiscoverySteps(
+      strategy,
+      (ctx.locations?.length ? ctx.locations : (strategy.idealCustomerShape?.geographicScope ?? [])),
+    );
 
     // Save to masterAgent.config.salesStrategy. Round 8 — backup-on-save:
     // copy the existing strategy to config.salesStrategyPrevious first,
@@ -857,7 +963,7 @@ export class StrategistAgent extends BaseAgent {
       // Deterministic skeleton is safe — no broad-term keywords, just bdStrategy
       // + empty pipeline-step params. Tag with _source so dashboard debugging
       // can distinguish from LLM-generated strategies.
-      const det = fillStrategyDefaults(this.buildDeterministicStrategy(mission));
+      const det = fillStrategyDefaults(this.buildDeterministicStrategy(mission, forcedBdStrategy));
       det._source = 'deterministic';
       return det;
     }
@@ -924,6 +1030,11 @@ export class StrategistAgent extends BaseAgent {
         'Each search step has AT MOST 4 keywords: sub-category name + 1-2 technical specialties + optional service word (e.g. ["payment processing","API","PCI"] or ["neobank","core banking","BaaS"]). If you have more sub-categories, split them across SEPARATE search steps.',
       );
     }
+    if (firstCheck.errors.some((e) => e.includes('too_few_serp_search_steps'))) {
+      fixHints.push(
+        "The user LOCKED the web_search strategy: discovery MUST be Google web search. Emit 3-8 GOOGLE_EXTENSION steps with action 'search_serp', dependsOn: [], params { dork: '<a LinkedIn-targeted Google query, ICP quoted inline>', limit: 30, queryRationale: '<one sentence>' }. Mix site:linkedin.com/company dorks and site:linkedin.com/in dorks. DELETE every LINKEDIN_EXTENSION:search_companies, GMAPS_EXTENSION, and CRAWL4AI jobs step — those contradict the lock. Keep teamRoleKeywords.",
+      );
+    }
     if (firstCheck.errors.some((e) => e.includes('too_few_gmaps_search_steps'))) {
       fixHints.push(
         "Generate 3-6 GMAPS_EXTENSION steps with action 'search_businesses', dependsOn: [], and params { query: '<niche keywords, NO city/country>', location: '<city or region>', limit: 20, queryRationale: '<one sentence>' }. Mix broad niches ('restaurant') with narrow ones ('asian restaurant', 'sushi restaurant'). For local_business do NOT add LINKEDIN_EXTENSION:search_companies or CRAWL4AI jobs steps.",
@@ -972,6 +1083,20 @@ export class StrategistAgent extends BaseAgent {
         { masterAgentId, attempt1Errors: firstCheck.errors, attempt2Errors: secondCheck.errors },
         'StrategistAgent: validation failed twice — refusing to fabricate strategy',
       );
+      // Exception: when the user EXPLICITLY locked a strategy, returning null
+      // leaves the agent broken (e.g. a web_search lock whose LLM kept emitting
+      // LinkedIn steps → all stripped → zero discovery). The lock is the user's
+      // intent, so fall back to lock-honoring deterministic steps (grounded in
+      // the mission) rather than failing the whole run.
+      if (forcedBdStrategy) {
+        logger.warn(
+          { masterAgentId, forcedBdStrategy },
+          'StrategistAgent: honoring user lock with deterministic fallback after double validation failure',
+        );
+        const det = fillStrategyDefaults(this.buildDeterministicStrategy(mission, forcedBdStrategy));
+        det._source = 'deterministic_locked';
+        return det;
+      }
       try {
         await withTenant(this.tenantId, async (tx) => {
           await tx.insert(agentActivityLog).values({
@@ -1029,9 +1154,12 @@ export class StrategistAgent extends BaseAgent {
    * dispatcher gracefully degrades to agentConfig.hiringKeywords / services
    * when strategy fields are missing.
    */
-  private buildDeterministicStrategy(mission: string | undefined): SalesStrategy {
+  private buildDeterministicStrategy(mission: string | undefined, forcedBdStrategy?: SalesStrategy['bdStrategy']): SalesStrategy {
     const intent = detectMissionStrategyFromText(mission ?? '');
-    const bdStrategy: SalesStrategy['bdStrategy'] = intent.recommended ?? 'industry_target';
+    // A user-locked strategy is authoritative — never let the mission heuristic
+    // override it (otherwise a web_search lock silently falls back to LinkedIn
+    // company search and produces zero Google steps).
+    const bdStrategy: SalesStrategy['bdStrategy'] = forcedBdStrategy ?? intent.recommended ?? 'industry_target';
     return {
       reasoning:
         'Deterministic fallback strategy — LLM call failed after retries. ' +
@@ -1043,7 +1171,7 @@ export class StrategistAgent extends BaseAgent {
       painPointsAddressed: [],
       opportunitySearchQueries: [],
       hiringKeywords: [],
-      pipelineSteps: this.buildDeterministicPipelineSteps(bdStrategy),
+      pipelineSteps: this.buildDeterministicPipelineSteps(bdStrategy, mission),
       idealCustomerShape: DEFAULT_ICS(),
       icpSegmentation: [],
       queryDesignNotes:
@@ -1063,8 +1191,16 @@ export class StrategistAgent extends BaseAgent {
    *   - hiring_signal   → CRAWL4AI:search_linkedin_jobs (root)
    *   - hybrid          → BOTH as parallel roots
    */
-  private buildDeterministicPipelineSteps(bdStrategy: SalesStrategy['bdStrategy']): NonNullable<SalesStrategy['pipelineSteps']> {
+  private buildDeterministicPipelineSteps(
+    bdStrategy: SalesStrategy['bdStrategy'],
+    mission?: string,
+    geography?: string[],
+    exclude?: string[],
+  ): NonNullable<SalesStrategy['pipelineSteps']> {
     const steps: NonNullable<SalesStrategy['pipelineSteps']> = [];
+    if (bdStrategy === 'web_search') {
+      return this.buildSerpDorkSteps(mission, geography, exclude);
+    }
     if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
       steps.push({
         id: 'discover_jobs',
@@ -1074,7 +1210,7 @@ export class StrategistAgent extends BaseAgent {
         params: {},
       });
     }
-    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid' || bdStrategy === 'local_hybrid') {
+    if (bdStrategy === 'industry_target' || bdStrategy === 'hybrid') {
       steps.push({
         id: 'discover_companies',
         tool: 'LINKEDIN_EXTENSION',
@@ -1086,16 +1222,70 @@ export class StrategistAgent extends BaseAgent {
     if (bdStrategy === 'local_business' || bdStrategy === 'local_hybrid') {
       // Empty params are acceptable — the master-agent dispatch branch falls
       // back to config targetIndustries/services for query and locations for
-      // the Maps location.
-      steps.push({
-        id: 'discover_businesses',
-        tool: 'GMAPS_EXTENSION',
-        action: 'search_businesses',
-        dependsOn: [],
-        params: {},
-      });
+      // the Maps location. local_hybrid wants ≥2 Maps roots.
+      const gmapsCount = bdStrategy === 'local_hybrid' ? 2 : 3;
+      for (let i = 0; i < gmapsCount; i++) {
+        steps.push({
+          id: `discover_businesses_${i + 1}`,
+          tool: 'GMAPS_EXTENSION',
+          action: 'search_businesses',
+          dependsOn: [],
+          params: {},
+        });
+      }
+    }
+    if (bdStrategy === 'local_hybrid') {
+      // "LinkedIn via Google" — SERP dorks find LinkedIn company/person pages
+      // for the same local niche. Replaces direct LinkedIn faceted search,
+      // which can't bound geography for many countries.
+      steps.push(...this.buildSerpDorkSteps(mission, geography, exclude));
     }
     return steps;
+  }
+
+  /**
+   * Compose deterministic Google-SERP dork steps from the mission keywords.
+   * Shared by bdStrategy 'web_search' and the LinkedIn-via-Google half of
+   * 'local_hybrid'. The LLM normally writes far sharper dorks; this is the
+   * last-resort fallback so validation passes and the run does something.
+   * Geography is force-injected later by enforceGeographyInDiscoverySteps.
+   */
+  private buildSerpDorkSteps(mission?: string, geography?: string[], exclude?: string[]): NonNullable<SalesStrategy['pipelineSteps']> {
+    // Geography terms are injected as a separate quoted suffix — they must NOT
+    // also leak into the niche keywords (else "Tunisia" becomes a keyword and
+    // the dork double-quotes the country). Seller-side words (vendor name /
+    // product terms) are likewise excluded so a dork targets the CUSTOMER niche.
+    const geoList = (geography ?? [])
+      .map((g) => (g ?? '').trim())
+      .filter((g) => g && g.toLowerCase() !== 'global');
+    const geoWords = new Set(geoList.flatMap((g) => g.toLowerCase().split(/\s+/)));
+    const excludeWords = new Set((exclude ?? []).map((w) => w.toLowerCase()));
+    const kws = (mission ?? '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !DETERMINISTIC_DORK_STOPWORDS.has(w) && !geoWords.has(w) && !excludeWords.has(w))
+      .slice(0, 2);
+    const primary = kws[0] ?? 'company';
+    const secondary = kws[1] ?? '';
+    const geo = geoList[0] ?? '';
+    const geoSuffix = geo ? ` "${geo}"` : '';
+    // Company-FIRST: the user wants LinkedIn *companies* surfaced from Google;
+    // /company dorks dominate, and a single /in dork feeds the contact→employer
+    // reverse-engineer path (handleSerpComplete). Every dork carries the region
+    // inline so results never wander worldwide.
+    const dorks = [
+      `site:linkedin.com/company "${primary}"${secondary ? ` "${secondary}"` : ''}${geoSuffix}`,
+      `site:linkedin.com/company "${primary}"${geoSuffix}`,
+      `site:linkedin.com/in "${primary}"${geoSuffix}`,
+    ];
+    return dorks.map((dork, i) => ({
+      id: `serp_${i + 1}`,
+      tool: 'GOOGLE_EXTENSION' as const,
+      action: 'search_serp' as const,
+      dependsOn: [],
+      params: { dork, limit: 30, queryRationale: 'Deterministic fallback dork (niche + region), company-first.' },
+    }));
   }
 
   /**
@@ -1117,22 +1307,27 @@ export class StrategistAgent extends BaseAgent {
         && (s.action === 'search_linkedin_jobs' || s.action === 'linkedin_jobs' || s.action === 'search_jobs');
       const isLiSearchRoot = s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
       const isGmapsStep = s.tool === 'GMAPS_EXTENSION';
+      const isGoogleStep = s.tool === 'GOOGLE_EXTENSION';
+      if (bdStrategy === 'web_search') {
+        // Google-SERP-only discovery.
+        return isJobsRoot || isLiSearchRoot || isGmapsStep;
+      }
       if (bdStrategy === 'industry_target') {
-        return isJobsRoot || isGmapsStep;
+        return isJobsRoot || isGmapsStep || isGoogleStep;
       }
       if (bdStrategy === 'hiring_signal') {
-        return isLiSearchRoot || isGmapsStep;
+        return isLiSearchRoot || isGmapsStep || isGoogleStep;
       }
       if (bdStrategy === 'hybrid') {
-        return isGmapsStep;
+        return isGmapsStep || isGoogleStep;
       }
       if (bdStrategy === 'local_business') {
         // Maps-only discovery — no LinkedIn or jobs roots.
-        return isJobsRoot || isLiSearchRoot;
+        return isJobsRoot || isLiSearchRoot || isGoogleStep;
       }
       if (bdStrategy === 'local_hybrid') {
-        // Maps + LinkedIn companies, no jobs.
-        return isJobsRoot;
+        // Maps + LinkedIn-via-Google (SERP), no jobs and no direct LinkedIn.
+        return isJobsRoot || isLiSearchRoot;
       }
       return false;
     };
@@ -1169,16 +1364,20 @@ export class StrategistAgent extends BaseAgent {
 
     const isGmapsSearch = (s: { tool: string; action: string }) =>
       s.tool === 'GMAPS_EXTENSION' && s.action === 'search_businesses';
+    const isSerpSearch = (s: { tool: string; action: string }) =>
+      s.tool === 'GOOGLE_EXTENSION' && s.action === 'search_serp';
 
     const hasExt = steps.some(isExtSearch);
     const hasJobs = steps.some(isJobsSearch);
     const hasGmaps = steps.some(isGmapsSearch);
+    const hasSerp = steps.some(isSerpSearch);
 
-    if (bdStrategy === 'industry_target') return hasExt && !hasJobs && !hasGmaps;
-    if (bdStrategy === 'hiring_signal') return hasJobs && !hasExt && !hasGmaps;
-    if (bdStrategy === 'hybrid') return hasExt && hasJobs && !hasGmaps;
-    if (bdStrategy === 'local_business') return hasGmaps && !hasExt && !hasJobs;
-    if (bdStrategy === 'local_hybrid') return hasGmaps && hasExt && !hasJobs;
+    if (bdStrategy === 'industry_target') return hasExt && !hasJobs && !hasGmaps && !hasSerp;
+    if (bdStrategy === 'hiring_signal') return hasJobs && !hasExt && !hasGmaps && !hasSerp;
+    if (bdStrategy === 'hybrid') return hasExt && hasJobs && !hasGmaps && !hasSerp;
+    if (bdStrategy === 'local_business') return hasGmaps && !hasExt && !hasJobs && !hasSerp;
+    if (bdStrategy === 'local_hybrid') return hasGmaps && hasSerp && !hasExt && !hasJobs;
+    if (bdStrategy === 'web_search') return hasSerp && !hasExt && !hasJobs && !hasGmaps;
     return true;
   }
 }

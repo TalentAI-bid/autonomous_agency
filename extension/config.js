@@ -7,6 +7,6 @@
 // against a non-production backend, change BACKEND_URL below and reload the
 // unpacked extension.
 //
-// Production:  https://agents.api.talentailabs.com
+// Production:  https://api.keenpipe.com
 // Local dev:   http://localhost:4000
-export const BACKEND_URL = 'https://agents.api.talentailabs.com';
+export const BACKEND_URL = 'https://api.keenpipe.com';

@@ -23,6 +23,105 @@ let paused = false;
 let currentTask = null;
 let currentMasterAgentName = null;
 let currentStatus = 'idle';
+// Tab id of the scrape currently in flight, and a settler that resolves the
+// in-flight adapter Promise early. These let an abort (server `stop_all`, a
+// `cancel`, or the user pausing the extension) close the open tab and stop the
+// scrape INSTANTLY instead of waiting for the page to finish or the 180s
+// timeout to fire.
+let currentTabId = null;
+let settleInFlight = null;
+// Bumped on every abort (server stop_all / cancel / user pause). Each task is
+// tagged with the epoch that was current when it was ENQUEUED; when its turn to
+// run arrives, a task whose epoch is stale (i.e. an abort happened after it was
+// queued) is skipped. This is what actually drops the backlog on stop — merely
+// resetting taskQueueTail does NOT, because the .then() chain for already-queued
+// tasks is built at enqueue time and keeps running regardless of the variable.
+let abortEpoch = 0;
+
+// All scraping tabs are corralled into one dedicated, collapsed tab group so
+// they never clutter the user's tab strip and (opened in the background) never
+// steal focus while the user works. MV3 service workers are ephemeral, so this
+// resets to null on SW restart — the startup IIFE below re-adopts the existing
+// group by title, and if it can't, the next scrape simply starts a fresh one.
+const SCRAPE_GROUP_TITLE = 'KeenPipe Scraper';
+let scrapeGroupId = null;
+
+// Re-adopt the scraper group across service-worker restarts.
+(async () => {
+  try {
+    if (!chrome.tabGroups?.query) return;
+    const groups = await chrome.tabGroups.query({ title: SCRAPE_GROUP_TITLE });
+    if (groups && groups.length) scrapeGroupId = groups[0].id;
+  } catch (_) {}
+})();
+
+/**
+ * Put a scraping tab into the dedicated "KeenPipe Scraper" group. Best-effort:
+ * if grouping is unavailable/fails the scrape still proceeds (just ungrouped).
+ * The title/color/collapsed styling is applied ONLY when a new group is created,
+ * so if the user expands the group to watch progress we don't keep re-collapsing it.
+ */
+async function groupScrapeTab(tabId) {
+  if (tabId == null) return;
+  try {
+    let groupId;
+    let created = false;
+    if (scrapeGroupId != null) {
+      try {
+        groupId = await chrome.tabs.group({ groupId: scrapeGroupId, tabIds: tabId });
+      } catch (_) {
+        // Stale/closed group, or the tab is in a different window than the group.
+        groupId = await chrome.tabs.group({ tabIds: tabId });
+        created = true;
+      }
+    } else {
+      groupId = await chrome.tabs.group({ tabIds: tabId });
+      created = true;
+    }
+    scrapeGroupId = groupId;
+    if (created) {
+      try {
+        await chrome.tabGroups.update(groupId, {
+          title: SCRAPE_GROUP_TITLE,
+          color: 'blue',
+          collapsed: true,
+        });
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.warn('[TalentAI sw] groupScrapeTab failed (non-fatal)', err?.message ?? err);
+  }
+}
+
+/**
+ * Abort whatever scrape is running right now: close its tab, resolve the
+ * awaited adapter Promise as 'aborted' (so processTask returns without sending
+ * a result — the server already marked the task cancelled), drop the in-memory
+ * task backlog, and go idle. Safe to call when nothing is running.
+ */
+function abortCurrentScrape(reason) {
+  console.log('[TalentAI sw] abortCurrentScrape', { reason, taskId: currentTask?.taskId ?? null, currentTabId });
+  // Invalidate every task already sitting in the single-flight chain: each was
+  // tagged with the epoch current at enqueue time, so bumping it here makes them
+  // all skip when their turn arrives. Reassigning taskQueueTail alone does NOT
+  // cancel the already-built .then() chain, which is why a plain stop used to
+  // keep draining the backlog until the user manually paused the extension.
+  abortEpoch++;
+  taskQueueTail = Promise.resolve();
+  const settle = settleInFlight;
+  settleInFlight = null;
+  if (settle) {
+    try { settle({ kind: 'scrape_result', taskId: currentTask?.taskId, status: 'aborted' }); } catch (_) {}
+  }
+  if (currentTabId != null) {
+    const tabId = currentTabId;
+    currentTabId = null;
+    chrome.tabs.remove(tabId).catch(() => {});
+  }
+  currentTask = null;
+  currentMasterAgentName = null;
+  broadcast('current_task', null);
+}
 
 // Single-flight task queue. WebSocket delivers task messages concurrently
 // (e.g. 58 fetch_company tasks fire from the server in rapid succession);
@@ -90,8 +189,10 @@ const ADAPTER_FILES = {
   // other. Legacy fetch_company stays for already-queued rows.
   'linkedin:fetch_company_info': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-info.js'],
   'linkedin:fetch_company_team': ['lib/scraper-utils.js', 'content/linkedin/fetch-company-team.js'],
-  // Single-person profile re-scrape (user-triggered contact correction).
-  'linkedin:fetch_profile':      ['lib/scraper-utils.js', 'content/linkedin/fetch-profile.js'],
+  // Single-person profile re-scrape (user-triggered contact correction) — also
+  // reverse-engineers the current employer (name + company URL) via the shared
+  // parse-experience lib, for the google_serp discovery path.
+  'linkedin:fetch_profile':      ['lib/scraper-utils.js', 'content/linkedin/lib/parse-experience.js', 'content/linkedin/fetch-profile.js'],
   // Review-then-send outreach: open profile, type DM / connection-note, leave
   // it for the user to click Send. One adapter, branches on params.channel.
   'linkedin:linkedin_message':   ['lib/scraper-utils.js', 'content/linkedin/paste-outreach.js'],
@@ -104,6 +205,9 @@ const ADAPTER_FILES = {
   'gmaps:fetch_business':        ['content/gmaps/maps-core.js', 'content/gmaps/fetch-business.js'],
   'crunchbase:search_companies': ['lib/scraper-utils.js', 'content/crunchbase/search-companies.js'],
   'crunchbase:fetch_company':    ['lib/scraper-utils.js', 'content/crunchbase/fetch-company.js'],
+  // Google web-search (SERP) discovery for the web_search strategy — thin
+  // wrapper over the self-contained google-core module (inject core first).
+  'google:search_serp':          ['content/google/google-core.js', 'content/google/search-serp.js'],
 };
 
 // ─── Startup: open WS if we have an active session ─────────────────────────
@@ -175,19 +279,37 @@ async function handleMessage(msg) {
   }
   if (msg.type === 'task') {
     console.log('[TalentAI sw] queueing', { taskId: msg.taskId, site: msg.site, taskType: msg.taskType });
+    // Tag with the current abort epoch. If an abort (stop_all / cancel / pause)
+    // fires before this task's turn, its epoch goes stale and it is skipped —
+    // this is what makes a server stop actually halt the backlog.
+    const epoch = abortEpoch;
     // Tail-chain onto the single-flight queue. Don't await — the WS client
     // must remain free to receive subsequent messages while this task runs.
-    taskQueueTail = taskQueueTail.then(() => processTask(msg).catch((err) => {
-      console.error('[TalentAI sw] task processing error', { taskId: msg.taskId, err: err?.message ?? String(err) });
-    }));
+    taskQueueTail = taskQueueTail.then(() => {
+      if (epoch !== abortEpoch) {
+        console.log('[TalentAI sw] skipping task from aborted batch', { taskId: msg.taskId });
+        return;
+      }
+      return processTask(msg).catch((err) => {
+        console.error('[TalentAI sw] task processing error', { taskId: msg.taskId, err: err?.message ?? String(err) });
+      });
+    });
+    return;
+  }
+  if (msg.type === 'stop_all') {
+    // Agent stopped/deleted server-side — abort the in-flight scrape NOW and
+    // drop the backlog so scraping halts instantly.
+    console.log('[TalentAI sw] stop_all', { tenantId: msg.tenantId ?? null, masterAgentId: msg.masterAgentId ?? null });
+    abortCurrentScrape('server_stop_all');
+    setStatus('idle');
     return;
   }
   if (msg.type === 'cancel') {
-    // best-effort: just clear currentTask
-    if (currentTask?.taskId === msg.taskId) {
-      currentTask = null;
-      currentMasterAgentName = null;
-      broadcast('current_task', null);
+    // Cancel the currently-running task: abort the scrape (close its tab) if it
+    // matches, otherwise best-effort clear the reference.
+    if (!msg.taskId || currentTask?.taskId === msg.taskId) {
+      abortCurrentScrape('server_cancel');
+      setStatus('idle');
     }
     return;
   }
@@ -287,15 +409,14 @@ async function processTask(msg) {
     const target = buildUrl(site, taskType, params);
     console.log('[TalentAI sw] navigate begin', { taskId, taskType, target, isDetailTask });
     if (isDetailTask) {
-      // Detail pages open in a NEW tab to avoid navigating away from search results.
-      // gmaps fanout enqueues ~one fetch_business per business — opening each in
-      // the FOREGROUND steals focus on every task. Open gmaps detail tabs in the
-      // background; LinkedIn keeps foreground (unchanged).
-      const active = site !== 'gmaps';
-      tab = await createAndWaitTab(target, 45_000, { active });
+      // Detail pages open in a NEW tab to avoid navigating away from search
+      // results. All scraping tabs now open in the BACKGROUND (never steal focus)
+      // and are corralled into the "KeenPipe Scraper" group by createAndWaitTab.
+      tab = await createAndWaitTab(target, 45_000, { active: false });
     } else {
       tab = await openOrFocusTab(target, site);
     }
+    currentTabId = tab?.id ?? null;
     console.log('[TalentAI sw] tab', { tabId: tab?.id, url: target, isDetailTask });
 
     // Pre-inject hostname check: never inject an adapter onto a chrome-extension://
@@ -339,6 +460,7 @@ async function processTask(msg) {
           });
           chrome.runtime.onMessage.removeListener(listener);
           clearTimeout(timeout);
+          settleInFlight = null;
           resolve(m);
         }
       };
@@ -346,8 +468,16 @@ async function processTask(msg) {
 
       const timeout = setTimeout(() => {
         chrome.runtime.onMessage.removeListener(listener);
+        settleInFlight = null;
         resolve({ kind: 'scrape_result', taskId, status: 'failed', error: 'adapter_timeout_180s' });
       }, 180_000);
+
+      // Let abortCurrentScrape() resolve this Promise early (tab closed on stop).
+      settleInFlight = (r) => {
+        chrome.runtime.onMessage.removeListener(listener);
+        clearTimeout(timeout);
+        resolve(r);
+      };
 
       try {
         console.log('[TalentAI sw] inject', { files, taskId });
@@ -386,6 +516,14 @@ async function processTask(msg) {
         resolve({ kind: 'scrape_result', taskId, status: 'failed', error: `inject_failed:${injErr.message || injErr}` });
       }
     });
+
+    // ─── Aborted mid-scrape (server stop_all / cancel / extension paused) ──
+    // The task row is already 'cancelled' server-side; send nothing and skip the
+    // post-task pacing. The tab was closed by abortCurrentScrape().
+    if (resultMsg.status === 'aborted') {
+      console.log('[TalentAI sw] task_aborted', { taskId });
+      return;
+    }
 
     // ─── Blocked-by-popup short-circuit ────────────────────────────────────
     // Adapter detected a terms/premium/cookie modal on the page. We do NOT
@@ -495,6 +633,8 @@ async function processTask(msg) {
     if (isDetailTask && tab) {
       try { await chrome.tabs.remove(tab.id); } catch (_) {}
     }
+    settleInFlight = null;
+    currentTabId = null;
     currentTask = null;
     currentMasterAgentName = null;
     broadcast('current_task', null);
@@ -598,6 +738,12 @@ function buildUrl(site, type, params) {
   if (site === 'crunchbase' && type === 'fetch_company') {
     return params.crunchbaseUrl;
   }
+  if (site === 'google' && type === 'search_serp') {
+    // Web search (not Maps). The dork already carries all operators/quotes;
+    // num=30 pulls ~30 organic results on one page so we avoid paginating.
+    const q = encodeURIComponent(params.dork || '');
+    return `https://www.google.com/search?q=${q}&num=30`;
+  }
   throw new Error(`no_url_builder_for:${site}:${type}`);
 }
 
@@ -610,15 +756,24 @@ async function openOrFocusTab(url, site) {
     linkedin: '*://*.linkedin.com/*',
     gmaps: '*://*.google.com/maps*',
     crunchbase: '*://*.crunchbase.com/*',
+    // Web search — scoped to /search* so it never collides with a Maps tab.
+    google: '*://*.google.com/search*',
   }[site];
 
   if (hostMatch) {
     const existing = await chrome.tabs.query({ url: hostMatch });
-    if (existing.length > 0) {
-      const tab = existing[0];
+    // Only reuse a warm tab that WE opened (i.e. already in our scraper group).
+    // This keeps the LinkedIn/Maps session warm across sequential fetches while
+    // never hijacking the user's OWN open LinkedIn/Maps tab.
+    const mine = scrapeGroupId != null
+      ? existing.filter((t) => t.groupId === scrapeGroupId)
+      : [];
+    if (mine.length > 0) {
+      const tab = mine[0];
       console.log('[TalentAI sw] reusing tab', { tabId: tab.id, currentUrl: tab.url, target: url });
       try {
         await navigateExistingTab(tab.id, url);
+        await groupScrapeTab(tab.id); // idempotent — keep it in the group
         return tab;
       } catch (err) {
         console.warn('[TalentAI sw] navigate existing failed, creating new', err?.message ?? err);
@@ -665,8 +820,9 @@ function navigateExistingTab(tabId, url, timeoutMs = 45_000) {
     chrome.tabs.onUpdated.addListener(listener);
     setTimeout(() => finishOnce('timeout'), timeoutMs);
 
-    // Kick off navigation AFTER listener attached.
-    chrome.tabs.update(tabId, { url, active: true }).catch((err) => {
+    // Kick off navigation AFTER listener attached. active:false so reusing a
+    // warm scraper tab never yanks focus away from the user's current tab.
+    chrome.tabs.update(tabId, { url, active: false }).catch((err) => {
       cleanup();
       reject(err);
     });
@@ -675,7 +831,7 @@ function navigateExistingTab(tabId, url, timeoutMs = 45_000) {
 
 // Create a new tab on the URL and wait for its first `complete` event on
 // the expected hostname.
-function createAndWaitTab(url, timeoutMs = 45_000, { active = true } = {}) {
+function createAndWaitTab(url, timeoutMs = 45_000, { active = false } = {}) {
   // Same backstop as navigateExistingTab — chrome.tabs.create with a relative
   // URL resolves against chrome-extension://<id> and breaks the task.
   if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
@@ -707,6 +863,7 @@ function createAndWaitTab(url, timeoutMs = 45_000, { active = true } = {}) {
 
     chrome.tabs.create({ url, active }).then((tab) => {
       createdTab = tab;
+      groupScrapeTab(tab.id); // corral into the scraper group the moment it exists
     }).catch((err) => {
       cleanup();
       reject(err);
@@ -863,6 +1020,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       paused = !paused;
       await chrome.storage.local.set({ paused });
       if (paused) {
+        // Abort the current scrape immediately — don't let the open tab finish.
+        abortCurrentScrape('extension_paused');
         ws?.close();
         ws = null;
         setStatus('paused');

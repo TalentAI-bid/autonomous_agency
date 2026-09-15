@@ -23,7 +23,7 @@ const serif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: 'TalentAI Sales — Autonomous Outbound',
+  title: 'KeenPipe Sales — Autonomous Outbound',
   description: 'Autonomous B2B outbound sales on a multi-agent platform.',
 };
 

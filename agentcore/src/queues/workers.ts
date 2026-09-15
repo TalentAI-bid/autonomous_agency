@@ -14,6 +14,7 @@ import { startFollowupSendWorker } from '../workers/followup-send.worker.js';
 import { startFollowupSchedulerWorker, ensureFollowupSchedulerRepeatable } from '../workers/followup-scheduler.worker.js';
 import { startFitScoreWorker } from '../workers/fit-score.worker.js';
 import { startGmapsMenuWorker } from '../workers/gmaps-menu.worker.js';
+import { startGmapsEmailWorker } from '../workers/gmaps-email.worker.js';
 import logger from '../utils/logger.js';
 
 /** Active workers registry */
@@ -215,6 +216,26 @@ export async function scheduleAgentJobs(
   }
 }
 
+/**
+ * Remove the repeatable master-orchestrate job for one agent so the 60s
+ * discovery-refill loop stops firing the moment the agent is stopped/deleted.
+ * `scheduleAgentJobs` (called from /start) re-adds it, so stop→start still works.
+ * Idempotent — a no-op when the job isn't scheduled.
+ */
+export async function removeOrchestrateRepeatable(tenantId: string, agentId: string): Promise<void> {
+  try {
+    const discoveryQueue = getQueue(tenantId, 'discovery');
+    const existing = await discoveryQueue.getRepeatableJobs();
+    const stale = existing.find(j => j.id === `master-orchestrate-${tenantId}-${agentId}`);
+    if (stale) {
+      await discoveryQueue.removeRepeatableByKey(stale.key);
+      logger.info({ tenantId, agentId }, 'Removed master-orchestrate repeatable job (agent stopped/deleted)');
+    }
+  } catch (err) {
+    logger.error({ err, tenantId, agentId }, 'Failed to remove master-orchestrate repeatable job');
+  }
+}
+
 export async function closeAllWorkers(): Promise<void> {
   await Promise.all(activeWorkers.map((w) => w.close()));
   activeWorkers.length = 0;
@@ -342,6 +363,7 @@ if (scriptPath.endsWith('workers.js') || scriptPath.endsWith('workers.ts')) {
         startFollowupSendWorker();
         startFitScoreWorker();
         startGmapsMenuWorker();
+        startGmapsEmailWorker();
         await ensureFollowupSchedulerRepeatable();
       } catch (err) {
         logger.error({ err }, 'Failed to start followup workers (sequence sends will not run)');

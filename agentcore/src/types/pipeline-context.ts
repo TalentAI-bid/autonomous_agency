@@ -64,7 +64,7 @@ export interface SalesStrategy {
   userRole?: 'vendor' | 'buyer';
   targetIndustries?: string[];
   painPointsAddressed?: string[];
-  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid';
+  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search';
   marketAnalysis?: {
     customerPersonas?: Array<{
       title?: string;
@@ -107,7 +107,7 @@ export interface SalesStrategy {
   };
   pipelineSteps?: Array<{
     id: string;
-    tool: 'LINKEDIN_EXTENSION' | 'GMAPS_EXTENSION' | 'CRAWL4AI' | 'LLM_ANALYSIS' | 'REACHER' | 'EMAIL_PATTERN' | 'SCORING';
+    tool: 'LINKEDIN_EXTENSION' | 'GMAPS_EXTENSION' | 'GOOGLE_EXTENSION' | 'CRAWL4AI' | 'LLM_ANALYSIS' | 'REACHER' | 'EMAIL_PATTERN' | 'SCORING';
     action: string;
     dependsOn: string[];
     params?: PipelineStepParams;
@@ -206,6 +206,13 @@ export interface PipelineStepParams {
   // straight to it and skips its own URL construction.
   searchUrl?: string;
 
+  // Mandatory for GOOGLE_EXTENSION search_serp steps (web_search strategy).
+  // The full Google "dork" query the extension types into google.com/search —
+  // e.g. `site:linkedin.com/in "VP Engineering" "fintech" "Tunisia"`. The R1
+  // strategist bakes role/industry/geo directly into the dork string, so unlike
+  // the LinkedIn/GMaps facets there is no separate geographyFilter to merge.
+  dork?: string;
+
   // Legacy / inert (kept on the type for backwards-compat with older saved
   // strategies — the pre-save filter has been removed and these are no
   // longer read by anyone).
@@ -234,7 +241,7 @@ export interface PipelineStepParams {
  * Not enforced by the schema (config is untyped JSONB), but referenced by
  * master-agent.ts, strategist.agent.ts and chat.service.ts at runtime.
  */
-export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid';
+export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search';
 
 export interface MasterAgentConfigFlags {
   /**
@@ -250,4 +257,13 @@ export interface MasterAgentConfigFlags {
    * overwrite it from LLM output.
    */
   userExplicitBdStrategy?: BdStrategy;
+
+  /**
+   * GMaps-enrichment-only agent. Set alongside `verificationList`: each listed
+   * company is enriched purely via Google Maps (search by name → phone/website/
+   * detail → generic-email crawl), with a Google-dork fallback when Maps has no
+   * confident match. The LinkedIn half of list-verification is skipped. No new
+   * bdStrategy — this rides on top of the list-upload flow.
+   */
+  gmapsEnrichOnly?: boolean;
 }

@@ -6,6 +6,7 @@ import { ensureDeal } from './crm-activity.service.js';
 import { logEvent } from './timeline.service.js';
 import { dispatchJob } from './queue.service.js';
 import { enqueueGmapsMenu } from '../queues/gmaps-menu-queues.js';
+import { enqueueGmapsEmail } from '../queues/gmaps-email-queues.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -50,6 +51,14 @@ export interface GmapsBusinessInput {
   aboutHtml?: string | null;
   /** true when this record came from a place-detail (fetch_business) scrape. */
   detailFetched?: boolean;
+  /**
+   * Known company row to enrich IN PLACE. Set on the strict paths (list
+   * verification + the "Enrich via Google Maps" button) where we already have
+   * the exact company this result belongs to. When present it pins the company
+   * update by id (no fuzzy name/domain dedup → never forks a duplicate row),
+   * and the linked gmaps_business contact attaches to this same company.
+   */
+  knownCompanyId?: string;
 }
 
 export interface IngestGmapsResult {
@@ -113,6 +122,10 @@ export async function ingestGmapsBusiness(
   const company = await saveOrUpdateCompanyStatic(
     tenantId,
     {
+      // Pin the update to the known row when the caller gave us one (strict
+      // list / enrich-button paths), so we enrich THAT company in place instead
+      // of fuzzy-matching and possibly forking a duplicate.
+      ...(b.knownCompanyId ? { id: b.knownCompanyId } : {}),
       name,
       domain: website ? extractDomain(website) : undefined,
       rawData: {
@@ -224,6 +237,13 @@ export async function ingestGmapsBusiness(
       } catch (err) {
         logger.debug({ err, contactId }, 'gmaps backfill: enrichment dispatch failed (non-fatal)');
       }
+      // Business contacts have no person name, so the enrichment agent's email
+      // finder never fires — scrape the website for a generic inbox instead.
+      try {
+        await enqueueGmapsEmail({ tenantId, contactId, masterAgentId });
+      } catch (err) {
+        logger.debug({ err, contactId }, 'gmaps backfill: generic-email dispatch failed (non-fatal)');
+      }
     }
   } else {
     const [inserted] = await withTenant(tenantId, async (tx) => {
@@ -243,6 +263,10 @@ export async function ingestGmapsBusiness(
           mapsUrl,
           category: b.category || undefined,
           address: b.address || undefined,
+          // Phone must live in sourceMetadata too — the business-detail card and
+          // the company card read `meta.phone`, while only the list reads the
+          // contacts.phone column. Omitting it here left phone list-only.
+          phone: b.phone || undefined,
           website,
           rating: b.rating ?? null,
           reviewsCount: reviewCount,
@@ -291,6 +315,13 @@ export async function ingestGmapsBusiness(
         });
       } catch (err) {
         logger.debug({ err, contactId }, 'gmaps ingest: enrichment dispatch failed (non-fatal)');
+      }
+      // Business contacts have no person name, so the enrichment agent's email
+      // finder never fires — scrape the website for a generic inbox instead.
+      try {
+        await enqueueGmapsEmail({ tenantId, contactId, masterAgentId });
+      } catch (err) {
+        logger.debug({ err, contactId }, 'gmaps ingest: generic-email dispatch failed (non-fatal)');
       }
     }
   }

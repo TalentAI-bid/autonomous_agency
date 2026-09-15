@@ -4,7 +4,14 @@ export function buildInitialStrategySystemPrompt(forcedBdStrategy?: BdStrategy):
   const lock = forcedBdStrategy
     ? `\n\nUSER-LOCKED STRATEGY: ${forcedBdStrategy}\n` +
       `The user explicitly chose this strategy in chat. You MUST set bdStrategy="${forcedBdStrategy}" in your output. Do not change it under any circumstance.\n` +
-      (forcedBdStrategy === 'industry_target'
+      (forcedBdStrategy === 'web_search'
+        ? `- Discovery is GOOGLE WEB SEARCH ONLY. Emit 3-8 GOOGLE_EXTENSION steps with action "search_serp", dependsOn: []. Each step params: { dork: "<a pointed Google query>", limit: 30, queryRationale: "<one sentence>" }.\n` +
+          `- Build LinkedIn-targeted "dorks" that bake the ICP directly into the query string. COMPANY-FIRST: the MAJORITY of dorks must be site:linkedin.com/company (we want target companies). Add only 1-2 site:linkedin.com/in dorks for named decision-makers — and keep each one TIGHTLY qualified (niche + geography, e.g. "gym" "Owner" "Tunisia"), because every /in result gets its employer reverse-engineered; a loose /in dork (e.g. just "Tunisia") pulls unrelated people and saves junk employers. Use quoted terms for role/industry/tech.\n` +
+          `- MANDATORY: EVERY dork MUST include the mission's geography as a quoted term (Google has no separate location facet — a dork without it returns worldwide junk). Use the user's EXACT country/city verbatim (e.g. "Tunisia"); NEVER substitute a broader region or drop it. Vary specificity: some broad, some tightly qualified. Examples: site:linkedin.com/company "payment infrastructure" "Tunisia" — site:linkedin.com/in "Head of Data" "fintech" "Tunisia" — site:linkedin.com/in "CTO" "series A" "SaaS" "France".\n` +
+          `- STAY IN DOMAIN: quote terms that name what the target actually IS. For a gym mission use "gym"/"fitness"/"salle de sport", never ambiguous words like "coach" (returns life/business coaches). Anchor ambiguous words to the domain.\n` +
+          `- Populate targetIndustries (3-8) and teamRoleKeywords (3-6) — the per-company team scrape still runs after a company is discovered. Leave hiringKeywords [].\n` +
+          `- dataSourceStrategy.needsChromeExtension MUST be true (the Chrome extension performs the Google search in the user's browser session).`
+        : forcedBdStrategy === 'industry_target'
         ? `- Populate targetIndustries with 3-8 entries — industries whose companies typically employ the user's placement target / buy the user's offering.\n` +
           `- Leave hiringKeywords as an empty array [] (the master-agent will not run LinkedIn Jobs scrape for industry_target).\n` +
           `- dataSourceStrategy.needsChromeExtension MUST be true (industry company search runs through the Chrome extension).`
@@ -13,12 +20,14 @@ export function buildInitialStrategySystemPrompt(forcedBdStrategy?: BdStrategy):
           `- Leave targetIndustries as an empty array [] (the master-agent will not run extension company search for hiring_signal).`
         : forcedBdStrategy === 'local_business'
         ? `- Discovery is GOOGLE MAPS ONLY. Emit 3-6 GMAPS_EXTENSION steps with action "search_businesses", dependsOn: []. Each step params: { query: "<niche keywords ONLY — never a city/country name>", location: "<city or region>", limit: 20, queryRationale: "<one sentence>" }. Mix broad niches ("restaurant") with narrow ones ("asian restaurant", "sushi restaurant").\n` +
+          `- STAY IN THE BUSINESS'S DOMAIN: the query must name the actual place-type the user wants. For a gym mission use "gym", "fitness center", "salle de sport", "crossfit box" — NOT ambiguous words like "coach" (pulls life/business coaches) or bare "trainer". Anchor every niche to the domain (e.g. "personal trainer" → "gym personal trainer").\n` +
           `- Do NOT emit LINKEDIN_EXTENSION:search_companies, CRAWL4AI jobs steps, fetch_company_team, or teamRoleKeywords — local businesses have no LinkedIn people pages. Leave hiringKeywords [].\n` +
           `- dataSourceStrategy.needsChromeExtension MUST be true (Google Maps scraping runs through the Chrome extension).`
         : forcedBdStrategy === 'local_hybrid'
-        ? `- Discovery combines GOOGLE MAPS and LINKEDIN. Emit ≥2 GMAPS_EXTENSION:search_businesses steps (params { query, location, limit, queryRationale } — query is the niche ONLY, location is the city/region) AND ≥3 LINKEDIN_EXTENSION:search_companies steps as parallel roots.\n` +
-          `- Keep the LinkedIn enrichment chain (fetch_company_info, fetch_company_team, teamRoleKeywords) for the LinkedIn half only — Maps businesses are enriched automatically.\n` +
-          `- Populate targetIndustries (3-8) for the LinkedIn half. Leave hiringKeywords [].\n` +
+        ? `- Discovery combines GOOGLE MAPS and "LINKEDIN VIA GOOGLE" (Google web search). Emit ≥2 GMAPS_EXTENSION:search_businesses steps (params { query, location, limit, queryRationale } — query is the niche ONLY, location is the city/region) AND ≥3 GOOGLE_EXTENSION:search_serp steps (params { dork, limit, queryRationale }) as parallel roots. Do NOT emit LINKEDIN_EXTENSION:search_companies — direct LinkedIn faceted search can't bound geography for many countries and returns worldwide junk.\n` +
+          `- Each dork bakes the niche + the mission geography inline and quoted; MANDATORY: every dork MUST include the exact country/city (e.g. "Tunisia"). COMPANY-FIRST: most dorks are site:linkedin.com/company; add only 1-2 tightly-qualified site:linkedin.com/in dorks (niche + geography) — a loose /in dork reverse-engineers unrelated people into junk employers.\n` +
+          `- Keep the LinkedIn enrichment chain (fetch_company_info, fetch_company_team, teamRoleKeywords) — LinkedIn pages found via Google are enriched the same way; Maps businesses are enriched automatically.\n` +
+          `- Populate targetIndustries (3-8). Leave hiringKeywords [].\n` +
           `- dataSourceStrategy.needsChromeExtension MUST be true.`
         : `- Populate BOTH targetIndustries (3-8) AND hiringKeywords (3-8) for the hybrid path.\n` +
           `- dataSourceStrategy.needsChromeExtension MUST be true.`) +
@@ -52,7 +61,7 @@ Your output must be valid JSON with these fields:
 - hiringKeywords: string[] — THE JOB ROLES TARGET COMPANIES ARE POSTING (what to search LinkedIn Jobs for). Technical roles companies hire for — NOT decision-maker titles you email. Example: ["blockchain developer", "web3 engineer", "Hedera developer"] for a company selling Hedera consulting. See CRITICAL DISTINCTION below.
 - teamRoleKeywords: string[] — SHORT decision-maker titles used to drive the LinkedIn team-scrape step (\`fetch_company_team\` hits \`linkedin.com/company/<slug>/people/?keywords=<kw>\` once per keyword). 3-6 entries. PREFER 1-WORD KEYWORDS (e.g. "CEO", "CTO", "Founder", "HR", "COO", "Director") — these return the most results on LinkedIn's people filter. Multi-word titles like "Head of Digital Transformation" or "Chief Innovation Officer" return zero results on most company pages. Keep it simple. REQUIRED whenever \`pipelineSteps\` includes LINKEDIN_EXTENSION:fetch_company_team — without it, the team scrape is skipped entirely. Examples: B2B SaaS → ["CEO","CTO","Founder","COO","Director"]; Recruiting → ["HR","Founder","CEO","Director"]; Hedera consulting → ["CTO","Founder","CEO","Director"].
 - targetTech: string[] — technology keywords (languages, frameworks, blockchains) appearing in job posts of qualified companies. Used as secondary filters. Example: ["Hedera", "HBAR", "Solidity", "distributed ledger"]
-- bdStrategy: "hiring_signal" | "industry_target" | "hybrid" | "local_business" | "local_hybrid" — how to discover target companies (see BD STRATEGY DECISION below)
+- bdStrategy: "hiring_signal" | "industry_target" | "hybrid" | "local_business" | "local_hybrid" | "web_search" — how to discover target companies (see BD STRATEGY DECISION below). "web_search" is a user-locked-only choice: use it ONLY when the USER-LOCKED STRATEGY above says so — never pick it on your own.
 - marketAnalysis: { customerPersonas: [{ title, painPoints, buyingTriggers, objections }], competitiveLandscape: string }
 - opportunitySearchQueries: [{ type: string, query: string, rationale: string }] — exact search queries to find targets. Types: linkedin_jobs, indeed_jobs, career_pages
 - companyQualificationCriteria: { sizeRange: { min: number, max: number }, industries: string[], signals: string[], redFlags: string[] }
@@ -71,6 +80,7 @@ Your output must be valid JSON with these fields:
   Available tools:
   - LINKEDIN_EXTENSION: Search companies/people via Chrome extension (UK/IE/unknown regions)
   - GMAPS_EXTENSION: Search local/consumer-facing businesses on Google Maps via Chrome extension (restaurants, salons, shops, clinics — geography is CITY-level)
+  - GOOGLE_EXTENSION: Run a Google WEB search (SERP) via the Chrome extension using a pointed "dork" query, and harvest the result URLs. Used for bdStrategy "web_search" and the LinkedIn-via-Google half of "local_hybrid". action "search_serp", params { dork, limit, queryRationale }. Dorks are LinkedIn-targeted (site:linkedin.com/in and site:linkedin.com/company) with the ICP quoted inline. Geography goes INSIDE the dork string (quoted) and is MANDATORY on every dork.
   - CRAWL4AI: Scrape company websites, public directories, and LinkedIn Jobs (public, no login needed)
   - LLM_ANALYSIS: Deep company/candidate profiling via LLM
   - REACHER: SMTP email verification (first person per company only)
@@ -104,7 +114,11 @@ Your output must be valid JSON with these fields:
       { "id": "g2", "tool": "GMAPS_EXTENSION", "action": "search_businesses", "dependsOn": [], "params": { "query": "asian restaurant", "location": "Riyadh", "limit": 20, "queryRationale": "Mid-specificity — the core target niche." } }
       { "id": "g3", "tool": "GMAPS_EXTENSION", "action": "search_businesses", "dependsOn": [], "params": { "query": "sushi restaurant", "location": "Riyadh", "limit": 20, "queryRationale": "Narrow high-intent slice of the asian-food segment." } }
     NO teamRoleKeywords and NO fetch_company_team for local_business — Google Maps has no people pages. Business details (phone, website) and email enrichment are fanned out automatically after each search.
-  - bdStrategy "local_hybrid" → BOTH ≥2 GMAPS_EXTENSION:search_businesses steps AND ≥3 LINKEDIN_EXTENSION:search_companies steps as parallel roots. Keep the LinkedIn enrichment chain (fetch_company_info / fetch_company_team / teamRoleKeywords) for the LinkedIn half.
+  - bdStrategy "local_hybrid" → BOTH ≥2 GMAPS_EXTENSION:search_businesses steps AND ≥3 GOOGLE_EXTENSION:search_serp steps (LinkedIn via Google) as parallel roots. Do NOT use LINKEDIN_EXTENSION:search_companies — direct LinkedIn faceted search returns worldwide junk for local niches. Every dork MUST quote the mission geography (e.g. "Tunisia"). Keep the LinkedIn enrichment chain (fetch_company_info / fetch_company_team / teamRoleKeywords) for LinkedIn pages found via Google.
+  - bdStrategy "web_search" (user-locked only) → Root steps MUST be 3-8 GOOGLE_EXTENSION steps with action "search_serp". Each params: { dork: "<LinkedIn-targeted Google query with the ICP quoted inline>", limit: 30, queryRationale: "<one sentence>" }. COMPANY-FIRST: most dorks are site:linkedin.com/company (companies); add only 1-2 tightly-qualified site:linkedin.com/in dorks (niche + geography) for decision-makers — each /in result reverse-engineers the person's employer, so a loose /in dork saves junk companies. KEEP teamRoleKeywords (3-6) — once a company is discovered from a SERP result, its team is scraped just like the LinkedIn path. Worked example — mission "sell data-engineering consulting to fintechs in Tunisia":
+      { "id": "s1", "tool": "GOOGLE_EXTENSION", "action": "search_serp", "dependsOn": [], "params": { "dork": "site:linkedin.com/company \"fintech\" \"Tunisia\"", "limit": 30, "queryRationale": "Find fintech companies headquartered in Tunisia via their LinkedIn company pages." } }
+      { "id": "s2", "tool": "GOOGLE_EXTENSION", "action": "search_serp", "dependsOn": [], "params": { "dork": "site:linkedin.com/in \"Head of Data\" \"fintech\" \"Tunisia\"", "limit": 30, "queryRationale": "Target the exact data decision-makers at Tunisian fintechs." } }
+      { "id": "s3", "tool": "GOOGLE_EXTENSION", "action": "search_serp", "dependsOn": [], "params": { "dork": "site:linkedin.com/in \"CTO\" \"payments\" \"Tunis\"", "limit": 30, "queryRationale": "Narrow slice — payments CTOs in the capital." } }
 
   NOTE: Job boards (WTTJ, Free-Work, Indeed, etc.) are NOT available in v1.
   Do NOT generate CRAWL4AI:scrape_job_boards steps.
@@ -442,6 +456,8 @@ REGION LIBRARIES — pick the appropriate one based on the user's mission scope:
     All of EU + MENA + North America combined (18 regions)
 
 If the user's mission explicitly names regions ("EU only", "MENA buyers", "US and Canada"), use the matching library. If the mission spans multiple regions ("EU and MENA"), concatenate the libraries (deduplicated).
+
+NAMED COUNTRY = VERBATIM. If the user names a SPECIFIC country ("gyms in Tunisia", "clinics in Kenya"), use that EXACT country as the geography — do NOT swap in a regional library that omits it (Tunisia is NOT "MENA→UAE/Saudi/…"). The named country must appear verbatim in geographicScope, in every Google dork (quoted), and in every GMaps step's location field. Substituting or dropping the user's country is the single worst discovery bug — it returns the whole world.
 
 CRITICAL: do NOT narrow geography per sub-category. Tempting to think "neobanks are bigger in Germany, target Germany" — that's wrong reasoning. We don't actually know which countries have which sub-categories; LinkedIn does the matching. Let LinkedIn return whatever neobanks exist across the full geography, then sort by fit score.
 

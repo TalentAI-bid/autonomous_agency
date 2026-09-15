@@ -577,7 +577,7 @@ export abstract class BaseAgent {
 
   /**
    * Wrapper called by every BullMQ worker. Enforces the master agent's
-   * daily runtime budget (default 1h/day) and records elapsed wall-clock
+   * daily runtime budget (default 3h/day) and records elapsed wall-clock
    * time against it.
    *
    * If the budget is exhausted, the master agent's status is flipped to
@@ -603,7 +603,7 @@ export abstract class BaseAgent {
             .limit(1);
         });
         if (row) {
-          budgetMs = row.budget ?? 3_600_000;
+          budgetMs = row.budget ?? 10_800_000;
           const exhausted = await isQuotaExhausted(masterAgentId, budgetMs);
           if (exhausted) {
             // Flip status (idempotent) and re-dispatch this job to fire after

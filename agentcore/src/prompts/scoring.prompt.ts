@@ -10,16 +10,16 @@ export interface ScoringResult {
 
 export function buildSystemPrompt(useCase?: string): string {
   if (useCase === 'sales') {
-    return `You are a B2B sales lead qualification specialist. Score prospects based on their potential as a sales target — considering authority, company fit, accessibility, and buying signals.
+    return `You are a B2B sales lead qualification specialist. Score how well this PERSON fits the seller's Ideal Customer Profile (ICP) as a decision-maker to reach out to. Score against the STRUCTURED ICP provided (title patterns, seniority, department/function, geography) — not generic seniority.
 
 Scoring dimensions (all 0-100):
-- authority: title-based decision power. C-suite = 90+, VP = 80, Director = 70, Manager = 55, IC = 30
-- companyFit: industry match, company size, tech stack alignment with the product being sold
+- authority: how closely the person's title + seniority match the ICP's decision-maker targeting (titlePatterns / seniorityLevels). An exact title-pattern match at a targeted seniority = 90+. A decision-maker at the right level but a different exact title = 70-85. A relevant-but-junior IC = 25-40. Someone clearly outside the target function/seniority = 0-25.
+- relevance: how well the person's DEPARTMENT/FUNCTION matches the ICP buyerFunctions / departmentFocus. Exact function match = 90+; adjacent function = 50-70; wrong function = 0-30.
+- companyFit: the fit of the person's COMPANY to the ICP. When a company buyer-fit score is provided, ANCHOR this dimension to it (use it directly, ±10 for person-specific signal). Otherwise infer from industry/size/geography vs the ICP.
 - accessibility: email found = 90, LinkedIn found = 70, company page only = 40
-- relevance: how well the person/company matches the product being sold
 - opportunity_strength: linked buying signals. Active opportunity with buyingIntentScore>=70 = 90+, score 50-69 = 70-89, ICP match only = 50-69, no signal = 40-55
 
-When data is sparse, lean toward a moderate score (45-60) rather than a low one. Only reject with confidence — missing data should not be heavily penalized.
+The overall score is what gates whether we spend money verifying and contacting this lead — so a person who does NOT match the ICP's title/function should score LOW even at a good company. Do not inflate off-ICP contacts. When person-level data is sparse but title/company clearly match the ICP, still score moderate-to-high; only genuinely off-ICP people score low.
 
 Confidence (0-100): how confident you are in the score based on data quality.
 - High data completeness + rich profile data → 80-100 confidence
@@ -96,6 +96,17 @@ export function buildUserPrompt(data: {
     techGapScore?: number;
     outreachAngle?: string;
   };
+  // Structured ICP (sales) — from SalesStrategy. Drives authority/relevance/
+  // companyFit against the strategy, not free-text roles. companyBuyerFitScore
+  // is the parent company's buyer_fit_score (0-100), inherited as companyFit.
+  icp?: {
+    titlePatterns?: string[];
+    seniorityLevels?: string[];
+    departmentFocus?: string[];
+    buyerFunctions?: string[];
+    geographicScope?: string[];
+    companyBuyerFitScore?: number;
+  };
 }): string {
   const yearsExp = data.contact.totalYearsExperience ?? data.contact.experience.reduce((total, exp) => {
     const start = new Date(exp.startDate + '-01');
@@ -151,10 +162,12 @@ LINKED OPPORTUNITY:
 - Technologies: ${data.opportunity.technologies?.join(', ') ?? 'N/A'}
 - Description: ${data.opportunity.description?.slice(0, 200) ?? 'N/A'}` : ''}
 
-TARGET REQUIREMENTS:
-- Target Decision-Maker Roles: ${(data.requirements.targetRoles ?? data.requirements.requiredSkills).join(', ')}
-- Target Industries/Company Attributes: ${(data.requirements.preferredSkills ?? []).join(', ') || 'Not specified'}
-- Target Locations: ${data.requirements.locations.join(', ')}
+IDEAL CUSTOMER PROFILE (score the person against THIS):
+- Target title patterns (decision-makers): ${(data.icp?.titlePatterns ?? data.requirements.targetRoles ?? []).join(', ') || 'Not specified'}
+- Target seniority levels: ${(data.icp?.seniorityLevels ?? []).join(', ') || 'Not specified'}
+- Target functions / departments: ${[...(data.icp?.buyerFunctions ?? []), ...(data.icp?.departmentFocus ?? [])].join(', ') || 'Not specified'}
+- Target geography: ${(data.icp?.geographicScope ?? data.requirements.locations).join(', ') || 'Not specified'}
+- Company buyer-fit score (anchor companyFit to this): ${data.icp?.companyBuyerFitScore != null ? `${data.icp.companyBuyerFitScore}/100` : 'Not scored'}
 - Scoring Weights: ${JSON.stringify(data.requirements.scoringWeights ?? defaultWeights)}
 
 Return JSON:

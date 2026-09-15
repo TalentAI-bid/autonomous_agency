@@ -3,14 +3,14 @@ import { queueRedis } from '../queues/setup.js';
 /**
  * Per-master-agent daily runtime budget tracker.
  *
- * Each master agent has a budget (default 1 hour) of cumulative wall-clock
+ * Each master agent has a budget (default 3 hours) of cumulative wall-clock
  * job-execution time per UTC calendar day. This module records usage in Redis
  * and exposes helpers for the worker layer to gate dispatch when exhausted.
  *
  * Key shape: `master_agent:{id}:runtime:{YYYY-MM-DD}` (TTL 36h)
  */
 
-const DEFAULT_BUDGET_MS = 60 * 60 * 1000; // 1 hour
+const DEFAULT_BUDGET_MS = 3 * 60 * 60 * 1000; // 3 hours
 const KEY_TTL_SECONDS = 36 * 60 * 60; // 36h — survives until the next day rolls over
 
 function todayKey(masterAgentId: string, when: Date = new Date()): string {

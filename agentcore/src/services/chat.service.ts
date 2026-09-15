@@ -175,6 +175,12 @@ function parseQuickReplies(
         { id: 'bd_e', label: 'E — Local + Companies', replyText: 'E', variant: 'secondary' },
       );
     }
+    // Google web-search discovery — offered whenever the message names it.
+    if (lower.includes('google search') || lower.includes('web search') || lower.includes('domain discovery')) {
+      chips.push(
+        { id: 'bd_f', label: 'F — Google Discovery', replyText: 'F', variant: 'secondary' },
+      );
+    }
     return chips;
   }
 
@@ -221,7 +227,7 @@ function looksLikeAutonomyGrant(text: string): boolean {
  * detects either the chip letter ("A" / "B" / "C") or a typed strategy name
  * ("hiring", "industry", "hybrid", "both").
  */
-function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | null {
+function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | null {
   const t = content.trim().toLowerCase();
   if (!t || t.length > 80) return null;
   // Chip A / "Hiring" / "companies that are hiring"
@@ -230,6 +236,10 @@ function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industr
   if (/^b$|^b[.)]\s|^industry(\s+target)?$|^by\s+industry/.test(t)) return 'industry_target';
   // Chip C / "Hybrid" / "both"
   if (/^c$|^c[.)]\s|^hybrid$|^both(\s+strategies)?$/.test(t)) return 'hybrid';
+  // Chip F / "Google Discovery" / "web search" / "domain discovery" — checked
+  // BEFORE the D "google maps" arm. Matches "google search/discovery", "web
+  // search", "domain discovery", "serp" — never plain "google maps".
+  if (/^f$|^f[.)]\s|^google\s+(search|discovery)$|^web\s+search$|^domain\s+discovery$|^serp$/.test(t)) return 'web_search';
   // Chip E / "local hybrid" / "local + companies" — checked BEFORE D so
   // "local hybrid" doesn't fall into D's `^local` arm.
   if (/^e$|^e[.)]\s|^local\s*hybrid$|^local\s*\+\s*compan|^local\s+and\s+compan/.test(t)) return 'local_hybrid';
@@ -379,7 +389,7 @@ export async function sendMessage(
   // A spreadsheet attachment short-circuits the normal LLM proposal flow: we
   // set up (or reuse) a list_verification agent and start it immediately.
   if (spreadsheets.length > 0) {
-    return await runVerificationListFromChat(tenantId, userId, conversationId, conversation, spreadsheets);
+    return await runVerificationListFromChat(tenantId, userId, conversationId, conversation, spreadsheets, detectGmapsOnlyIntent(content));
   }
 
   // Load messages, listeners, accounts, and company context in parallel
@@ -801,7 +811,7 @@ export async function* sendMessageStream(
 
   // Spreadsheet → set up + start a list_verification agent, stream the result.
   if (spreadsheets.length > 0) {
-    const { message } = await runVerificationListFromChat(tenantId, userId, conversationId, conversation, spreadsheets);
+    const { message } = await runVerificationListFromChat(tenantId, userId, conversationId, conversation, spreadsheets, detectGmapsOnlyIntent(content));
     yield `event: done\ndata: ${JSON.stringify({ message, proposalData: null })}\n\n`;
     return;
   }
@@ -1230,7 +1240,7 @@ export async function approveProposal(tenantId: string, conversationId: string, 
   // bdStrategy="hybrid", and both root steps end up in the saved pipeline.
   const stagedExtracted = (conversation.extractedConfig as Record<string, unknown> | null) ?? {};
   const stagedLock = stagedExtracted.userExplicitBdStrategy as
-    | 'hiring_signal' | 'industry_target' | 'hybrid' | undefined;
+    | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | undefined;
 
   // Create master agent
   const [agent] = await withTenant(tenantId, async (tx) => {
@@ -1336,12 +1346,24 @@ export async function approveProposal(tenantId: string, conversationId: string, 
  * and return an assistant message summarising what happened. This is the
  * chat-native path the user expects — no Settings-tab upload needed.
  */
+/**
+ * True when the user asked to enrich the uploaded list purely via Google Maps
+ * (e.g. "enrich this with google maps only", "gmaps enrichment", "no linkedin").
+ * Requires BOTH a maps mention and an only/enrich signal to avoid false hits.
+ */
+function detectGmapsOnlyIntent(text: string | undefined): boolean {
+  const t = (text ?? '').toLowerCase();
+  if (!/\b(google\s*maps|gmaps|g\.?maps|maps)\b/.test(t)) return false;
+  return /\bonly\b|\bjust\b|enrich|enrichment|no\s+linkedin|without\s+linkedin/.test(t);
+}
+
 async function runVerificationListFromChat(
   tenantId: string,
   userId: string | undefined,
   conversationId: string,
   conversation: { masterAgentId?: string | null; extractedConfig?: unknown },
   spreadsheets: Attachment[],
+  gmapsOnly = false,
 ): Promise<{ message: typeof conversationMessages.$inferSelect }> {
   const appendAssistant = async (text: string, type: 'text' | 'file_upload' | 'pipeline_proposal' | 'pipeline_approved' = 'text') => {
     const [{ maxOrder }] = await withTenant(tenantId, async (tx) =>
@@ -1392,9 +1414,13 @@ async function runVerificationListFromChat(
     const [agent] = await withTenant(tenantId, async (tx) =>
       tx.insert(masterAgents).values({
         tenantId,
-        name: `Verification — ${base}`.slice(0, 255),
-        description: 'Strict verification of an uploaded company list',
-        mission: 'Verify and enrich the uploaded list of companies via LinkedIn, Google Maps, and their websites. Do not discover new companies.',
+        name: `${gmapsOnly ? 'GMaps Enrich' : 'Verification'} — ${base}`.slice(0, 255),
+        description: gmapsOnly
+          ? 'Google Maps enrichment of an uploaded company list'
+          : 'Strict verification of an uploaded company list',
+        mission: gmapsOnly
+          ? 'Enrich the uploaded list of companies via Google Maps (phone, website, details) and their websites (generic email), falling back to a Google dork when Maps has no match. Do not use LinkedIn and do not discover new companies.'
+          : 'Verify and enrich the uploaded list of companies via LinkedIn, Google Maps, and their websites. Do not discover new companies.',
         useCase: 'sales',
         config: {},
         createdBy: userId,
@@ -1425,10 +1451,11 @@ async function runVerificationListFromChat(
         // List is data only — agent stays normal; dispatch binds discovery to it.
         verificationList,
         teamRoleKeywords: (existingConfig.teamRoleKeywords as string[] | undefined) ?? DEFAULT_TEAM_ROLE_KEYWORDS,
+        ...(gmapsOnly ? { gmapsEnrichOnly: true } : {}),
       },
-      // Mirror approveProposal: mark running before execute(); the normal
-      // action-plan gate inside execute() will flip it to awaiting_action_plan
-      // if the agent still needs outreach answers.
+      // Mirror approveProposal: mark running before execute(). The action plan
+      // no longer gates the run — execute()'s only gate is the connected
+      // extension, which flips to paused (extension_required) when offline.
       status: 'running',
       updatedAt: new Date(),
     }).where(and(eq(masterAgents.id, masterAgentId!), eq(masterAgents.tenantId, tenantId)));
@@ -1458,13 +1485,21 @@ async function runVerificationListFromChat(
   })();
 
   const gmapsBatches = Math.ceil(verificationList.length / 20);
-  const summary = `Got it — I imported **${verificationList.length} companies** from your file and set up an agent for them. It works like any normal agent, but its target set is fixed to your list (it won't go find new companies). For each company it will:\n\n`
-    + `• find its LinkedIn page and pull company info + team\n`
-    + `• find it on Google Maps and pull the listing details\n`
-    + `• crawl any website link in your file, plus the real site found on LinkedIn\n\n`
-    + `…then score each one and draft outreach, surfacing them in your daily queue like usual. Google Maps runs in batches of 20 (~2h apart); LinkedIn runs in parallel. Results appear under this agent's Companies tab.\n\n`
-    + `If I still need a few outreach details from you (sender, calendar link, etc.), I'll ask in the agent's Action Plan before any messages go out. Note: LinkedIn & Maps lookups run through the connected Chrome extension — make sure it's connected.`
-    + (gmapsBatches > 1 ? `\n\n(${gmapsBatches} Maps batches queued.)` : '');
+  const summary = gmapsOnly
+    ? `Got it — I imported **${verificationList.length} companies** and set up a **Google Maps enrichment** agent. It won't touch LinkedIn and won't find new companies. For each company it will:\n\n`
+      + `• search Google Maps by name and pull the listing (phone, address, category, website, hours)\n`
+      + `• crawl the business website for a generic email (info@ / contact@)\n`
+      + `• if Maps has no match, fall back to a Google dork to find the official site, then enrich that\n\n`
+      + `…then score each one and surface it in your queue. Google Maps runs in batches of 20 (~2h apart). Results appear under this agent's Companies tab.\n\n`
+      + `Note: Maps & website lookups run through the connected Chrome extension — make sure it's connected.`
+      + (gmapsBatches > 1 ? `\n\n(${gmapsBatches} Maps batches queued.)` : '')
+    : `Got it — I imported **${verificationList.length} companies** from your file and set up an agent for them. It works like any normal agent, but its target set is fixed to your list (it won't go find new companies). For each company it will:\n\n`
+      + `• find its LinkedIn page and pull company info + team\n`
+      + `• find it on Google Maps and pull the listing details\n`
+      + `• crawl any website link in your file, plus the real site found on LinkedIn\n\n`
+      + `…then score each one and draft outreach, surfacing them in your daily queue like usual. Google Maps runs in batches of 20 (~2h apart); LinkedIn runs in parallel. Results appear under this agent's Companies tab.\n\n`
+      + `If I still need a few outreach details from you (sender, calendar link, etc.), I'll ask in the agent's Action Plan before any messages go out. Note: LinkedIn & Maps lookups run through the connected Chrome extension — make sure it's connected.`
+      + (gmapsBatches > 1 ? `\n\n(${gmapsBatches} Maps batches queued.)` : '');
 
   return { message: await appendAssistant(summary, 'text') };
 }

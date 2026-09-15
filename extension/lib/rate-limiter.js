@@ -26,6 +26,12 @@ const DEFAULT_LIMITS = {
     search_businesses: { dailyCap: 20, minDelayMs: 2000 },
     fetch_business:    { dailyCap: 200, minDelayMs: 2000 },
   },
+  google: {
+    // Web-search (SERP) discovery. Google CAPTCHAs aggressively on velocity
+    // even in a real browser session, so keep this conservative: ~40 dork
+    // searches/day, 6s apart. Server (EXTENSION_SITE_LIMITS) is authoritative.
+    search_serp: { dailyCap: 40, minDelayMs: 6000 },
+  },
   crunchbase: {
     search_companies: { dailyCap: 10, minDelayMs: 5000 },
     fetch_company:    { dailyCap: 50, minDelayMs: 5000 },

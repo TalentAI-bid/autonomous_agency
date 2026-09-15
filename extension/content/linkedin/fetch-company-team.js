@@ -68,7 +68,12 @@
     // .artdeco-pagination paginator as company search — Next/Previous
     // arrows + numbered Page N buttons + ?page= URL. We extract per
     // page, dedup by profile URL, then advance via goToNextPage().
-    const MAX_PAGES = 3;
+    //
+    // Only ONE page: the server keeps just the top 3 KEY people per company
+    // (ranked by title), and page 1 already renders ~10 employee cards — more
+    // than enough to pick from. Scraping pages 2-3 added two ~8s pagination
+    // round-trips per keyword for candidates we then discard. Cap at 1.
+    const MAX_PAGES = 1;
     const seen = new Set();
     const people = [];
     let pagesScraped = 0;
@@ -77,9 +82,11 @@
     let matchedSelector = null;
 
     for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
-      // Pre-extraction settle + deep scroll so LinkedIn lazy-loads cards.
-      await u.sleep(u.jitter(1500));
-      await u.scrollAndLoad({ scrolls: 4, scrollDelay: 1500, settleDelay: 1500 });
+      // Pre-extraction settle + light scroll so LinkedIn lazy-loads the first
+      // screenful of cards. We only keep the top 3, so a shallow scroll (was 4)
+      // loads plenty without the extra dwell time.
+      await u.sleep(u.jitter(1200));
+      await u.scrollAndLoad({ scrolls: 2, scrollDelay: 1000, settleDelay: 1200 });
 
       const result = extractPagePeople(seen, people);
       pagesScraped = pageNum;

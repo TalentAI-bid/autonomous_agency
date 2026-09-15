@@ -88,10 +88,10 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-brand">
-        <div className="brand-mark">T</div>
+        <div className="brand-mark">K</div>
         <div style={{ minWidth: 0 }}>
           <div className="brand-name">
-            TalentAI <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>Sales</span>
+            KeenPipe
           </div>
         </div>
         <div className="brand-sub">v2.4</div>

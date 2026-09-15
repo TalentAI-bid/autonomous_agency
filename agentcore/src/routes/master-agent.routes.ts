@@ -4,7 +4,8 @@ import { eq, and, desc, count, avg, gt, lt, inArray, isNull, sql, max } from 'dr
 import { withTenant } from '../config/database.js';
 import { masterAgents, agentConfigs, contacts, campaigns, campaignContacts, emailsSent, companies, documents, pipelineErrors, conversations, conversationMessages, emailAccounts, emailQueue, extensionTasks } from '../db/schema/index.js';
 import { env } from '../config/env.js';
-import { registerTenantWorkers, scheduleAgentJobs } from '../queues/workers.js';
+import { registerTenantWorkers, scheduleAgentJobs, removeOrchestrateRepeatable } from '../queues/workers.js';
+import { publishExtensionStop, dispatchGmapsEnrichForCompanies } from '../services/extension-dispatcher.js';
 import { MasterAgent } from '../agents/master-agent.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { parseCompanyListFile, buildVerificationList, DEFAULT_TEAM_ROLE_KEYWORDS } from '../services/verification-list.service.js';
@@ -78,8 +79,12 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
   // one company row per entry (source='user_list') and stores the list on
   // config.verificationList. Running the agent then enriches ONLY these
   // companies (LinkedIn + Maps + Crawl4AI), discovering nothing new.
-  fastify.post<{ Params: { id: string } }>('/:id/verification-list', async (request, reply) => {
+  fastify.post<{ Params: { id: string }; Querystring: { gmapsOnly?: string } }>('/:id/verification-list', async (request, reply) => {
     const { id } = request.params;
+    // ?gmapsOnly=true → enrich each listed company purely via Google Maps
+    // (+ dork fallback), skipping the LinkedIn half. Query param so it rides
+    // alongside the multipart file body.
+    const gmapsOnly = request.query?.gmapsOnly === 'true';
     const [agent] = await withTenant(request.tenantId, async (tx) =>
       tx.select({ id: masterAgents.id, config: masterAgents.config })
         .from(masterAgents)
@@ -121,6 +126,7 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
       // Seed decision-maker titles for the LinkedIn team scrape unless the
       // strategist already produced some.
       teamRoleKeywords: (existingConfig.teamRoleKeywords as string[] | undefined) ?? DEFAULT_TEAM_ROLE_KEYWORDS,
+      ...(gmapsOnly ? { gmapsEnrichOnly: true } : {}),
     };
     await withTenant(request.tenantId, async (tx) => {
       await tx.update(masterAgents)
@@ -132,6 +138,52 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
       data: {
         count: verificationList.length,
         companies: verificationList.map((v) => ({ companyId: v.companyId, name: v.name })),
+      },
+    });
+  });
+
+  // POST /api/master-agents/:id/gmaps-enrich — take this agent's ALREADY-
+  // discovered companies and enrich each purely via Google Maps (search by name
+  // → phone/website/detail → generic-email crawl), with a Google-dork fallback
+  // when Maps has no confident match. Unlike the verification-list upload, this
+  // does NOT change the agent's mode: config is untouched, it just enqueues one
+  // GMaps task per existing company. Batched 20 per ~2h (200/day free-plan
+  // quota); tasks are userInitiated so they dispatch even if the agent is paused.
+  fastify.post<{ Params: { id: string } }>('/:id/gmaps-enrich', async (request, reply) => {
+    const { id } = request.params;
+    const [agent] = await withTenant(request.tenantId, async (tx) =>
+      tx.select({ id: masterAgents.id, config: masterAgents.config })
+        .from(masterAgents)
+        .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
+        .limit(1),
+    );
+    if (!agent) throw new NotFoundError('MasterAgent', id);
+
+    const rows = await withTenant(request.tenantId, async (tx) =>
+      tx.select({ companyId: companies.id, name: companies.name })
+        .from(companies)
+        .where(and(eq(companies.masterAgentId, id), eq(companies.tenantId, request.tenantId))),
+    );
+    if (rows.length === 0) {
+      throw new ValidationError('This agent has no companies yet — discover or upload some first.');
+    }
+
+    const cfg = (agent.config as Record<string, unknown> | null) ?? {};
+    const region = Array.isArray(cfg.locations) && (cfg.locations as string[]).length
+      ? String((cfg.locations as string[])[0] ?? '').trim()
+      : '';
+
+    const enqueued = await dispatchGmapsEnrichForCompanies(request.tenantId, id, rows, {
+      region,
+      userInitiated: true,
+    });
+
+    return reply.status(201).send({
+      data: {
+        companies: rows.length,
+        enqueued,
+        batchSize: 20,
+        note: 'GMaps enrichment queued — dispatched 20 per ~2h to respect the 200/day quota. Keep the extension connected.',
       },
     });
   });
@@ -331,6 +383,10 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
         ));
     });
 
+    // Kill the refill loop + abort any in-flight scrape before the row is gone.
+    await removeOrchestrateRepeatable(request.tenantId, id);
+    await publishExtensionStop(request.tenantId, id);
+
     const result = await withTenant(request.tenantId, async (tx) => {
       return tx.delete(masterAgents)
         .where(and(eq(masterAgents.id, id), eq(masterAgents.tenantId, request.tenantId)))
@@ -404,9 +460,12 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
     const pipelineCtx = (cfg.pipelineContext as PipelineContext | undefined);
     const folded = applyActionPlanAnswers(merged.items, cfg, pipelineCtx);
 
-    const nextStatus = merged.status === 'completed' || merged.status === 'skipped'
-      ? 'idle' // ready to be (re-)started
-      : 'awaiting_action_plan';
+    // The action plan is OPTIONAL context — it must NEVER block or gate the
+    // run (the connected extension is the single execution gate). Persist the
+    // answers but never move the agent into the legacy blocking status. Free
+    // any agent still stuck in awaiting_action_plan to idle; otherwise leave
+    // its current run state (running / paused / idle) untouched.
+    const nextStatus = agent.status === 'awaiting_action_plan' ? 'idle' : agent.status;
 
     const [updated] = await withTenant(request.tenantId, async (tx) => {
       return tx.update(masterAgents)
@@ -615,6 +674,14 @@ export default async function masterAgentRoutes(fastify: FastifyInstance) {
           inArray(extensionTasks.status, ['pending', 'dispatched']),
         ));
     });
+
+    // Stop the 60s discovery-refill loop dead — otherwise orchestrate re-enqueues
+    // discovery every minute and the extension queue fills right back up.
+    await removeOrchestrateRepeatable(request.tenantId, id);
+
+    // Tell the extension to abort the in-flight scrape NOW (close the tab + drop
+    // its backlog) instead of finishing whatever page it's on.
+    await publishExtensionStop(request.tenantId, id);
 
     // Clean up all pipeline + repeatable email jobs for this tenant
     try {

@@ -208,7 +208,20 @@
 
     const feed = await waitForSelector('div[role="feed"], div[aria-label*="Results"]', { timeout: 15000 })
       .catch(() => null);
-    if (!feed) throw new Error('gmaps_no_results_feed');
+    if (!feed) {
+      // A search for a unique business name often makes Maps auto-redirect
+      // straight to the place panel — no results feed ever appears. Don't lose
+      // the lookup: scrape the place detail directly and return it as a single
+      // fully-detailed business (detailFetched=true so the server doesn't queue
+      // a redundant fetch_business). This is the common name-enrichment path.
+      if (isMapsPlacePage() || document.querySelector('h1.DUwDvf')) {
+        const place = await scrapePlace({ mapsUrl: location.href });
+        if (place && place.name) {
+          return { businesses: [{ ...place, location: locationCtx, detailFetched: true }] };
+        }
+      }
+      throw new Error('gmaps_no_results_feed');
+    }
 
     // Scroll until we've loaded >= max results or the feed stops growing.
     let stableIterations = 0;
@@ -257,7 +270,7 @@
       || extractText(document, '.DkEaL')
       || '';
     const address = findByDataItemId('address');
-    const phone = findByDataItemId('phone:tel:') || null;
+    const phone = findByDataItemId('phone:tel:') || extractTelHref() || null;
     const website = findByDataItemId('authority') || null; // Google tags website rows as "authority"
     const hours = await extractHours();
     const plusCode = findByDataItemId('oloc') || '';
@@ -501,6 +514,14 @@
     const src = url || location.href;
     const m = src.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || src.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
     return m ? { lat: parseFloat(m[1]), lng: parseFloat(m[2]) } : null;
+  }
+
+  // Fallback phone read: some place layouts tag the number only as a tel: link
+  // rather than a data-item-id="phone:tel:" row. Locale-independent (href only).
+  function extractTelHref() {
+    const a = document.querySelector('a[href^="tel:"]');
+    if (!a) return '';
+    return decodeURIComponent((a.getAttribute('href') || '').replace(/^tel:/i, '')).trim();
   }
 
   function findByDataItemId(prefix) {

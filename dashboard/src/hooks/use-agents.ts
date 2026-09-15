@@ -77,6 +77,19 @@ export function useStopAgent() {
   });
 }
 
+export function useGmapsEnrichAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiPost<{ companies: number; enqueued: number; batchSize: number; note: string }>(
+        `/master-agents/${id}/gmaps-enrich`,
+      ),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['agents', id] });
+    },
+  });
+}
+
 export function useDeleteAgent() {
   const qc = useQueryClient();
   return useMutation({

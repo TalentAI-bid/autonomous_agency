@@ -533,7 +533,7 @@ export class MasterAgent extends BaseAgent {
               // LLM-derived value. Once the user picks "industry" / "hiring" /
               // "hybrid" in chat, that pick is the single source of truth.
               const userExplicit = (agentConfig as Record<string, unknown>).userExplicitBdStrategy as
-                | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | undefined;
+                | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | 'people_search' | undefined;
               const bdStrategy = userExplicit ?? strategy.bdStrategy ?? 'hybrid';
               if (userExplicit) {
                 logger.info({ masterAgentId, userExplicit, strategistBdStrategy: strategy.bdStrategy }, 'Dispatch: using user-explicit bdStrategy');
@@ -583,7 +583,7 @@ export class MasterAgent extends BaseAgent {
                       // web_search owns Google-SERP discovery; every other lock
                       // strips stray GOOGLE_EXTENSION steps so a stale strategy
                       // can't fire them under the wrong strategy.
-                      if (userExplicit === 'web_search') {
+                      if (userExplicit === 'web_search' || userExplicit === 'people_search') {
                         return isJobsRoot || isLiSearchRoot || isGmapsStep;
                       }
                       if (userExplicit === 'industry_target') {

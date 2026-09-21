@@ -64,7 +64,7 @@ export interface SalesStrategy {
   userRole?: 'vendor' | 'buyer';
   targetIndustries?: string[];
   painPointsAddressed?: string[];
-  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search';
+  bdStrategy?: 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | 'people_search';
   marketAnalysis?: {
     customerPersonas?: Array<{
       title?: string;
@@ -241,7 +241,7 @@ export interface PipelineStepParams {
  * Not enforced by the schema (config is untyped JSONB), but referenced by
  * master-agent.ts, strategist.agent.ts and chat.service.ts at runtime.
  */
-export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search';
+export type BdStrategy = 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | 'people_search';
 
 export interface MasterAgentConfigFlags {
   /**

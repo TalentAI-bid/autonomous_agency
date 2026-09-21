@@ -1,4 +1,4 @@
-import { eq, and, asc, desc, gt, isNull, lte, or, exists, inArray, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, gt, isNull, lte, or, exists, inArray, notInArray, sql } from 'drizzle-orm';
 import { db, withTenant } from '../config/database.js';
 import { companies, contacts, extensionSessions, extensionTasks, masterAgents } from '../db/schema/index.js';
 import { userTenants } from '../db/schema/user-tenants.js';
@@ -519,6 +519,11 @@ export async function enqueueCompanyEnrichmentFanout(
       const strategyKw = pickFrom(strategyRaw);
       const legacyKw = pickFrom(legacyRaw);
       teamKeywords = strategyKw.length > 0 ? strategyKw : legacyKw;
+      // people_search (chip G) is person-first: attach each discovered person's
+      // OWN employer, but never scrape that company's other staff. Hard-skip the
+      // team fetch regardless of any teamRoleKeywords present on the config.
+      const bd = (cfg?.bdStrategy ?? cfg?.userExplicitBdStrategy) as string | undefined;
+      if (bd === 'people_search') teamKeywords = [];
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), masterAgentId },
@@ -903,15 +908,35 @@ export async function publishExtensionStop(tenantId: string, masterAgentId?: str
   }
 }
 
+// A pending task is only worth SELECTING for dispatch if its owning agent can
+// actually run it. tryDispatch already skips paused / paused_quota agents, but
+// those tasks must also be kept OUT of the (createdAt-ordered, LIMIT-N) select
+// window: otherwise a big stale backlog from paused agents fills every window,
+// tryDispatch skips all of them, nothing dispatches, and freshly-created agents
+// starve — the whole extension queue stalls. Keep a task when: it has no agent
+// (or the agent was deleted — tryDispatch will then cancel it), its agent is not
+// paused, or it is an explicit user-initiated one-off (dashboard button) that
+// must run even while the agent is paused. Requires a leftJoin(masterAgents).
+// Nothing is deleted — a paused_quota agent's tasks re-enter the window the
+// moment it auto-resumes (status flips off paused_quota).
+const dispatchableTaskGate = () =>
+  or(
+    isNull(masterAgents.id),
+    notInArray(masterAgents.status, ['paused', 'paused_quota']),
+    sql`${extensionTasks.params}->>'userInitiated' = 'true'`,
+  );
+
 export async function drainPending(tenantId: string, sessionId: string): Promise<number> {
   const pending = await withTenant(tenantId, async (tx) => {
     return tx
       .select({ id: extensionTasks.id })
       .from(extensionTasks)
+      .leftJoin(masterAgents, eq(masterAgents.id, extensionTasks.masterAgentId))
       .where(and(
         eq(extensionTasks.tenantId, tenantId),
         eq(extensionTasks.status, 'pending'),
         lte(extensionTasks.dispatchAfter, new Date()),
+        dispatchableTaskGate(),
       ))
       .orderBy(desc(extensionTasks.priority), asc(extensionTasks.createdAt))
       .limit(50);
@@ -946,11 +971,13 @@ export async function drainPendingForUser(userId: string, sessionId: string): Pr
     .select({ id: extensionTasks.id, tenantId: extensionTasks.tenantId })
     .from(extensionTasks)
     .innerJoin(userTenants, eq(userTenants.tenantId, extensionTasks.tenantId))
+    .leftJoin(masterAgents, eq(masterAgents.id, extensionTasks.masterAgentId))
     .where(and(
       eq(userTenants.userId, userId),
       inArray(userTenants.role, ['owner', 'admin', 'member']),
       eq(extensionTasks.status, 'pending'),
       lte(extensionTasks.dispatchAfter, new Date()),
+      dispatchableTaskGate(),
     ))
     .orderBy(desc(extensionTasks.priority), asc(extensionTasks.createdAt))
     .limit(50);
@@ -984,9 +1011,11 @@ export async function runScheduledDispatchSweep(): Promise<number> {
   const eligible = await db
     .select({ id: extensionTasks.id, tenantId: extensionTasks.tenantId })
     .from(extensionTasks)
+    .leftJoin(masterAgents, eq(masterAgents.id, extensionTasks.masterAgentId))
     .where(and(
       eq(extensionTasks.status, 'pending'),
       lte(extensionTasks.dispatchAfter, new Date()),
+      dispatchableTaskGate(),
     ))
     .orderBy(desc(extensionTasks.priority), asc(extensionTasks.createdAt))
     .limit(200);

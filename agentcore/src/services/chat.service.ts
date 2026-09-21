@@ -227,7 +227,7 @@ function looksLikeAutonomyGrant(text: string): boolean {
  * detects either the chip letter ("A" / "B" / "C") or a typed strategy name
  * ("hiring", "industry", "hybrid", "both").
  */
-function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | null {
+function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | 'people_search' | null {
   const t = content.trim().toLowerCase();
   if (!t || t.length > 80) return null;
   // Chip A / "Hiring" / "companies that are hiring"
@@ -240,6 +240,11 @@ function parseExplicitStrategyReply(content: string): 'hiring_signal' | 'industr
   // BEFORE the D "google maps" arm. Matches "google search/discovery", "web
   // search", "domain discovery", "serp" — never plain "google maps".
   if (/^f$|^f[.)]\s|^google\s+(search|discovery)$|^web\s+search$|^domain\s+discovery$|^serp$/.test(t)) return 'web_search';
+  // Chip G / "people discovery" / "person search" — person-first Google discovery
+  // (site:linkedin.com/in dorks): find PEOPLE by role+region, save person + their
+  // company, no team-fetch. Checked after F; matches "g", "people search",
+  // "person discovery", "find people".
+  if (/^g$|^g[.)]\s|^people\s+(search|discovery)$|^person\s+(search|discovery)$|^find\s+people$/.test(t)) return 'people_search';
   // Chip E / "local hybrid" / "local + companies" — checked BEFORE D so
   // "local hybrid" doesn't fall into D's `^local` arm.
   if (/^e$|^e[.)]\s|^local\s*hybrid$|^local\s*\+\s*compan|^local\s+and\s+compan/.test(t)) return 'local_hybrid';
@@ -1240,7 +1245,7 @@ export async function approveProposal(tenantId: string, conversationId: string, 
   // bdStrategy="hybrid", and both root steps end up in the saved pipeline.
   const stagedExtracted = (conversation.extractedConfig as Record<string, unknown> | null) ?? {};
   const stagedLock = stagedExtracted.userExplicitBdStrategy as
-    | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | undefined;
+    | 'hiring_signal' | 'industry_target' | 'hybrid' | 'local_business' | 'local_hybrid' | 'web_search' | 'people_search' | undefined;
 
   // Create master agent
   const [agent] = await withTenant(tenantId, async (tx) => {

@@ -244,14 +244,15 @@ export function validateStrategistOutput(strategy: SalesStrategy): { valid: bool
     if (liSearchSteps.length < 3) {
       errors.push(`too_few_search_steps (have ${liSearchSteps.length}, need ≥3)`);
     }
-  } else if (bd === 'web_search') {
+  } else if (bd === 'web_search' || bd === 'people_search') {
     // Google-SERP discovery: dork variety beats volume (the google search cap
     // is ~40/day, and each dork returns many result URLs), so 3-8 pointed
     // dorks is the right shape. Discovery is Google-only — no LinkedIn/GMaps
-    // search or jobs root steps.
+    // search or jobs root steps. people_search is the person-first variant
+    // (site:linkedin.com/in dorks only, no team-fetch) — same step shape.
     if (serpSearchSteps.length < 3) {
       errors.push(
-        `too_few_serp_search_steps (have ${serpSearchSteps.length}, need ≥3 GOOGLE_EXTENSION:search_serp root steps for bdStrategy='web_search')`,
+        `too_few_serp_search_steps (have ${serpSearchSteps.length}, need ≥3 GOOGLE_EXTENSION:search_serp root steps for bdStrategy='${bd}')`,
       );
     }
   } else {
@@ -610,6 +611,7 @@ export class StrategistAgent extends BaseAgent {
       if (
         explicit === 'hiring_signal' || explicit === 'industry_target' || explicit === 'hybrid'
         || explicit === 'local_business' || explicit === 'local_hybrid' || explicit === 'web_search'
+        || explicit === 'people_search'
       ) {
         userExplicitBdStrategy = explicit;
         logger.info({ masterAgentId, userExplicitBdStrategy }, 'Strategist: user-locked bdStrategy detected');
@@ -741,7 +743,7 @@ export class StrategistAgent extends BaseAgent {
       if (
         userExplicitBdStrategy === 'industry_target' || userExplicitBdStrategy === 'hybrid'
         || userExplicitBdStrategy === 'local_business' || userExplicitBdStrategy === 'local_hybrid'
-        || userExplicitBdStrategy === 'web_search'
+        || userExplicitBdStrategy === 'web_search' || userExplicitBdStrategy === 'people_search'
       ) {
         strategy.dataSourceStrategy = {
           ...(strategy.dataSourceStrategy ?? { primaryRegion: '', availableSources: [], expectedQuality: 'medium', userNotes: '' }),
@@ -1201,6 +1203,9 @@ export class StrategistAgent extends BaseAgent {
     if (bdStrategy === 'web_search') {
       return this.buildSerpDorkSteps(mission, geography, exclude);
     }
+    if (bdStrategy === 'people_search') {
+      return this.buildSerpDorkSteps(mission, geography, exclude, true /* personOnly */);
+    }
     if (bdStrategy === 'hiring_signal' || bdStrategy === 'hybrid') {
       steps.push({
         id: 'discover_jobs',
@@ -1250,7 +1255,7 @@ export class StrategistAgent extends BaseAgent {
    * last-resort fallback so validation passes and the run does something.
    * Geography is force-injected later by enforceGeographyInDiscoverySteps.
    */
-  private buildSerpDorkSteps(mission?: string, geography?: string[], exclude?: string[]): NonNullable<SalesStrategy['pipelineSteps']> {
+  private buildSerpDorkSteps(mission?: string, geography?: string[], exclude?: string[], personOnly = false): NonNullable<SalesStrategy['pipelineSteps']> {
     // Geography terms are injected as a separate quoted suffix — they must NOT
     // also leak into the niche keywords (else "Tunisia" becomes a keyword and
     // the dork double-quotes the country). Seller-side words (vendor name /
@@ -1274,11 +1279,19 @@ export class StrategistAgent extends BaseAgent {
     // /company dorks dominate, and a single /in dork feeds the contact→employer
     // reverse-engineer path (handleSerpComplete). Every dork carries the region
     // inline so results never wander worldwide.
-    const dorks = [
-      `site:linkedin.com/company "${primary}"${secondary ? ` "${secondary}"` : ''}${geoSuffix}`,
-      `site:linkedin.com/company "${primary}"${geoSuffix}`,
-      `site:linkedin.com/in "${primary}"${geoSuffix}`,
-    ];
+    // people_search is PERSON-first: only site:linkedin.com/in dorks, so every
+    // result is a person profile (→ reverse-engineer employer, no team scrape).
+    const dorks = personOnly
+      ? [
+          `site:linkedin.com/in "${primary}"${secondary ? ` "${secondary}"` : ''}${geoSuffix}`,
+          `site:linkedin.com/in "${primary}"${geoSuffix}`,
+          `site:linkedin.com/in "${primary}" "${secondary || primary}"${geoSuffix}`,
+        ]
+      : [
+          `site:linkedin.com/company "${primary}"${secondary ? ` "${secondary}"` : ''}${geoSuffix}`,
+          `site:linkedin.com/company "${primary}"${geoSuffix}`,
+          `site:linkedin.com/in "${primary}"${geoSuffix}`,
+        ];
     return dorks.map((dork, i) => ({
       id: `serp_${i + 1}`,
       tool: 'GOOGLE_EXTENSION' as const,
@@ -1308,8 +1321,8 @@ export class StrategistAgent extends BaseAgent {
       const isLiSearchRoot = s.tool === 'LINKEDIN_EXTENSION' && s.action === 'search_companies';
       const isGmapsStep = s.tool === 'GMAPS_EXTENSION';
       const isGoogleStep = s.tool === 'GOOGLE_EXTENSION';
-      if (bdStrategy === 'web_search') {
-        // Google-SERP-only discovery.
+      if (bdStrategy === 'web_search' || bdStrategy === 'people_search') {
+        // Google-SERP-only discovery (people_search = person-first variant).
         return isJobsRoot || isLiSearchRoot || isGmapsStep;
       }
       if (bdStrategy === 'industry_target') {
@@ -1377,7 +1390,7 @@ export class StrategistAgent extends BaseAgent {
     if (bdStrategy === 'hybrid') return hasExt && hasJobs && !hasGmaps && !hasSerp;
     if (bdStrategy === 'local_business') return hasGmaps && !hasExt && !hasJobs && !hasSerp;
     if (bdStrategy === 'local_hybrid') return hasGmaps && hasSerp && !hasExt && !hasJobs;
-    if (bdStrategy === 'web_search') return hasSerp && !hasExt && !hasJobs && !hasGmaps;
+    if (bdStrategy === 'web_search' || bdStrategy === 'people_search') return hasSerp && !hasExt && !hasJobs && !hasGmaps;
     return true;
   }
 }

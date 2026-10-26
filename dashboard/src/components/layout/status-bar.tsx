@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRealtimeStore } from '@/stores/realtime.store';
 
+import { cn } from '@/lib/utils';
 function pad(n: number) {
   return String(n).padStart(2, '0');
 }
@@ -27,19 +28,16 @@ export function StatusBar() {
 
   return (
     <div className="status-bar">
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span className="inline-flex items-center gap-1.5">
         <span
-          className="dot"
-          style={{
-            background: connected ? 'oklch(0.78 0.15 145)' : 'var(--ink-4)',
-          }}
+          className={cn('dot', connected ? '!bg-up' : '!bg-ink-4')}
         />
         <span>{connected ? 'WS connected' : 'WS disconnected'}</span>
       </span>
       <span>evt/sec {evtPerSec}</span>
       <span>events 60s: {events.length}</span>
       <span>llm tokens — / — today</span>
-      <span style={{ marginLeft: 'auto' }}>{ts}</span>
+      <span className="ml-auto">{ts}</span>
     </div>
   );
 }

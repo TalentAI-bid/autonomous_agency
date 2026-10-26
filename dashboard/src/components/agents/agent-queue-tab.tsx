@@ -9,9 +9,9 @@ interface AgentQueueTabProps {
 
 export function AgentQueueTab({ agentId, agentName }: AgentQueueTabProps) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-        Daily queue for <strong style={{ color: 'var(--ink)' }}>{agentName ?? 'this agent'}</strong>.
+    <div className="flex flex-col gap-3">
+      <div className="text-[13px] text-ink-3">
+        Daily queue for <strong className="text-ink">{agentName ?? 'this agent'}</strong>.
         Only actions for companies this agent owns are shown.
       </div>
       <QueueView masterAgentId={agentId} />

@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import type { CSSProperties } from 'react';
 import {
   Rocket,
   Check,
@@ -19,6 +18,7 @@ import { useSetupStatus, type SetupSteps } from '@/hooks/use-setup-status';
 import { useDashboardAnalytics } from '@/hooks/use-analytics';
 
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 /* ── Top-strip stat card ──────────────────────────────────────────────── */
 function StatCard({
   icon,
@@ -30,26 +30,11 @@ function StatCard({
   value: string | number;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '10px 14px',
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--line)',
-        borderRadius: 'var(--radius)',
-        minWidth: 150,
-      }}
-    >
-      <span style={{ color: 'var(--ink-3)', display: 'grid', placeItems: 'center' }}>{icon}</span>
-      <div style={{ minWidth: 0 }}>
-        <div className="caps-sm" style={{ color: 'var(--ink-3)' }}>
-          {label}
-        </div>
-        <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.1 }}>
-          {value}
-        </div>
+    <div className="flex min-w-[150px] items-center gap-2.5 rounded-lg border border-line bg-bg-panel px-3.5 py-2.5">
+      <span className="grid place-items-center text-ink-3">{icon}</span>
+      <div className="min-w-0">
+        <div className="caps-sm text-ink-3">{label}</div>
+        <div className="mono text-base font-semibold leading-[1.1] text-ink">{value}</div>
       </div>
     </div>
   );
@@ -57,6 +42,15 @@ function StatCard({
 
 /* ── Get-set-up checklist row ─────────────────────────────────────────── */
 type RowKind = 'done' | 'active' | 'warn' | 'locked';
+
+const CIRCLE: Record<RowKind, string> = {
+  done: 'border-accent bg-accent text-white',
+  active: 'border-line-strong bg-bg-panel text-ink-2',
+  warn: 'border-warn/40 bg-warn-weak text-warn',
+  locked: 'border-line bg-bg-soft text-ink-4',
+};
+
+const SUB_TONE = { up: 'text-accent-fg', warn: 'text-warn', muted: 'text-ink-3' } as const;
 
 function ChecklistRow({
   index,
@@ -73,61 +67,27 @@ function ChecklistRow({
   icon: React.ReactNode;
   action?: React.ReactNode;
 }) {
-  const circle: Record<RowKind, CSSProperties> = {
-    done: { background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)' },
-    active: { background: 'var(--bg-panel)', color: 'var(--ink-2)', border: '1px solid var(--line-strong)' },
-    warn: {
-      background: 'var(--warn-weak)',
-      color: 'var(--warn)',
-      border: '1px solid color-mix(in oklch, var(--warn) 40%, transparent)',
-    },
-    locked: { background: 'var(--bg-soft)', color: 'var(--ink-4)', border: '1px solid var(--line)' },
-  };
-  const subColor =
-    sub?.tone === 'up' ? 'var(--accent-fg)' : sub?.tone === 'warn' ? 'var(--warn)' : 'var(--ink-3)';
-
   return (
     <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '14px 16px',
-        borderTop: index === 0 ? 'none' : '1px solid var(--line)',
-        background: kind === 'warn' ? 'color-mix(in oklch, var(--warn) 5%, transparent)' : 'transparent',
-      }}
+      className={cn(
+        'flex items-center gap-3 px-4 py-3.5',
+        index !== 0 && 'border-t border-line',
+        kind === 'warn' && 'bg-warn/5',
+      )}
     >
       <span
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 999,
-          display: 'grid',
-          placeItems: 'center',
-          flexShrink: 0,
-          fontSize: 12,
-          fontWeight: 600,
-          fontFamily: 'var(--ff-mono)',
-          ...circle[kind],
-        }}
+        className={cn(
+          'grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full border font-mono text-xs font-semibold',
+          CIRCLE[kind],
+        )}
       >
         {kind === 'done' ? <Check size={14} strokeWidth={3} /> : kind === 'locked' ? <Lock size={13} /> : index + 1}
       </span>
-      <span style={{ color: kind === 'locked' ? 'var(--ink-4)' : 'var(--ink-3)', display: 'grid', placeItems: 'center' }}>
-        {icon}
-      </span>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div
-          style={{
-            fontSize: 13.5,
-            fontWeight: 500,
-            color: kind === 'locked' ? 'var(--ink-3)' : 'var(--ink)',
-          }}
-        >
+      <span className={cn('grid place-items-center', kind === 'locked' ? 'text-ink-4' : 'text-ink-3')}>{icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className={cn('text-[13.5px] font-medium', kind === 'locked' ? 'text-ink-3' : 'text-ink')}>
           {title}
-          {sub && (
-            <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: subColor }}>— {sub.text}</span>
-          )}
+          {sub && <span className={cn('ml-2 text-xs font-medium', SUB_TONE[sub.tone])}>— {sub.text}</span>}
         </div>
       </div>
       {action}
@@ -141,20 +101,12 @@ const FUNNEL_STAGES = ['Discovered', 'Enriched', 'Scored', 'Contacted', 'Replied
 function FunnelCell({ label, last }: { label: string; last: boolean }) {
   return (
     <>
-      <div style={{ textAlign: 'center', minWidth: 0 }}>
-        <div className="caps-sm" style={{ color: 'var(--ink-3)', marginBottom: 6 }}>
-          {label}
-        </div>
-        <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: 'var(--ink-2)', lineHeight: 1 }}>
-          0
-        </div>
-        <div className="mono" style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4 }}>
-          0%
-        </div>
+      <div className="min-w-0 text-center">
+        <div className="caps-sm mb-1.5 text-ink-3">{label}</div>
+        <div className="mono text-[22px] font-semibold leading-none text-ink-2">0</div>
+        <div className="mono mt-1 text-[11px] text-ink-4">0%</div>
       </div>
-      {!last && (
-        <ChevronRight size={16} style={{ color: 'var(--ink-5)', flexShrink: 0, alignSelf: 'start', marginTop: 22 }} />
-      )}
+      {!last && <ChevronRight size={16} className="mt-[22px] shrink-0 self-start text-ink-5"/>}
     </>
   );
 }
@@ -188,32 +140,22 @@ export function OnboardingView() {
   };
 
   return (
-    <div className="page" style={{ padding: '20px 24px', maxWidth: 1120, margin: '0 auto' }}>
+    <div className="page mx-auto max-w-[1120px] !px-6 !py-5">
       {/* Top strip: status pill · stat cards · deploy CTA */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 28 }}>
-        <span
-          className="pill"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            background: 'var(--warn-weak)',
-            color: 'var(--warn)',
-            borderColor: 'color-mix(in oklch, var(--warn) 30%, transparent)',
-          }}
-        >
+      <div className="mb-7 flex flex-wrap items-center gap-3">
+        <span className="pill !inline-flex items-center !gap-[7px] !border-warn/30 !bg-warn-weak !text-warn">
           <Sparkles size={12} />
           Setup in progress
         </span>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div className="flex flex-wrap gap-2.5">
           <StatCard icon={<Users size={16} />} label="Active agents" value={runningAgents} />
           <StatCard icon={<Sparkles size={16} />} label="Leads" value={dash(leads)} />
           <StatCard icon={<MessageSquare size={16} />} label="Reply rate" value={replyRate} />
           <StatCard icon={<CalendarCheck size={16} />} label="Meetings" value={dash(meetings)} />
         </div>
 
-        <div style={{ marginLeft: 'auto' }}>
+        <div className="ml-auto">
           {canDeploy ? (
             <Button asChild variant="brand" size="dense"><Link href="/agents/new">
               <Rocket size={14} /> Deploy agent
@@ -227,43 +169,26 @@ export function OnboardingView() {
       </div>
 
       {/* Hero */}
-      <h1
-        className="display"
-        style={{ fontSize: 34, fontWeight: 400, letterSpacing: '-0.02em', margin: '0 0 24px' }}
-      >
+      <h1 className="display mb-6 mt-0 !text-[34px] !font-normal !tracking-[-0.02em]">
         Let&apos;s get your first agent live
       </h1>
 
       {/* Get set up */}
-      <div className="panel" style={{ marginBottom: 20 }}>
-        <div style={{ padding: '16px 16px 14px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 12 }}>
-            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>Get set up</h2>
-            <span className="mono" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)' }}>
-              {completedCount} of 4 complete
-            </span>
+      <div className="panel mb-5">
+        <div className="px-4 pb-3.5 pt-4">
+          <div className="mb-3 flex items-baseline">
+            <h2 className="m-0 text-[15px] font-semibold text-ink">Get set up</h2>
+            <span className="mono ml-auto text-xs text-ink-3">{completedCount} of 4 complete</span>
           </div>
-          <div
-            style={{
-              height: 6,
-              borderRadius: 999,
-              background: 'var(--bg-soft)',
-              border: '1px solid var(--line)',
-              overflow: 'hidden',
-            }}
-          >
+          <div className="h-1.5 overflow-hidden rounded-full border border-line bg-bg-soft">
             <div
-              style={{
-                height: '100%',
-                width: `${progressPct}%`,
-                background: 'var(--accent)',
-                transition: 'width 300ms ease',
-              }}
+              className="h-full bg-accent transition-[width] duration-300 ease-in-out"
+              style={{ width: `${progressPct}%` }}
             />
           </div>
         </div>
 
-        <div style={{ borderTop: '1px solid var(--line)' }}>
+        <div className="border-t border-line">
           <ChecklistRow
             index={0}
             title="Company profile"
@@ -304,7 +229,7 @@ export function OnboardingView() {
             }
             action={
               steps.extension ? undefined : (
-                <Button asChild variant="panel" size="xs"><Link href="/linkedin-extension" style={{ paddingRight: 6 }} aria-label="Install the LinkedIn extension">
+                <Button asChild variant="panel" size="xs"><Link href="/linkedin-extension" className="pr-1.5" aria-label="Install the LinkedIn extension">
                   Install <ChevronRight size={14} />
                 </Link></Button>
               )
@@ -321,7 +246,7 @@ export function OnboardingView() {
                   Deploy
                 </Link></Button>
               ) : (
-                <span style={{ color: 'var(--ink-4)', display: 'grid', placeItems: 'center' }}>
+                <span className="grid place-items-center text-ink-4">
                   <Lock size={14} />
                 </span>
               )
@@ -335,25 +260,16 @@ export function OnboardingView() {
         <div className="panel-head">
           <h3>Pipeline funnel</h3>
         </div>
-        <div style={{ padding: '20px 22px 6px' }}>
-          <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: 8 }}>
+        <div className="px-[22px] pb-1.5 pt-5">
+          <div className="flex items-start justify-between gap-2">
             {FUNNEL_STAGES.map((s, i) => (
               <FunnelCell key={s} label={s} last={i === FUNNEL_STAGES.length - 1} />
             ))}
           </div>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 6,
-            padding: '18px 0 28px',
-            color: 'var(--ink-4)',
-          }}
-        >
-          <Filter size={26} strokeWidth={1.5} style={{ opacity: 0.5 }} />
-          <span style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Your funnel fills as agents run</span>
+        <div className="flex flex-col items-center gap-1.5 pb-7 pt-[18px] text-ink-4">
+          <Filter size={26} strokeWidth={1.5} className="opacity-50"/>
+          <span className="text-[12.5px] text-ink-3">Your funnel fills as agents run</span>
         </div>
       </div>
     </div>

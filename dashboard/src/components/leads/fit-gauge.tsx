@@ -31,7 +31,7 @@ export function FitGauge({
   const discovering = score == null;
 
   return (
-    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }} aria-hidden>
         <circle
           cx={size / 2}
@@ -58,23 +58,15 @@ export function FitGauge({
         )}
       </svg>
       <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          lineHeight: 1,
-        }}
+        className="absolute flex flex-col items-center justify-center leading-[1]" style={{ inset: 0 }}
       >
         <span
-          className="mono"
-          style={{ fontSize: size * 0.3, fontWeight: 600, color: discovering ? 'var(--ink-4)' : 'var(--ink)' }}
+          className="mono !font-semibold"
+          style={{ fontSize: size * 0.3, color: discovering ? 'var(--ink-4)' : 'var(--ink)' }}
         >
           {discovering ? '—' : Math.round(score!)}
         </span>
-        <span className="mono" style={{ fontSize: size * 0.15, color: 'var(--ink-4)', marginTop: 1 }}>
+        <span className="mono !text-ink-4 !mt-px" style={{ fontSize: size * 0.15 }}>
           /100
         </span>
       </div>

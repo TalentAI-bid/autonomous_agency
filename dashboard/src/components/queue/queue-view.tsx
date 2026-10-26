@@ -74,19 +74,9 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
 
   const refreshBanner = refreshInFlight ? (
     <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '10px 12px',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        background: 'var(--bg-panel)',
-        fontSize: 13,
-        color: 'var(--ink-2)',
-      }}
+      className="flex items-center gap-2 py-2.5 px-3 border border-border rounded-[8px] bg-bg-panel text-[13px] text-ink-2"
     >
-      <span style={{ fontSize: 14 }}>{refreshTimedOut ? 'ℹ️' : '🔄'}</span>
+      <span className="text-[14px]">{refreshTimedOut ? 'ℹ️' : '🔄'}</span>
       <span>
         {refreshTimedOut
           ? "No matching actions found for today's rules. Try again after adding more prospects, or check back tomorrow."
@@ -97,16 +87,16 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Skeleton className="h-16" />
-        {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-16"/>
+        {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24"/>)}
       </div>
     );
   }
 
   if (!data || data.count === 0) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="flex flex-col gap-4">
         {refreshBanner}
         <EmptyState
           icon={CheckCircle2}
@@ -135,22 +125,22 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-between items-end flex-wrap gap-3">
         {showGreeting ? (
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 600 }}>
+            <h1 className="!text-[22px] !font-semibold">
               {greeting}{name ? `, ${name}` : ''}.
             </h1>
-            <p style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-              <strong style={{ color: 'var(--ink)' }}>{data.count}</strong> actions today
-              {' · ~'}<strong style={{ color: 'var(--ink)' }}>{data.etaMinutes}</strong> min estimated
+            <p className="!text-[13px] !text-ink-3">
+              <strong className="text-ink">{data.count}</strong> actions today
+              {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
             </p>
           </div>
         ) : (
-          <p style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-            <strong style={{ color: 'var(--ink)' }}>{data.count}</strong> actions
-            {' · ~'}<strong style={{ color: 'var(--ink)' }}>{data.etaMinutes}</strong> min estimated
+          <p className="!text-[13px] !text-ink-3">
+            <strong className="text-ink">{data.count}</strong> actions
+            {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
           </p>
         )}
         <Button
@@ -169,20 +159,10 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
         if (b.count === 0) return null;
         const open = expanded[b.priority];
         return (
-          <div key={b.priority} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div key={b.priority} className="flex flex-col gap-2">
             <button
               onClick={() => toggle(b.priority)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 0',
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--ink)',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
+              className="flex items-center gap-2.5 py-2 px-0 bg-transparent border-0 text-ink cursor-pointer text-left"
             >
               <Badge variant={
                 b.priority === 'P0' ? 'error' :
@@ -191,16 +171,16 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
               }>
                 {b.priority}
               </Badge>
-              <span style={{ fontSize: 14, fontWeight: 500 }}>
+              <span className="text-[14px] font-medium">
                 {PRIORITY_DESC[b.priority] ?? b.priority}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>({b.count})</span>
-              <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)' }}>
+              <span className="text-[12px] text-ink-3">({b.count})</span>
+              <span className="ml-auto text-[12px] text-ink-3">
                 {open ? '▼' : '▶'}
               </span>
             </button>
             {open && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="flex flex-col gap-2">
                 {b.actions.map(({ action, company, recommendedContact }) => (
                   <ActionCard key={action.id} action={action} company={company} contact={recommendedContact} />
                 ))}

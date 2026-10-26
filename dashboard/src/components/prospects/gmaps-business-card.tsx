@@ -7,6 +7,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useGenerateGmapsRecommendation, type GmapsRecommendation } from '@/hooks/use-gmaps-recommendation';
 import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 // Renders the Google Maps place-detail captured into a contact's sourceMetadata
 // by the extension scraper. Locale-bearing prose (reviews, about) is stored as
@@ -20,15 +21,13 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
-const LABEL: React.CSSProperties = {
-  fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6,
-};
-const ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink)' };
-const SECTION: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+const LABEL = 'mb-1.5 text-[10px] uppercase tracking-[0.4px] text-ink-3';
+const ROW = 'flex items-center gap-1.5 text-xs text-ink';
+const SECTION = 'flex flex-col gap-1.5';
 
 function LinkRow({ icon, href, children }: { icon: React.ReactNode; href: string; children: React.ReactNode }) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" style={{ ...ROW, textDecoration: 'none' }}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={ROW}>
       {icon}<span>{children}</span>
     </a>
   );
@@ -37,23 +36,17 @@ function LinkRow({ icon, href, children }: { icon: React.ReactNode; href: string
 function Collapsible({ label, html }: { label: string; html: string }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div style={SECTION}>
+    <div className={SECTION}>
       <button
         onClick={() => setOpen((o) => !o)}
-        style={{
-          fontSize: 11, padding: '4px 10px', borderRadius: 999, border: '1px solid var(--border)',
-          background: 'var(--bg-sub)', color: 'var(--ink-2)', cursor: 'pointer', alignSelf: 'flex-start',
-        }}
+        className="cursor-pointer self-start rounded-full border border-border bg-bg-sub px-2.5 py-1 text-[11px] text-ink-2"
       >
         {open ? `Hide ${label}` : `Show ${label}`}
       </button>
       {open && (
         <div
           dir="auto"
-          style={{
-            maxHeight: 360, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
-            border: '1px solid var(--border)', borderRadius: 8, padding: 10, background: 'var(--bg-panel)',
-          }}
+          className="max-h-[360px] overflow-auto rounded-lg border border-border bg-bg-panel p-2.5 text-xs leading-normal"
           // Sanitized at capture time in maps-core.js (no scripts/handlers).
           dangerouslySetInnerHTML={{ __html: html }}
         />
@@ -70,51 +63,51 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
   };
   const fitColor = rec?.fit === 'high' ? 'success' : rec?.fit === 'low' ? 'error' : 'warning';
   return (
-    <div style={SECTION}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ ...LABEL, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div className={SECTION}>
+      <div className="flex items-center justify-between gap-2">
+        <div className={cn(LABEL, 'mb-0 flex items-center gap-1')}>
           <Sparkles size={11} /> AI Recommendation
         </div>
         {contactId && (
           <button
             onClick={run}
             disabled={gen?.isPending}
-            style={{
-              fontSize: 11, padding: '3px 10px', borderRadius: 999, border: '1px solid var(--border)',
-              background: 'var(--bg-panel)', color: 'var(--ink-2)', cursor: gen?.isPending ? 'wait' : 'pointer',
-            }}
+            className={cn(
+              'rounded-full border border-border bg-bg-panel px-2.5 py-[3px] text-[11px] text-ink-2',
+              gen?.isPending ? 'cursor-wait' : 'cursor-pointer',
+            )}
           >
             {gen?.isPending ? 'Generating…' : rec ? 'Regenerate' : 'Generate'}
           </button>
         )}
       </div>
       {rec && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }} dir="auto">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="flex flex-col gap-1.5 text-xs" dir="auto">
+          <div className="flex items-center gap-2">
             <Badge variant={fitColor as 'success' | 'error' | 'warning'}>{rec.fit} fit</Badge>
             {typeof rec.priorityScore === 'number' && (
-              <span style={{ color: 'var(--ink-3)' }}>Priority {rec.priorityScore}/100</span>
+              <span className="text-ink-3">Priority {rec.priorityScore}/100</span>
             )}
           </div>
-          {rec.reasoning && <div style={{ color: 'var(--ink-2)' }}>{rec.reasoning}</div>}
+          {rec.reasoning && <div className="text-ink-2">{rec.reasoning}</div>}
           {rec.outreachAngle && <div><strong>Angle:</strong> {rec.outreachAngle}</div>}
           {rec.recommendedService && <div><strong>Pitch:</strong> {rec.recommendedService}</div>}
           {rec.gaps?.length > 0 && (
             <div>
               <strong>Gaps:</strong>
-              <ul style={{ margin: '2px 0 0', paddingInlineStart: 18 }}>
+              <ul className="m-0 mt-0.5 ps-[18px]">
                 {rec.gaps.map((g, i) => <li key={i}>{g}</li>)}
               </ul>
             </div>
           )}
           {rec.suggestedOpener && (
-            <div style={{ borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8, color: 'var(--ink-2)', fontStyle: 'italic' }}>
+            <div className="border-s-2 border-border ps-2 italic text-ink-2">
               {rec.suggestedOpener}
             </div>
           )}
         </div>
       )}
-      {!rec && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>No recommendation yet.</div>}
+      {!rec && <div className="text-[11px] text-ink-3">No recommendation yet.</div>}
     </div>
   );
 }
@@ -157,31 +150,26 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
     ? (m.aiRecommendation as unknown as GmapsRecommendation) : null);
 
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'var(--bg-sub)',
-        display: 'flex', flexDirection: 'column', gap: 14,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-bg-sub p-4">
+      <div className="flex items-center gap-1.5">
         <MapPin size={14} />
-        <div style={{ fontSize: 13, fontWeight: 600 }}>Google Maps</div>
+        <div className="text-[13px] font-semibold">Google Maps</div>
       </div>
 
       {(category || rating != null || reviewsCount != null) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, flexWrap: 'wrap' }}>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           {category && <Badge variant="outline">{category}</Badge>}
           {rating != null && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <span className="inline-flex items-center gap-[3px]">
               <Star size={12} fill="currentColor" /> {rating}
-              {reviewsCount != null && <span style={{ color: 'var(--ink-3)' }}>({reviewsCount})</span>}
+              {reviewsCount != null && <span className="text-ink-3">({reviewsCount})</span>}
             </span>
           )}
         </div>
       )}
 
       {(phone || website || mapsUrl || directionsUrl || menuLink) && (
-        <div style={SECTION}>
+        <div className={SECTION}>
           {phone && <LinkRow icon={<Phone size={13} />} href={`tel:${phone}`}>{phone}</LinkRow>}
           {website && <LinkRow icon={<Globe size={13} />} href={website}>Website <ExternalLink size={11} /></LinkRow>}
           {menuLink && <LinkRow icon={<Utensils size={13} />} href={menuLink}>Menu <ExternalLink size={11} /></LinkRow>}
@@ -191,9 +179,9 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
       )}
 
       {(address || plusCode) && (
-        <div style={SECTION}>
-          {address && <div style={ROW}><MapPin size={13} />{address}</div>}
-          {plusCode && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{plusCode}</div>}
+        <div className={SECTION}>
+          {address && <div className={ROW}><MapPin size={13} />{address}</div>}
+          {plusCode && <div className="text-[11px] text-ink-3">{plusCode}</div>}
         </div>
       )}
 
@@ -201,32 +189,32 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
 
       {priceText && (
         <div>
-          <div style={LABEL}>Price</div>
-          <div style={{ fontSize: 12 }} dir="auto">{priceText}</div>
+          <div className={LABEL}>Price</div>
+          <div className="text-xs" dir="auto">{priceText}</div>
         </div>
       )}
 
       {(hoursRows.length > 0 || hoursStr) && (
         <div>
-          <div style={LABEL}><Clock size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Hours</div>
+          <div className={LABEL}><Clock size={11} className="mr-1 inline align-middle"/>Hours</div>
           {hoursRows.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }} dir="auto">
+            <div className="flex flex-col gap-0.5 text-xs" dir="auto">
               {hoursRows.map(([day, t]) => (
-                <div key={day} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                  <span style={{ color: 'var(--ink-2)' }}>{day}</span><span>{t}</span>
+                <div key={day} className="flex justify-between gap-3">
+                  <span className="text-ink-2">{day}</span><span>{t}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 12 }} dir="auto">{hoursStr}</div>
+            <div className="text-xs" dir="auto">{hoursStr}</div>
           )}
         </div>
       )}
 
       {serviceOptions.length > 0 && (
         <div>
-          <div style={LABEL}>Service options</div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          <div className={LABEL}>Service options</div>
+          <div className="flex flex-wrap gap-1">
             {serviceOptions.map((o) => <Badge key={o} variant="outline">{o}</Badge>)}
           </div>
         </div>
@@ -234,62 +222,62 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
 
       {description && (
         <div>
-          <div style={LABEL}>About</div>
-          <div style={{ fontSize: 12, color: 'var(--ink-2)' }} dir="auto">{description}</div>
+          <div className={LABEL}>About</div>
+          <div className="text-xs text-ink-2" dir="auto">{description}</div>
         </div>
       )}
 
       {photoUrls.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+        <div className="flex gap-1.5 overflow-x-auto">
           {photoUrls.map((u, i) => (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={u} alt="" style={{ height: 72, borderRadius: 8, flex: '0 0 auto' }} />
+            <img key={i} src={u} alt="" className="h-[72px] flex-none rounded-lg"/>
           ))}
         </div>
       )}
 
       {menu && (dishes.length > 0 || str(menu.cuisine) || str(menu.priceRange)) && (
-        <div style={SECTION}>
-          <div style={LABEL}><Utensils size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Menu</div>
+        <div className={SECTION}>
+          <div className={LABEL}><Utensils size={11} className="mr-1 inline align-middle"/>Menu</div>
           {(str(menu.cuisine) || str(menu.priceRange)) && (
-            <div style={{ fontSize: 12, color: 'var(--ink-2)' }} dir="auto">
+            <div className="text-xs text-ink-2" dir="auto">
               {[str(menu.cuisine), str(menu.priceRange)].filter(Boolean).join(' · ')}
             </div>
           )}
           {dishes.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12 }} dir="auto">
+            <div className="flex flex-col gap-[3px] text-xs" dir="auto">
               {dishes.map((d, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <div key={i} className="flex justify-between gap-3">
                   <span>{[str(d.section), str(d.name)].filter(Boolean).join(' — ')}</span>
-                  {str(d.price) && <span style={{ color: 'var(--ink-3)' }}>{str(d.price)}</span>}
+                  {str(d.price) && <span className="text-ink-3">{str(d.price)}</span>}
                 </div>
               ))}
             </div>
           )}
           {str(menu.source) && (
-            <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>source: {str(menu.source)}</div>
+            <div className="text-[10px] text-ink-3">source: {str(menu.source)}</div>
           )}
         </div>
       )}
 
       {ratingDistribution.length > 0 && (
         <div>
-          <div style={LABEL}>Rating breakdown</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: 'var(--ink-2)' }} dir="auto">
+          <div className={LABEL}>Rating breakdown</div>
+          <div className="flex flex-col gap-0.5 text-[11px] text-ink-2" dir="auto">
             {ratingDistribution.map((r, i) => <div key={i}>{str(r.label)}</div>)}
           </div>
         </div>
       )}
 
       {(reviewsHtml || aboutHtml) && (
-        <div style={{ ...SECTION, gap: 8 }}>
+        <div className={cn(SECTION, 'gap-2')}>
           {aboutHtml && <Collapsible label="full details" html={aboutHtml} />}
           {reviewsHtml && <Collapsible label="reviews" html={reviewsHtml} />}
         </div>
       )}
 
       {!phone && !website && !address && !mapsUrl && (
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div className="flex items-center gap-1 text-[11px] text-ink-3">
           <Tag size={11} /> Detail not fetched yet
         </div>
       )}

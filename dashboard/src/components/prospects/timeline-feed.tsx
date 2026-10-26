@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { formatDate, formatRelative } from '@/lib/utils';
+import { formatDate, formatRelative, cn } from '@/lib/utils';
 import type { TimelineEvent } from '@/lib/api/prospects';
 
 function eventIcon(type: string): string {
@@ -30,13 +30,7 @@ export function TimelineFeed({
   if (events.length === 0) {
     return (
       <div
-        style={{
-          textAlign: 'center',
-          padding: 32,
-          color: 'var(--ink-3)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-        }}
+        className="text-center p-8 text-ink-3 border border-border rounded-[8px]"
       >
         No events yet.
       </div>
@@ -51,21 +45,15 @@ export function TimelineFeed({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="flex flex-col gap-4">
       {Object.entries(grouped).map(([day, items]) => (
         <div key={day}>
           <div
-            style={{
-              fontSize: 11,
-              textTransform: 'uppercase',
-              letterSpacing: 0.5,
-              color: 'var(--ink-3)',
-              marginBottom: 6,
-            }}
+            className="text-[11px] uppercase tracking-[0.5px] text-ink-3 mb-1.5"
           >
             {day}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="flex flex-col gap-1.5">
             {items.map((ev) => (
               <EventCard key={ev.id} event={ev} />
             ))}
@@ -73,7 +61,7 @@ export function TimelineFeed({
         </div>
       ))}
       {hasMore && (
-        <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--ink-3)' }}>
+        <div className="text-center text-[11px] text-ink-3">
           Load more — cursor pagination coming with the next interaction
         </div>
       )}
@@ -86,28 +74,22 @@ function EventCard({ event }: { event: TimelineEvent }) {
   const hasDetail = Boolean(event.description) || Object.keys(event.metadata ?? {}).length > 0;
   return (
     <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        padding: 10,
-        background: 'var(--bg-sub)',
-        cursor: hasDetail ? 'pointer' : 'default',
-      }}
+      className={cn('rounded-[8px] border border-border bg-bg-sub p-2.5', hasDetail ? 'cursor-pointer' : 'cursor-default')}
       onClick={() => hasDetail && setExpanded((v) => !v)}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 16 }}>{eventIcon(event.type)}</span>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>{event.title ?? event.type.replace(/_/g, ' ')}</span>
-          <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>{event.actorType}</span>
+      <div className="flex justify-between items-baseline">
+        <div className="flex items-center gap-2">
+          <span className="text-[16px]">{eventIcon(event.type)}</span>
+          <span className="text-[13px] font-medium">{event.title ?? event.type.replace(/_/g, ' ')}</span>
+          <span className="text-[10px] text-ink-3">{event.actorType}</span>
         </div>
-        <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{formatRelative(event.occurredAt)}</span>
+        <span className="text-[11px] text-ink-3">{formatRelative(event.occurredAt)}</span>
       </div>
       {expanded && (
-        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--ink-2)' }}>
-          {event.description && <div style={{ marginBottom: 6, whiteSpace: 'pre-wrap' }}>{event.description}</div>}
+        <div className="mt-2 text-[12px] text-ink-2">
+          {event.description && <div className="mb-1.5 whitespace-pre-wrap">{event.description}</div>}
           {event.metadata && Object.keys(event.metadata).length > 0 && (
-            <pre style={{ fontSize: 10, color: 'var(--ink-3)', whiteSpace: 'pre-wrap', margin: 0 }}>
+            <pre className="text-[10px] text-ink-3 whitespace-pre-wrap m-0">
               {JSON.stringify(event.metadata, null, 2)}
             </pre>
           )}

@@ -36,11 +36,11 @@ export function DraftEditorDialog({
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent style={{ maxWidth: 640 }}>
+      <DialogContent className="max-w-[640px]">
         <DialogHeader>
           <DialogTitle>Edit draft</DialogTitle>
         </DialogHeader>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="flex flex-col gap-2">
           {hasSubject && (
             <Input
               placeholder="Subject"
@@ -54,7 +54,7 @@ export function DraftEditorDialog({
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
-          <div style={{ fontSize: 11, color: 'var(--ink-3)', alignSelf: 'flex-end' }}>
+          <div className="text-[11px] text-ink-3 self-end">
             {body.length} chars · {body.trim().split(/\s+/).filter(Boolean).length} words
           </div>
         </div>

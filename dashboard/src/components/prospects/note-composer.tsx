@@ -23,14 +23,14 @@ export function NoteComposer({ prospectId }: { prospectId: string }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div className="flex flex-col gap-1.5">
       <Textarea
         rows={3}
         placeholder="Add a note — what you learned, follow-up plan, context for the next message…"
         value={body}
         onChange={(e) => setBody(e.target.value)}
       />
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="flex justify-end">
         <Button size="sm" onClick={submit} disabled={!body.trim() || mut.isPending}>
           {mut.isPending ? 'Saving…' : 'Add note'}
         </Button>

@@ -15,6 +15,7 @@ import {
 } from '@/hooks/use-queue';
 import { toast } from '@/hooks/use-toast';
 
+import { cn } from '@/lib/utils';
 const ACTION_LABELS: Record<string, { icon: string; label: string }> = {
   linkedin_connect:                  { icon: '🤝', label: 'Connection Request' },
   linkedin_dm_first:                 { icon: '💼', label: 'LinkedIn DM (first)' },
@@ -130,46 +131,44 @@ export function ActionCard({
 
   return (
     <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        padding: 14,
-        background: action.status === 'in_progress' ? 'var(--bg-panel)' : 'var(--bg-sub)',
-        opacity: action.status === 'completed' || action.status === 'skipped' ? 0.5 : 1,
-      }}
+      className={cn(
+        'rounded-[10px] border border-border p-3.5',
+        action.status === 'in_progress' ? 'bg-bg-panel' : 'bg-bg-sub',
+        (action.status === 'completed' || action.status === 'skipped') && 'opacity-50',
+      )}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 6 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' }}>
+      <div className="flex justify-between items-start gap-3 mb-1.5">
+        <div className="flex-1 min-w-0">
+          <div className="flex gap-2 items-center mb-1 flex-wrap">
             <Badge variant={PRIORITY_VARIANT[action.priority]}>{action.priority}</Badge>
-            <span style={{ fontSize: 14 }}>{labelInfo.icon} {labelInfo.label}</span>
+            <span className="text-[14px]">{labelInfo.icon} {labelInfo.label}</span>
             {action.priorityReason && (
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{action.priorityReason}</span>
+              <span className="text-[11px] text-ink-3">{action.priorityReason}</span>
             )}
             {action.draftConfidence != null && action.draftConfidence < 50 && (
               <Badge variant="warning">⚠️ Low context</Badge>
             )}
           </div>
           {/* Company name is the primary identifier. */}
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>
+          <div className="text-[15px] font-semibold text-ink">
             {company.name}
             {company.score != null && (
-              <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 8, fontWeight: 400 }}>
+              <span className="text-[11px] text-ink-3 ml-2 font-normal">
                 score {company.score}
               </span>
             )}
           </div>
           {/* Recommended target. Null for research actions. */}
           {contact ? (
-            <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 2 }}>
+            <div className="text-[12px] text-ink-2 mt-0.5">
               Recommended target:&nbsp;
-              <Link href={`/prospects/${contact.id}`} style={{ color: 'var(--ink)', textDecoration: 'none' }}>
+              <Link href={`/prospects/${contact.id}`} className="text-ink no-underline">
                 {recommendedName}
               </Link>
-              {contact.title && <span style={{ color: 'var(--ink-3)' }}> · {contact.title}</span>}
+              {contact.title && <span className="text-ink-3"> · {contact.title}</span>}
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2, fontStyle: 'italic' }}>
+            <div className="text-[12px] text-ink-3 mt-0.5 italic">
               No contact yet — research needed
             </div>
           )}
@@ -177,41 +176,28 @@ export function ActionCard({
       </div>
 
       {action.whyNow && (
-        <div style={{ fontSize: 12, color: 'var(--ink-2)', marginBottom: 8, fontStyle: 'italic' }}>
+        <div className="text-[12px] text-ink-2 mb-2 italic">
           {action.whyNow}
         </div>
       )}
 
       {showDraft && (
         <div
-          style={{
-            border: '1px dashed var(--border)',
-            borderRadius: 6,
-            padding: 8,
-            background: 'var(--bg-panel)',
-            marginBottom: 8,
-            cursor: 'pointer',
-          }}
+          className="border border-dashed border-border rounded-[6px] p-2 bg-bg-panel mb-2 cursor-pointer"
           onClick={() => setDraftExpanded((v) => !v)}
         >
           {action.draftSubject && (
-            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+            <div className="text-[12px] font-medium mb-1">
               Re: {action.draftSubject}
             </div>
           )}
           <div
-            style={{
-              fontSize: 12,
-              color: 'var(--ink-2)',
-              whiteSpace: 'pre-wrap',
-              maxHeight: draftExpanded ? 'none' : 60,
-              overflow: 'hidden',
-            }}
+            className="text-[12px] text-ink-2 whitespace-pre-wrap overflow-hidden" style={{ maxHeight: draftExpanded ? 'none' : 60 }}
           >
             {action.draftBody}
           </div>
           {!draftExpanded && action.draftBody && action.draftBody.length > 200 && (
-            <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 4 }}>
+            <div className="text-[10px] text-ink-3 mt-1">
               Click to expand · {action.draftBody.length} chars
             </div>
           )}
@@ -219,44 +205,25 @@ export function ActionCard({
       )}
 
       {alternatives.length > 0 && action.status === 'pending' && (
-        <div style={{ marginBottom: 8 }}>
+        <div className="mb-2">
           <button
             onClick={() => setAltsOpen((v) => !v)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--ink-2)',
-              fontSize: 12,
-              cursor: 'pointer',
-              padding: 0,
-            }}
+            className="bg-transparent border-0 text-ink-2 text-[12px] cursor-pointer p-0"
           >
             {altsOpen ? '▼' : '▶'} Other contacts at this company ({alternatives.length})
           </button>
           {altsOpen && (
-            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div className="mt-1.5 flex flex-col gap-1">
               {alternatives.map((alt) => (
                 <button
                   key={alt.contactId}
                   onClick={() => handleRetarget(alt)}
                   disabled={retargetMut.isPending}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 8px',
-                    background: 'var(--bg-panel)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    color: 'var(--ink)',
-                  }}
+                  className="flex items-center gap-1.5 py-1.5 px-2 bg-bg-panel border border-border rounded-[6px] text-left cursor-pointer text-[12px] text-ink"
                 >
-                  <span style={{ fontWeight: 500 }}>{alt.name}</span>
-                  {alt.title && <span style={{ color: 'var(--ink-3)' }}>· {alt.title}</span>}
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--ink-3)' }}>
+                  <span className="font-medium">{alt.name}</span>
+                  {alt.title && <span className="text-ink-3">· {alt.title}</span>}
+                  <span className="ml-auto text-[10px] text-ink-3">
                     Switch & regenerate draft
                   </span>
                 </button>
@@ -266,7 +233,7 @@ export function ActionCard({
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div className="flex gap-1.5 flex-wrap">
         {action.status === 'pending' && (
           <Button size="sm" onClick={handleExecute} disabled={executeMut.isPending}>
             {executeMut.isPending ? '…' : isResearch ? 'Find decision-makers' : 'Execute'}
@@ -293,7 +260,7 @@ export function ActionCard({
           </Button>
         )}
         {contact && (
-          <Link href={`/prospects/${contact.id}`} style={{ fontSize: 11, color: 'var(--ink-3)', alignSelf: 'center', marginLeft: 'auto' }}>
+          <Link href={`/prospects/${contact.id}`} className="text-[11px] text-ink-3 self-center ml-auto">
             Open ↗
           </Link>
         )}

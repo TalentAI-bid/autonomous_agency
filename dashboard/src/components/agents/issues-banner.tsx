@@ -63,51 +63,35 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
 
   return (
     <Panel
-      style={{
-        borderColor: 'var(--down, oklch(0.65 0.18 25))',
-        marginBottom: 16,
-      }}
+      className="mb-4 !border-down"
     >
-      <PanelHead style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <PanelHead className="flex items-center gap-2.5">
         <Icon name="flag" size={14} />
         <span>Pipeline issues</span>
         <Pill variant="down">{rows.length}</Pill>
       </PanelHead>
-      <PanelBody style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <PanelBody className="flex flex-col gap-1.5">
         {visible.map((row) => (
           <div
             key={row.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '16px 1fr auto',
-              alignItems: 'center',
-              gap: 10,
-              padding: '6px 0',
-              borderBottom: '1px solid var(--line, rgba(255,255,255,0.06))',
-            }}
+            className="grid grid-cols-[16px_1fr_auto] items-center gap-2.5 py-1.5 px-0 border-b border-[color:var(--line,_rgba(255,255,255,0.06))]"
           >
             <Dot state={severityState(row.severity)} title={row.severity} />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
                 <Pill variant={severityVariant(row.severity)}>{row.errorType}</Pill>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                <span className="text-[11px] text-ink-3">
                   {row.step} · {row.tool} · {timeAgo(row.createdAt)}
                 </span>
               </div>
               <span
-                style={{
-                  fontSize: 13,
-                  color: 'var(--ink)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
+                className="text-[13px] text-ink overflow-hidden text-ellipsis whitespace-nowrap"
                 title={row.message}
               >
                 {row.message}
               </span>
             </div>
-            <div style={{ display: 'inline-flex', gap: 6 }}>
+            <div className="inline-flex gap-1.5">
               {row.retryable && (
                 <Button
                   variant="panel" size="xs"
@@ -135,7 +119,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
           <Button
             variant="panel" size="xs"
             type="button"
-            style={{ alignSelf: 'flex-start', marginTop: 6 }}
+            className="self-start mt-1.5"
             onClick={() => setExpanded(true)}
           >
             Show {hidden} more
@@ -145,7 +129,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
           <Button
             variant="panel" size="xs"
             type="button"
-            style={{ alignSelf: 'flex-start', marginTop: 6 }}
+            className="self-start mt-1.5"
             onClick={() => setExpanded(false)}
           >
             Collapse

@@ -9,6 +9,7 @@ import { TimelineFeed } from '@/components/prospects/timeline-feed';
 import { NoteComposer } from '@/components/prospects/note-composer';
 import { Skeleton } from '@/components/ui/skeleton';
 
+import { cn } from '@/lib/utils';
 export default function ProspectDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
@@ -23,31 +24,25 @@ export default function ProspectDetailPage() {
 
   if (prospectLoading || !prospect) {
     return (
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
-        <Skeleton className="h-96" />
-        <Skeleton className="h-96" />
+      <div className="p-6 grid grid-cols-[320px_1fr] gap-4">
+        <Skeleton className="h-96"/>
+        <Skeleton className="h-96"/>
       </div>
     );
   }
 
   return (
     <div
-      style={{
-        padding: 24,
-        display: 'grid',
-        gridTemplateColumns: 'minmax(280px, 360px) 1fr',
-        gap: 16,
-        alignItems: 'start',
-      }}
+      className="p-6 grid grid-cols-[minmax(280px,_360px)_1fr] gap-4 items-start"
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="flex flex-col gap-4">
         <ContactSummaryCard prospect={prospect} />
         <GmapsBusinessCard contactId={prospect.id} sourceType={prospect.sourceType} meta={prospect.sourceMetadata} />
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="flex flex-col gap-4">
         <NoteComposer prospectId={prospect.id} />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div className="flex gap-1.5 flex-wrap">
           {[
             { label: 'All', value: undefined },
             { label: 'Outreach', value: 'outreach' },
@@ -59,22 +54,17 @@ export default function ProspectDetailPage() {
             <button
               key={c.label}
               onClick={() => setCategory(c.value)}
-              style={{
-                fontSize: 11,
-                padding: '4px 10px',
-                borderRadius: 999,
-                border: '1px solid var(--border)',
-                background: category === c.value ? 'var(--accent-weak)' : 'var(--bg-sub)',
-                color: category === c.value ? 'var(--accent-fg)' : 'var(--ink-2)',
-                cursor: 'pointer',
-              }}
+              className={cn(
+                'cursor-pointer rounded-full border border-border px-2.5 py-1 text-[11px]',
+                category === c.value ? 'bg-accent-weak text-accent-fg' : 'bg-bg-sub text-ink-2',
+              )}
             >
               {c.label}
             </button>
           ))}
         </div>
         {timelineLoading ? (
-          <Skeleton className="h-64" />
+          <Skeleton className="h-64"/>
         ) : (
           <TimelineFeed events={timeline?.events ?? []} hasMore={Boolean(timeline?.hasMore)} />
         )}

@@ -52,18 +52,7 @@ function Avatar({ text, hueSeed, size = 40 }: { text: string; hueSeed: string; s
   const hue = AVATAR_HUES[(hueSeed.charCodeAt(0) || 0) % AVATAR_HUES.length];
   return (
     <span
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 999,
-        display: 'grid',
-        placeItems: 'center',
-        fontSize: size * 0.36,
-        fontWeight: 600,
-        color: '#fff',
-        background: `oklch(0.62 0.11 ${hue})`,
-        flexShrink: 0,
-      }}
+      className="rounded-full grid place-items-center font-semibold text-white shrink-0" style={{ width: size, height: size, fontSize: size * 0.36, background: `oklch(0.62 0.11 ${hue})` }}
     >
       {text}
     </span>
@@ -128,43 +117,33 @@ export default function ProspectsPage() {
   const live = isFetching && !isLoading;
 
   return (
-    <div className="page" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div className="page !py-5 !px-6 !flex !flex-col !gap-[18px]">
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0 }}>
+      <div className="flex items-start gap-4 flex-wrap">
+        <div className="min-w-0">
           <h1
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              margin: 0,
-              fontSize: 26,
-              fontWeight: 600,
-              letterSpacing: '-0.02em',
-              color: 'var(--ink)',
-            }}
+            className="!flex !items-center !gap-3 !m-0 !text-[26px] !font-semibold !tracking-[-0.02em] !text-ink"
           >
-            <span className="display" style={{ fontStyle: 'italic' }}>
+            <span className="display !italic">
               Prospects
             </span>
-            <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>—</span>
-            <span className="mono" style={{ fontSize: 22 }}>
+            <span className="text-ink-3 font-normal">—</span>
+            <span className="mono !text-[22px]">
               {count}
             </span>
-            {live && <span className="dot is-live" style={{ width: 8, height: 8, borderRadius: 999 }} />}
+            {live && <span className="dot is-live !w-2 !h-2 !rounded-full"  />}
           </h1>
-          <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <p className="!mt-1.5 !mx-0 !mb-0 !text-[12.5px] !text-ink-3 !flex !items-center !gap-2">
             {debouncedSearch ? (
               <>
-                Searching: <span style={{ color: 'var(--ink-2)', fontWeight: 500 }}>{debouncedSearch}</span>
+                Searching: <span className="text-ink-2 font-medium">{debouncedSearch}</span>
               </>
             ) : (
               'Everyone your agents have surfaced and captured'
             )}
             {live && (
               <span
-                className="pill is-accent"
-                style={{ fontSize: 10, padding: '1px 8px', background: 'var(--accent-weak)', color: 'var(--accent-fg)' }}
+                className="pill is-accent !text-[10px] !py-px !px-2 !bg-accent-weak !text-accent-fg"
               >
                 Live
               </span>
@@ -172,7 +151,7 @@ export default function ProspectsPage() {
           </p>
         </div>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="ml-auto flex items-center gap-2">
           <Button asChild variant="panel" size="dense"><Link href="/prospects/new">
             <Plus size={14} /> Add prospect
           </Link></Button>
@@ -184,14 +163,14 @@ export default function ProspectsPage() {
       </div>
 
       {/* ── Filter pills ───────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <label className="filter-pill" style={{ cursor: 'text' }}>
-          <Search size={14} style={{ color: 'var(--ink-3)' }} />
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <label className="filter-pill !cursor-text">
+          <Search size={14} className="text-ink-3"/>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, company, title…"
-            style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', color: 'inherit', width: 200 }}
+            className="border-0 bg-transparent text-inherit w-[200px]" style={{ font: 'inherit' }}
           />
         </label>
 
@@ -203,7 +182,7 @@ export default function ProspectsPage() {
               </option>
             ))}
           </select>
-          <ChevronDown size={13} style={{ color: 'var(--ink-3)' }} />
+          <ChevronDown size={13} className="text-ink-3"/>
         </span>
 
         <span className="filter-pill">
@@ -214,16 +193,16 @@ export default function ProspectsPage() {
               </option>
             ))}
           </select>
-          <ChevronDown size={13} style={{ color: 'var(--ink-3)' }} />
+          <ChevronDown size={13} className="text-ink-3"/>
         </span>
 
         {tag && (
-          <span className="filter-pill" style={{ background: 'var(--accent-weak)', borderColor: 'transparent', color: 'var(--accent-fg)' }}>
+          <span className="filter-pill !border-transparent !bg-accent-weak !text-accent-fg">
             Tag: {tag}
             <button
               type="button"
               onClick={() => setParam('tag', '')}
-              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontSize: 14, lineHeight: 1 }}
+              className="border-0 bg-transparent cursor-pointer text-inherit text-[14px] leading-[1]"
               aria-label="Clear tag filter"
             >
               ×
@@ -231,13 +210,13 @@ export default function ProspectsPage() {
           </span>
         )}
 
-        <span className="filter-pill" style={{ marginLeft: 'auto' }}>
+        <span className="filter-pill !ml-auto">
           Sort by:
           <select value={sort} onChange={(e) => setSort(e.target.value as 'score' | 'recent')}>
             <option value="score">Fit score</option>
             <option value="recent">Most recent</option>
           </select>
-          <ChevronDown size={13} style={{ color: 'var(--ink-3)' }} />
+          <ChevronDown size={13} className="text-ink-3"/>
         </span>
       </div>
 
@@ -277,24 +256,13 @@ export default function ProspectsPage() {
                 title={name}
                 badge={
                   p.doNotContact ? (
-                    <span className="pill is-warn" style={{ fontSize: 10 }}>
+                    <span className="pill is-warn !text-[10px]">
                       DNC
                     </span>
                   ) : undefined
                 }
                 contactGlyph={
-                  <span
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 8,
-                      display: 'grid',
-                      placeItems: 'center',
-                      background: 'var(--bg-soft)',
-                      border: '1px solid var(--line)',
-                      color: 'var(--ink-3)',
-                    }}
-                  >
+                  <span className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-bg-soft text-ink-3">
                     <Building2 size={18} />
                   </span>
                 }
@@ -313,25 +281,17 @@ export default function ProspectsPage() {
 
       {/* ── Footer ─────────────────────────────────────────────── */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingTop: 8,
-          borderTop: '1px solid var(--line)',
-          fontSize: 12,
-          color: 'var(--ink-3)',
-        }}
+        className="flex items-center justify-between pt-2 border-t border-line text-[12px] text-ink-3"
       >
         <span>
-          <span className="mono" style={{ color: 'var(--ink-2)' }}>
+          <span className="mono !text-ink-2">
             {count}
           </span>{' '}
           {count === 1 ? 'prospect' : 'prospects'} shown{hasMore ? ' · more available' : ''}
         </span>
         {live && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--accent)' }} />
+          <span className="flex items-center gap-1.5">
+            <span className="pulse-dot !w-1.5 !h-1.5 !rounded-full !bg-accent"  />
             Auto-updating…
           </span>
         )}

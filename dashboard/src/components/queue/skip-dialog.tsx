@@ -44,13 +44,13 @@ export function SkipDialog({
         <DialogHeader>
           <DialogTitle>Skip this action</DialogTitle>
         </DialogHeader>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+        <div className="flex flex-col gap-2">
+          <div className="text-[12px] text-ink-3">
             Reason — tracked for future prompt-tuning analysis.
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className="flex flex-col gap-1">
             {REASONS.map((r) => (
-              <label key={r.value} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label key={r.value} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="skip-reason"
@@ -58,7 +58,7 @@ export function SkipDialog({
                   checked={reason === r.value}
                   onChange={() => setReason(r.value)}
                 />
-                <span style={{ fontSize: 13 }}>{r.label}</span>
+                <span className="text-[13px]">{r.label}</span>
               </label>
             ))}
           </div>

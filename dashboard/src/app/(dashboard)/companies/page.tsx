@@ -48,19 +48,7 @@ function personInitials(name: string) {
 function CompanyGlyph({ name, size = 28 }: { name: string; size?: number }) {
   return (
     <span
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 6,
-        display: 'grid',
-        placeItems: 'center',
-        fontSize: size * 0.42,
-        fontWeight: 700,
-        color: 'var(--ink)',
-        background: 'var(--bg-soft)',
-        border: '1px solid var(--line)',
-        flexShrink: 0,
-      }}
+      className="rounded-[6px] grid place-items-center font-bold text-ink bg-bg-soft border border-line shrink-0" style={{ width: size, height: size, fontSize: size * 0.42 }}
     >
       {monogram(name)}
     </span>
@@ -71,18 +59,7 @@ function PersonAvatar({ name, size = 40 }: { name: string; size?: number }) {
   const hue = AVATAR_HUES[(name.charCodeAt(0) || 0) % AVATAR_HUES.length];
   return (
     <span
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 999,
-        display: 'grid',
-        placeItems: 'center',
-        fontSize: size * 0.36,
-        fontWeight: 600,
-        color: '#fff',
-        background: `oklch(0.62 0.11 ${hue})`,
-        flexShrink: 0,
-      }}
+      className="rounded-full grid place-items-center font-semibold text-white shrink-0" style={{ width: size, height: size, fontSize: size * 0.36, background: `oklch(0.62 0.11 ${hue})` }}
     >
       {personInitials(name)}
     </span>
@@ -149,43 +126,33 @@ export default function CompaniesPage() {
   );
 
   return (
-    <div className="page" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div className="page !py-5 !px-6 !flex !flex-col !gap-[18px]">
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0 }}>
+      <div className="flex items-start gap-4 flex-wrap">
+        <div className="min-w-0">
           <h1
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              margin: 0,
-              fontSize: 26,
-              fontWeight: 600,
-              letterSpacing: '-0.02em',
-              color: 'var(--ink)',
-            }}
+            className="!flex !items-center !gap-3 !m-0 !text-[26px] !font-semibold !tracking-[-0.02em] !text-ink"
           >
-            <span className="display" style={{ fontStyle: 'italic' }}>
+            <span className="display !italic">
               Companies
             </span>
-            <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>—</span>
-            <span className="mono" style={{ fontSize: 22 }}>
+            <span className="text-ink-3 font-normal">—</span>
+            <span className="mono !text-[22px]">
               {count}
             </span>
-            {live && <span className="dot is-live" style={{ width: 8, height: 8, borderRadius: 999 }} />}
+            {live && <span className="dot is-live !w-2 !h-2 !rounded-full"  />}
           </h1>
-          <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <p className="!mt-1.5 !mx-0 !mb-0 !text-[12.5px] !text-ink-3 !flex !items-center !gap-2">
             {search ? (
               <>
-                Searching: <span style={{ color: 'var(--ink-2)', fontWeight: 500 }}>{search}</span>
+                Searching: <span className="text-ink-2 font-medium">{search}</span>
               </>
             ) : (
               'Every company your agents have discovered and scored'
             )}
             {live && (
               <span
-                className="pill is-accent"
-                style={{ fontSize: 10, padding: '1px 8px', background: 'var(--accent-weak)', color: 'var(--accent-fg)' }}
+                className="pill is-accent !text-[10px] !py-px !px-2 !bg-accent-weak !text-accent-fg"
               >
                 Live
               </span>
@@ -193,7 +160,7 @@ export default function CompaniesPage() {
           </p>
         </div>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="ml-auto flex items-center gap-2">
           <ExportButton />
           <Button asChild variant="brand" size="dense"><Link href="/agents/new">
             <Rocket size={14} /> Deploy agent
@@ -202,14 +169,14 @@ export default function CompaniesPage() {
       </div>
 
       {/* ── Filter pills ───────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <label className="filter-pill" style={{ cursor: 'text' }}>
-          <Search size={14} style={{ color: 'var(--ink-3)' }} />
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <label className="filter-pill !cursor-text">
+          <Search size={14} className="text-ink-3"/>
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by company name…"
-            style={{ border: 'none', background: 'transparent', outline: 'none', font: 'inherit', color: 'inherit', width: 200 }}
+            className="border-0 bg-transparent text-inherit w-[200px]" style={{ font: 'inherit' }}
           />
         </label>
 
@@ -226,13 +193,13 @@ export default function CompaniesPage() {
           Scored only
         </button>
 
-        <span className="filter-pill" style={{ marginLeft: 'auto' }}>
+        <span className="filter-pill !ml-auto">
           Sort by:
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'fit_score' | 'createdAt')}>
             <option value="fit_score">Fit score</option>
             <option value="createdAt">Newest</option>
           </select>
-          <ChevronDown size={13} style={{ color: 'var(--ink-3)' }} />
+          <ChevronDown size={13} className="text-ink-3"/>
         </span>
       </div>
 
@@ -269,8 +236,7 @@ export default function CompaniesPage() {
               badge={
                 c.size ? (
                   <span
-                    className="pill"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: 'var(--ink-3)' }}
+                    className="pill !inline-flex !items-center !gap-[5px] !text-[10.5px] !text-ink-3"
                   >
                     <Users size={11} /> {c.size}
                   </span>
@@ -280,18 +246,7 @@ export default function CompaniesPage() {
                 c.hasPerson ? (
                   <PersonAvatar name={c.contactName} size={40} />
                 ) : (
-                  <span
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 8,
-                      display: 'grid',
-                      placeItems: 'center',
-                      background: 'var(--bg-soft)',
-                      border: '1px solid var(--line)',
-                      color: 'var(--ink-4)',
-                    }}
-                  >
+                  <span className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-bg-soft text-ink-4">
                     <Building2 size={18} />
                   </span>
                 )
@@ -310,25 +265,17 @@ export default function CompaniesPage() {
 
       {/* ── Footer / pagination ────────────────────────────────── */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingTop: 8,
-          borderTop: '1px solid var(--line)',
-          fontSize: 12,
-          color: 'var(--ink-3)',
-        }}
+        className="flex items-center justify-between pt-2 border-t border-line text-[12px] text-ink-3"
       >
         <span>
-          <span className="mono" style={{ color: 'var(--ink-2)' }}>
+          <span className="mono !text-ink-2">
             {count}
           </span>{' '}
           {count === 1 ? 'company' : 'companies'} shown
         </span>
 
         {(cursorStack.length > 1 || pagination?.hasMore) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="flex items-center gap-2.5">
             <Button
               type="button"
               variant="panel" size="xs"
@@ -337,7 +284,7 @@ export default function CompaniesPage() {
             >
               ← Prev
             </Button>
-            <span className="mono" style={{ fontSize: 11 }}>
+            <span className="mono !text-[11px]">
               Page {cursorStack.length}
             </span>
             <Button

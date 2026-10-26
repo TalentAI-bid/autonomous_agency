@@ -26,7 +26,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
       <div className="main">
         {!onboardingFull && <Header />}
         {!onboardingFull && <OnboardingBanner />}
-        <main style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>{children}</main>
+        <main className="flex-1 overflow-auto min-h-0">{children}</main>
         {!onboardingFull && <StatusBar />}
       </div>
       <ActivityFab />

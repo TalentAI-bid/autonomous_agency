@@ -57,7 +57,7 @@ export function Header() {
         <span className="val">
           {runningAgents}/{totalAgents}
         </span>
-        <span className="delta" style={{ color: 'var(--up)' }}>
+        <span className="delta !text-up">
           active
         </span>
       </div>
@@ -77,24 +77,23 @@ export function Header() {
       <div className="searchbar" role="search">
         <Icon name="search" size={13} />
         <span>Jump to agent, lead, company… or type a command</span>
-        <span style={{ marginLeft: 'auto' }}>
+        <span className="ml-auto">
           <kbd>⌘K</kbd>
         </span>
       </div>
 
       <div className="topbar-right">
         <WorkspaceSwitcher />
-        <Button asChild variant="ink" size="xs"><Link href="/agents/new" style={{ gap: 6 }}>
+        <Button asChild variant="ink" size="xs"><Link href="/agents/new" className="gap-1.5">
           <Icon name="plus" size={12} /> New agent
         </Link></Button>
         <button className="topbar-cell" type="button" aria-label="Notifications">
           <Icon name="bell" size={13} />
-          {unread > 0 && <span style={{ fontSize: 11 }}>{Math.min(unread, 9)}</span>}
+          {unread > 0 && <span className="text-[11px]">{Math.min(unread, 9)}</span>}
         </button>
         <button
-          className="topbar-cell"
+          className="topbar-cell !text-ink-2"
           type="button"
-          style={{ color: 'var(--ink-2)' }}
           onClick={handleLogout}
           title="Logout"
           aria-label="Logout"

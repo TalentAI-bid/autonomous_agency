@@ -49,24 +49,16 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
 
   return (
     <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: 16,
-        background: 'var(--bg-sub)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
+      className="border border-border rounded-[12px] p-4 bg-bg-sub flex flex-col gap-3"
     >
       <div>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>{fullName}</div>
-        {prospect.title && <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{prospect.title}</div>}
-        {prospect.companyName && <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{prospect.companyName}</div>}
-        {prospect.location && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{prospect.location}</div>}
+        <div className="text-[18px] font-semibold">{fullName}</div>
+        {prospect.title && <div className="text-[12px] text-ink-3">{prospect.title}</div>}
+        {prospect.companyName && <div className="text-[12px] text-ink-2">{prospect.companyName}</div>}
+        {prospect.location && <div className="text-[11px] text-ink-3">{prospect.location}</div>}
       </div>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div className="flex gap-1.5 flex-wrap">
         <Badge variant={
           stage === 'engaged' || stage === 'qualified' || stage === 'closed_won' ? 'success' :
           stage === 'dnc' || stage === 'closed_lost' ? 'error' :
@@ -76,22 +68,22 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
           {stage.replace(/_/g, ' ')}
         </Badge>
         {prospect.prospectStage?.stageEnteredAt && (
-          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+          <span className="text-[11px] text-ink-3">
             entered {formatRelative(prospect.prospectStage.stageEnteredAt)}
           </span>
         )}
         {prospect.doNotContact && <Badge variant="error">DNC</Badge>}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--ink-3)' }}>
-        <span>Score: <strong style={{ color: 'var(--ink)' }}>{prospect.score ?? '—'}</strong></span>
-        <span>Touches: <strong style={{ color: 'var(--ink)' }}>{prospect.prospectStage?.totalTouches ?? 0}</strong></span>
+      <div className="flex gap-3 text-[11px] text-ink-3">
+        <span>Score: <strong className="text-ink">{prospect.score ?? '—'}</strong></span>
+        <span>Touches: <strong className="text-ink">{prospect.prospectStage?.totalTouches ?? 0}</strong></span>
         {prospect.prospectStage?.lastResponseAt && (
-          <span>Replied: <strong style={{ color: 'var(--ink)' }}>{formatRelative(prospect.prospectStage.lastResponseAt)}</strong></span>
+          <span>Replied: <strong className="text-ink">{formatRelative(prospect.prospectStage.lastResponseAt)}</strong></span>
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+      <div className="flex flex-col gap-1 text-[12px]">
         {prospect.email && <a href={`mailto:${prospect.email}`}>{prospect.email}</a>}
         {prospect.linkedinUrl && <a href={prospect.linkedinUrl} target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>}
         {prospect.phone && <a href={`tel:${prospect.phone}`}>{prospect.phone}</a>}
@@ -100,35 +92,35 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
       </div>
 
       <div>
-        <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Tags</div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div className="text-[10px] text-ink-3 uppercase tracking-[0.4px] mb-1.5">Tags</div>
+        <div className="flex gap-1 flex-wrap mb-2">
           {prospect.customTags.length === 0 ? (
-            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>No tags</span>
+            <span className="text-[11px] text-ink-3">No tags</span>
           ) : prospect.customTags.map((t) => (
-            <Badge key={t} variant="outline" style={{ cursor: 'pointer' }} onClick={() => removeTag(t)} title="Click to remove">
+            <Badge key={t} variant="outline" className="cursor-pointer" onClick={() => removeTag(t)} title="Click to remove">
               {t} ×
             </Badge>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div className="flex gap-1.5">
           <Input
             placeholder="Add tag"
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
-            style={{ flex: 1, fontSize: 12 }}
+            className="flex-1 text-[12px]"
           />
           <Button onClick={addTag} disabled={!tagInput.trim() || tagsMut.isPending} size="sm">Add</Button>
         </div>
       </div>
 
       <div>
-        <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>Source</div>
-        <div style={{ fontSize: 12 }}>{prospect.sourceType}</div>
-        <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>Added {formatDate(prospect.createdAt)}</div>
+        <div className="text-[10px] text-ink-3 uppercase tracking-[0.4px] mb-1.5">Source</div>
+        <div className="text-[12px]">{prospect.sourceType}</div>
+        <div className="text-[10px] text-ink-3">Added {formatDate(prospect.createdAt)}</div>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+      <div className="flex gap-1.5 flex-wrap mt-2">
         {!prospect.doNotContact && (
           <Button variant="outline" size="sm" onClick={() => setDncOpen(true)}>Mark DNC</Button>
         )}

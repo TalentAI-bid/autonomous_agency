@@ -55,11 +55,11 @@ export function ExecuteConfirmDialog({
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent style={{ maxWidth: 640 }}>
+      <DialogContent className="max-w-[640px]">
         <DialogHeader>
           <DialogTitle>Send email</DialogTitle>
         </DialogHeader>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="flex flex-col gap-2">
           <Input value={subj} onChange={(e) => setSubj(e.target.value)} placeholder="Subject" />
           <Textarea rows={12} value={bod} onChange={(e) => setBod(e.target.value)} placeholder="Body" />
         </div>

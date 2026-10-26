@@ -89,7 +89,7 @@ export function Sidebar() {
     <div className="sidebar">
       <div className="sidebar-brand">
         <div className="brand-mark">K</div>
-        <div style={{ minWidth: 0 }}>
+        <div className="min-w-0">
           <div className="brand-name">
             KeenPipe
           </div>
@@ -110,9 +110,9 @@ export function Sidebar() {
 
       <div className="sidebar-foot">
         <div className="avatar">{initials(user?.name ?? user?.email)}</div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 500 }}>{user?.name ?? user?.email ?? 'User'}</div>
-          <div style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium">{user?.name ?? user?.email ?? 'User'}</div>
+          <div className="text-[10.5px] text-ink-3">
             {tenant?.name ?? 'Workspace'} · {user?.role ?? 'Member'}
           </div>
         </div>
@@ -120,9 +120,8 @@ export function Sidebar() {
         <button
           type="button"
           onClick={handleLogout}
-          className="nav-item"
+          className="nav-item !p-1.5 !min-h-0 !w-7 !h-7 !justify-center !shrink-0"
           title="Sign out"
-          style={{ padding: 6, minHeight: 0, width: 28, height: 28, justifyContent: 'center', flexShrink: 0 }}
           aria-label="Sign out"
         >
           <Icon name="signOut" size={14} />

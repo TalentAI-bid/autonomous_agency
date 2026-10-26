@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import type { CSSProperties, ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 import { Linkedin, ArrowRight, Briefcase } from 'lucide-react';
 import { FitGauge } from './fit-gauge';
 
@@ -54,87 +55,55 @@ const tagStyle: Record<NonNullable<LeadTag['tone']>, CSSProperties> = {
 function TagChip({ tag }: { tag: LeadTag }) {
   return (
     <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '3px 8px',
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 500,
-        whiteSpace: 'nowrap',
-        ...tagStyle[tag.tone ?? 'default'],
-      }}
+      className="inline-flex items-center py-[3px] px-2 rounded-full text-[11px] font-medium whitespace-nowrap" style={{ ...tagStyle[tag.tone ?? 'default'] }}
     >
       {tag.label}
     </span>
   );
 }
 
-const cardBase: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  background: 'var(--bg-panel)',
-  border: '1px solid var(--line)',
-  borderRadius: 10,
-  padding: 18,
-  gap: 12,
-  aspectRatio: '1 / 1',
-  minHeight: 240,
-  minWidth: 0,
-  overflow: 'hidden',
-};
+const CARD_BASE =
+  'flex aspect-square min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-[10px] border border-line bg-bg-panel p-[18px]';
 
 /** Discovering placeholder — a live agent is still enriching this lead. */
 export function DiscoveringCard() {
   const bar = (w: number) => (
-    <span style={{ display: 'block', height: 8, width: w, borderRadius: 4, background: 'var(--bg-soft)' }} />
+    <span className="block h-2 rounded-[4px] bg-bg-soft" style={{ width: w }} />
   );
   return (
     <div
-      style={{
-        ...cardBase,
-        border: '1px dashed color-mix(in oklch, var(--accent) 45%, var(--line))',
-        background: 'color-mix(in oklch, var(--accent) 4%, var(--bg-panel))',
-      }}
+      className={cn(CARD_BASE, "border-dashed border-[color:color-mix(in_oklch,_var(--accent)_45%,_var(--line))] bg-[color:color-mix(in_oklch,_var(--accent)_4%,_var(--bg-panel))]")}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 20, height: 20, borderRadius: 4, background: 'var(--bg-soft)' }} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="w-5 h-5 rounded-[4px] bg-bg-soft"/>
           {bar(70)}
         </div>
         <span
-          className="pill is-accent"
-          style={{ fontSize: 10, background: 'var(--accent-weak)', color: 'var(--accent-fg)' }}
+          className="pill is-accent !text-[10px] !bg-accent-weak !text-accent-fg"
         >
           New
         </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ width: 40, height: 40, borderRadius: 999, background: 'var(--bg-soft)' }} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Discovering lead…</span>
+      <div className="flex items-center gap-2.5">
+        <span className="w-10 h-10 rounded-full bg-bg-soft"/>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[12px] text-ink-3">Discovering lead…</span>
           {bar(48)}
         </div>
         <span
-          style={{
-            marginLeft: 'auto',
-            width: 56,
-            height: 56,
-            borderRadius: 999,
-            border: '3px dashed color-mix(in oklch, var(--accent) 40%, var(--line))',
-          }}
+          className="ml-auto w-14 h-14 rounded-full border-[3px] border-dashed border-[color:color-mix(in_oklch,_var(--accent)_40%,_var(--line))]"
         />
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="flex gap-1.5">
         {bar(64)}
         {bar(80)}
       </div>
-      <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-fg)' }}>
+      <div className="mt-auto flex items-center gap-1.5 text-accent-fg">
         <span
-          style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--accent)' }}
-          className="pulse-dot"
+          className="pulse-dot !w-1.5 !h-1.5 !rounded-full !bg-accent"
         />
-        <span style={{ fontSize: 11 }}>Adding to results…</span>
+        <span className="text-[11px]">Adding to results…</span>
       </div>
     </div>
   );
@@ -157,94 +126,57 @@ export function LeadCard({
 }: LeadCardProps) {
   return (
     <div
-      style={{
-        ...cardBase,
-        borderColor: isNew ? 'color-mix(in oklch, var(--accent) 45%, var(--line))' : 'var(--line)',
-        transition: 'border-color 120ms, box-shadow 120ms',
-      }}
-      className="lead-card"
+      className={cn(
+        'lead-card transition-[border-color,box-shadow] duration-[120ms]',
+        CARD_BASE,
+        isNew && 'border-[color:color-mix(in_oklch,_var(--accent)_45%,_var(--line))]',
+      )}
     >
       {/* Header: glyph + title + badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ flexShrink: 0, display: 'grid', placeItems: 'center' }}>{glyph}</span>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 grid place-items-center">{glyph}</span>
         <span
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: 'var(--ink)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            minWidth: 0,
-          }}
+          className="text-[14px] font-semibold text-ink whitespace-nowrap overflow-hidden text-ellipsis min-w-0"
           title={title}
         >
           {title}
         </span>
-        {badge != null && <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{badge}</span>}
+        {badge != null && <span className="ml-auto shrink-0">{badge}</span>}
       </div>
 
       {/* Body: secondary entity + gauge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {contactGlyph && <span style={{ flexShrink: 0 }}>{contactGlyph}</span>}
-        <div style={{ minWidth: 0, flex: 1 }}>
+      <div className="flex items-center gap-2.5">
+        {contactGlyph && <span className="shrink-0">{contactGlyph}</span>}
+        <div className="min-w-0 flex-1">
           {contactName && (
             <div
-              style={{
-                fontSize: 13,
-                fontWeight: 500,
-                color: 'var(--ink)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
+              className="text-[13px] font-medium text-ink whitespace-nowrap overflow-hidden text-ellipsis"
             >
               {contactName}
             </div>
           )}
           {contactSub && (
             <div
-              style={{
-                fontSize: 11.5,
-                color: 'var(--ink-3)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
+              className="text-[11.5px] text-ink-3 whitespace-nowrap overflow-hidden text-ellipsis"
             >
               {contactSub}
             </div>
           )}
         </div>
-        <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
+        <span className="ml-auto shrink-0">
           <FitGauge score={score} />
         </span>
       </div>
 
       {/* Roles */}
       {roles.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <div className="flex flex-wrap gap-1.5">
           {roles.map((role, i) => (
             <span
               key={`${role}-${i}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '2px 8px',
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 500,
-                color: 'var(--ink-2)',
-                background: 'var(--bg-soft)',
-                border: '1px solid var(--line)',
-                whiteSpace: 'nowrap',
-                maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
+              className="inline-flex items-center gap-1 py-0.5 px-2 rounded-[6px] text-[11px] font-medium text-ink-2 bg-bg-soft border border-line whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
             >
-              <Briefcase size={11} style={{ color: 'var(--ink-3)', flexShrink: 0 }} />
+              <Briefcase size={11} className="text-ink-3 shrink-0"/>
               {role}
             </span>
           ))}
@@ -254,16 +186,7 @@ export function LeadCard({
       {/* Description */}
       {description && (
         <p
-          style={{
-            margin: 0,
-            fontSize: 12,
-            lineHeight: 1.5,
-            color: 'var(--ink-3)',
-            display: '-webkit-box',
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
+          className="!m-0 !text-[12px] !leading-[1.5] !text-ink-3 !overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
         >
           {description}
         </p>
@@ -271,7 +194,7 @@ export function LeadCard({
 
       {/* Tags */}
       {tags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <div className="flex flex-wrap gap-1.5">
           {tags.map((t, i) => (
             <TagChip key={`${t.label}-${i}`} tag={t} />
           ))}
@@ -280,14 +203,7 @@ export function LeadCard({
 
       {/* Footer: linkedin + view profile */}
       <div
-        style={{
-          marginTop: 'auto',
-          paddingTop: 12,
-          borderTop: '1px solid var(--line)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
+        className="mt-auto pt-3 border-t border-line flex items-center justify-between"
       >
         {linkedinUrl ? (
           <a
@@ -296,15 +212,7 @@ export function LeadCard({
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             aria-label="Open LinkedIn profile"
-            style={{
-              display: 'grid',
-              placeItems: 'center',
-              width: 26,
-              height: 26,
-              borderRadius: 5,
-              background: '#0a66c2',
-              color: '#fff',
-            }}
+            className="grid place-items-center w-[26px] h-[26px] rounded-[5px] bg-[color:#0a66c2] text-white"
           >
             <Linkedin size={14} />
           </a>
@@ -313,14 +221,7 @@ export function LeadCard({
         )}
         <Link
           href={href}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            fontSize: 12.5,
-            fontWeight: 500,
-            color: 'var(--accent-fg)',
-          }}
+          className="inline-flex items-center gap-[5px] text-[12.5px] font-medium text-accent-fg"
         >
           View profile <ArrowRight size={14} />
         </Link>

@@ -18,7 +18,7 @@ export function KpiTile({
   return (
     <div className="kpi">
       <div className="label">{label}</div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, justifyContent: 'space-between' }}>
+      <div className="flex items-end gap-2.5 justify-between">
         <div className="value">{value}</div>
         {spark && spark.length > 0 && (
           <Spark data={spark} width={74} height={26} color={up ? 'var(--up)' : 'var(--accent)'} fill />

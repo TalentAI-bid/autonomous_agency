@@ -74,7 +74,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
         {visible.map((row) => (
           <div
             key={row.id}
-            className="grid grid-cols-[16px_1fr_auto] items-center gap-2.5 py-1.5 px-0 border-b border-[color:var(--line,_rgba(255,255,255,0.06))]"
+            className="grid grid-cols-[16px_1fr_auto] items-center gap-2.5 py-1.5 px-0 border-b border-line"
           >
             <Dot state={severityState(row.severity)} title={row.severity} />
             <div className="flex flex-col gap-0.5 min-w-0">

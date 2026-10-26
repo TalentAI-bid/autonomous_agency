@@ -63,20 +63,20 @@ function TagChip({ tag }: { tag: LeadTag }) {
 }
 
 const CARD_BASE =
-  'flex aspect-square min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-[10px] border border-line bg-bg-panel p-[18px]';
+  'flex aspect-square min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-card border border-line bg-bg-panel p-[18px]';
 
 /** Discovering placeholder — a live agent is still enriching this lead. */
 export function DiscoveringCard() {
   const bar = (w: number) => (
-    <span className="block h-2 rounded-[4px] bg-bg-soft" style={{ width: w }} />
+    <span className="block h-2 rounded-tag bg-bg-soft" style={{ width: w }} />
   );
   return (
     <div
-      className={cn(CARD_BASE, "border-dashed border-[color:color-mix(in_oklch,_var(--accent)_45%,_var(--line))] bg-[color:color-mix(in_oklch,_var(--accent)_4%,_var(--bg-panel))]")}
+      className={cn(CARD_BASE, "border-dashed border-accent-line bg-accent-tint")}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-[4px] bg-bg-soft"/>
+          <span className="w-5 h-5 rounded-tag bg-bg-soft"/>
           {bar(70)}
         </div>
         <span
@@ -92,7 +92,7 @@ export function DiscoveringCard() {
           {bar(48)}
         </div>
         <span
-          className="ml-auto w-14 h-14 rounded-full border-[3px] border-dashed border-[color:color-mix(in_oklch,_var(--accent)_40%,_var(--line))]"
+          className="ml-auto w-14 h-14 rounded-full border-[3px] border-dashed border-accent-line"
         />
       </div>
       <div className="flex gap-1.5">
@@ -129,7 +129,7 @@ export function LeadCard({
       className={cn(
         'lead-card transition-[border-color,box-shadow] duration-[120ms]',
         CARD_BASE,
-        isNew && 'border-[color:color-mix(in_oklch,_var(--accent)_45%,_var(--line))]',
+        isNew && 'border-accent-line',
       )}
     >
       {/* Header: glyph + title + badge */}
@@ -174,7 +174,7 @@ export function LeadCard({
           {roles.map((role, i) => (
             <span
               key={`${role}-${i}`}
-              className="inline-flex items-center gap-1 py-0.5 px-2 rounded-[6px] text-xs font-medium text-ink-2 bg-bg-soft border border-line whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
+              className="inline-flex items-center gap-1 py-0.5 px-2 rounded-chip text-xs font-medium text-ink-2 bg-bg-soft border border-line whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
             >
               <Briefcase size={11} className="text-ink-3 shrink-0"/>
               {role}

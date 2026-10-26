@@ -2,40 +2,34 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
-import Link from 'next/link';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentCompanies, useAgentDocuments, useGmapsEnrichAgent } from '@/hooks/use-agents';
+import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentDocuments, useGmapsEnrichAgent } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
 import { useRealtimeStore } from '@/stores/realtime.store';
-import { AgentMonitor } from '@/components/agents/agent-monitor';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDate, getStatusColor } from '@/lib/utils';
-import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Target, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store, Star, Phone, MapPin } from 'lucide-react';
+import { formatDate } from '@/lib/utils';
+import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { ExportButton } from '@/components/shared/export-button';
-import { StrategyPanel } from '@/components/agents/strategy-panel';
-import { IcpSegmentationCard } from '@/components/agents/icp-segmentation-card';
 import { QuotaBadge } from '@/components/agents/quota-badge';
 import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
 import { AgentSettingsTab } from '@/components/agents/agent-settings-tab';
 import { AgentQueueTab } from '@/components/agents/agent-queue-tab';
-import { FitScoreBadge } from '@/components/companies/fit-score-badge';
-import type { CompanyFitScoreVerdict } from '@/types';
-
-type Tab = 'queue' | 'overview' | 'contacts' | 'businesses' | 'opportunities' | 'companies' | 'documents' | 'emails' | 'activity' | 'strategy' | 'room' | 'settings';
-const VALID_TABS: readonly Tab[] = [
-  'queue', 'overview', 'contacts', 'businesses', 'opportunities', 'companies', 'documents', 'emails', 'activity', 'strategy', 'room', 'settings',
-];
-
-function tabFromQuery(value: string | null): Tab {
-  return value && (VALID_TABS as readonly string[]).includes(value) ? (value as Tab) : 'queue';
-}
+import { AgentTabNav, agentTabFromQuery, type AgentTab, type AgentTabItem } from '@/components/agents/detail/agent-tab-nav';
+import { useCompaniesTab } from '@/components/agents/detail/use-companies-tab';
+import { OverviewTab } from '@/components/agents/detail/overview-tab';
+import { ContactsTab } from '@/components/agents/detail/contacts-tab';
+import { BusinessesTab } from '@/components/agents/detail/businesses-tab';
+import { CompaniesTab } from '@/components/agents/detail/companies-tab';
+import { DocumentsTab } from '@/components/agents/detail/documents-tab';
+import { EmailsTab } from '@/components/agents/detail/emails-tab';
+import { StrategyTab } from '@/components/agents/detail/strategy-tab';
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -45,14 +39,14 @@ export default function AgentDetailPage() {
 
   // Initialize from ?tab= so deep-linking (and breadcrumb back-from-detail-page)
   // lands on the right tab. Keep URL in sync when the user clicks tabs.
-  const [activeTab, setActiveTab] = useState<Tab>(() => tabFromQuery(searchParams.get('tab')));
+  const [activeTab, setActiveTab] = useState<AgentTab>(() => agentTabFromQuery(searchParams.get('tab')));
 
   useEffect(() => {
-    const t = tabFromQuery(searchParams.get('tab'));
+    const t = agentTabFromQuery(searchParams.get('tab'));
     setActiveTab((prev) => (prev === t ? prev : t));
   }, [searchParams]);
 
-  function selectTab(t: Tab) {
+  function selectTab(t: AgentTab) {
     setActiveTab(t);
     const q = new URLSearchParams(searchParams.toString());
     if (t === 'queue') q.delete('tab'); else q.set('tab', t);
@@ -63,17 +57,7 @@ export default function AgentDetailPage() {
   const { data: contactsRes } = useContacts({ masterAgentId: id, limit: 100 });
   const { data: stats } = useAgentStats(id);
   const { data: emails } = useAgentEmails(id);
-  // Companies tab state — only toggle now is the data-completeness filter
-  // (default hides zero/low-completeness stubs). Nothing is hidden by score
-  // anymore; companies sort by buyer_fit_score and the user scrolls.
-  const [showOnlyWithData, setShowOnlyWithData] = useState(true);
-  const [cursorStack, setCursorStack] = useState<Array<string | null>>([null]);
-  const currentCursor = cursorStack[cursorStack.length - 1] ?? null;
-  const { data: companiesData } = useAgentCompanies(id, {
-    includeIncomplete: !showOnlyWithData,
-    cursor: currentCursor,
-    sortBy: 'fit_score',
-  });
+  const companiesTab = useCompaniesTab(id);
   const { data: documentsData } = useAgentDocuments(id);
   const startAgent = useStartAgent();
   const stopAgent = useStopAgent();
@@ -89,9 +73,6 @@ export default function AgentDetailPage() {
   const contacts = contactsRes?.data ?? [];
   const gmapsBusinesses = contacts.filter((c) => c.sourceType === 'gmaps_business');
   const totalContacts = stats?.totalContacts ?? contactsRes?.pagination?.total ?? 0;
-  const config = (agent?.config ?? {}) as Record<string, unknown>;
-  const agentCompanies = companiesData?.data ?? [];
-  const companiesPagination = companiesData?.pagination;
   const agentDocuments = documentsData ?? [];
 
   async function handleStart() {
@@ -146,27 +127,15 @@ export default function AgentDetailPage() {
     );
   }
 
-  const targetRoles = (config.targetRoles as string[]) ?? [];
-  const requiredSkills = (config.requiredSkills as string[]) ?? [];
-  const locations = (config.locations as string[]) ?? [];
-  const byStatus = stats?.byStatus ?? {};
-
-  const funnelStages = [
-    { label: 'Discovered', value: byStatus.discovered ?? 0, color: 'bg-info' },
-    { label: 'Enriched', value: byStatus.enriched ?? 0, color: 'bg-info' },
-    { label: 'Scored', value: byStatus.scored ?? 0, color: 'bg-a-master' },
-    { label: 'Contacted', value: byStatus.contacted ?? 0, color: 'bg-up' },
-  ];
-
-  const tabs: { key: Tab; label: string; icon: React.ElementType; count?: number }[] = [
+  const tabs: AgentTabItem[] = [
     { key: 'queue', label: 'Queue', icon: ListChecks },
     { key: 'overview', label: 'Overview', icon: BarChart3 },
     { key: 'contacts', label: 'Contacts', icon: Users, count: totalContacts },
     ...(gmapsBusinesses.length > 0
-      ? [{ key: 'businesses' as Tab, label: 'Businesses', icon: Store, count: gmapsBusinesses.length }]
+      ? [{ key: 'businesses' as AgentTab, label: 'Businesses', icon: Store, count: gmapsBusinesses.length }]
       : []),
     { key: 'opportunities', label: 'Opportunities', icon: Zap },
-    { key: 'companies', label: 'Companies', icon: Building2, count: agentCompanies.length },
+    { key: 'companies', label: 'Companies', icon: Building2, count: companiesTab.companies.length },
     { key: 'documents', label: 'Documents', icon: FileText, count: agentDocuments.length },
     { key: 'emails', label: 'Emails', icon: Mail, count: emails?.length ?? 0 },
     { key: 'activity', label: 'Activity', icon: Activity },
@@ -243,598 +212,32 @@ export default function AgentDetailPage() {
       {/* Pipeline issues banner (visible regardless of active tab) */}
       <IssuesBanner masterAgentId={id} />
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => selectTab(tab.key)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-              {tab.count !== undefined && tab.count > 0 && (
-                <Badge variant="secondary" className="text-xs ml-1 px-1.5 py-0">
-                  {tab.count}
-                </Badge>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      <AgentTabNav tabs={tabs} active={activeTab} onSelect={selectTab} />
 
       {/* Tab Content */}
-      {activeTab === 'queue' && (
-        <AgentQueueTab agentId={id} agentName={agent.name} />
-      )}
-
+      {activeTab === 'queue' && <AgentQueueTab agentId={id} agentName={agent.name} />}
       {activeTab === 'overview' && (
-        <>
-          {/* Agent Monitor */}
-          <AgentMonitor masterAgentId={id} />
-
-          {/* Pipeline Stats + Parsed Requirements */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4" />
-                  Pipeline Stats
-                  {stats?.avgScore != null && (
-                    <Badge variant="outline" className="ml-auto text-xs">Avg Score: {stats.avgScore}</Badge>
-                  )}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {funnelStages.map((stage) => (
-                  <div key={stage.label} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">{stage.label}</span>
-                      <span className="font-medium">{stage.value}</span>
-                    </div>
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${stage.color} rounded-full transition-all`}
-                        style={{ width: totalContacts > 0 ? `${(stage.value / totalContacts) * 100}%` : '0%' }}
-                      />
-                    </div>
-                  </div>
-                ))}
-                {totalContacts === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No contacts yet. Run the agent to start the pipeline.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Target className="w-4 h-4" />
-                  Parsed Requirements
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {targetRoles.length > 0 && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1.5">
-                      {agent.useCase === 'sales' ? 'Target Decision-Makers' : 'Target Roles'}
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {targetRoles.map((role) => (
-                        <Badge key={role} variant="secondary" className="text-xs">{role}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {requiredSkills.length > 0 && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1.5">
-                      {agent.useCase === 'sales' ? 'Target Company Attributes' : 'Required Skills'}
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {requiredSkills.map((skill) => (
-                        <Badge key={skill} variant="outline" className="text-xs">{skill}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {locations.length > 0 && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1.5">Locations</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {locations.map((loc) => (
-                        <Badge key={loc} variant="outline" className="text-xs">{loc}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {typeof config.bdStrategy === 'string' && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1.5">Discovery Strategy</p>
-                    <Badge variant="outline" className="text-xs">
-                      {config.bdStrategy === 'hiring_signal' ? 'Hiring Signal (Job boards)' :
-                       config.bdStrategy === 'industry_target' ? 'Industry Targeting (Registries)' :
-                       'Hybrid (Both)'}
-                    </Badge>
-                  </div>
-                )}
-                {targetRoles.length === 0 && requiredSkills.length === 0 && locations.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    Requirements will appear after the agent runs.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Live Events */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Activity className="w-4 h-4 text-up" />
-                Live Events
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
-              {events.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">
-                  {agent.status === 'running' ? 'Waiting for events...' : 'No events. Start the agent to see activity.'}
-                </p>
-              ) : (
-                events.map((event, i) => (
-                  <div key={i} className="flex gap-2 text-xs border-l-2 border-border pl-2 py-1">
-                    <div className="min-w-0 flex-1">
-                      <span className={`font-medium ${getStatusColor(event.event)}`}>{event.event}</span>
-                      {event.data && typeof event.data === 'object' && 'message' in event.data && (
-                        <p className="text-muted-foreground mt-0.5 truncate">{String(event.data.message)}</p>
-                      )}
-                    </div>
-                    <span className="text-muted-foreground shrink-0">{formatDate(event.timestamp)}</span>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </>
+        <OverviewTab agentId={id} agent={agent} stats={stats} totalContacts={totalContacts} events={events} />
       )}
-
       {activeTab === 'contacts' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Users className="w-4 h-4" />
-              Contacts ({totalContacts})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {contacts.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                No contacts discovered yet. Run the agent to start finding {agent.useCase === 'sales' ? 'prospects' : 'candidates'}.
-              </p>
-            ) : (
-              contacts.map((contact) => (
-                <Link key={contact.id} href={`/agents/${id}/contacts/${contact.id}`} className="block cursor-pointer">
-                  <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{[contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || 'Unknown'}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {contact.title} {contact.companyName ? `at ${contact.companyName}` : ''}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 ml-2 shrink-0">
-                      {(contact.score ?? 0) > 0 && (
-                        <Badge variant="outline" className="text-xs">
-                          {contact.score}
-                        </Badge>
-                      )}
-                      <Badge variant="secondary" className="text-xs">{contact.status}</Badge>
-                    </div>
-                  </div>
-                </Link>
-              ))
-            )}
-          </CardContent>
-        </Card>
+        <ContactsTab agentId={id} agent={agent} contacts={contacts} totalContacts={totalContacts} />
       )}
-
-      {activeTab === 'businesses' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Store className="w-4 h-4" />
-              Businesses ({gmapsBusinesses.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {gmapsBusinesses.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                No Google Maps businesses captured yet.
-              </p>
-            ) : (
-              gmapsBusinesses.map((b) => {
-                const meta = (b.sourceMetadata ?? {}) as Record<string, unknown>;
-                const category = typeof meta.category === 'string' ? meta.category : '';
-                const rating = typeof meta.rating === 'number' ? meta.rating : null;
-                const reviews = typeof meta.reviewsCount === 'number' ? meta.reviewsCount : null;
-                const price = typeof meta.pricePerPerson === 'string' ? meta.pricePerPerson
-                  : (typeof meta.priceLevel === 'string' ? meta.priceLevel : '');
-                const menuLink = typeof meta.menuLink === 'string' ? meta.menuLink : '';
-                const hasRec = !!(meta.aiRecommendation && typeof meta.aiRecommendation === 'object');
-                return (
-                  <Link key={b.id} href={`/agents/${id}/contacts/${b.id}`} className="block cursor-pointer">
-                    <div className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate" dir="auto">{b.companyName || b.firstName || 'Business'}</p>
-                        <p className="text-xs text-muted-foreground truncate flex items-center gap-2 flex-wrap" dir="auto">
-                          {category && <span>{category}</span>}
-                          {rating != null && (
-                            <span className="inline-flex items-center gap-0.5">
-                              <Star className="w-3 h-3" /> {rating}{reviews != null ? ` (${reviews})` : ''}
-                            </span>
-                          )}
-                          {price && <span>{price}</span>}
-                          {b.phone && (
-                            <span className="inline-flex items-center gap-0.5"><Phone className="w-3 h-3" /> {b.phone}</span>
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 ml-2 shrink-0">
-                        {hasRec && <Badge variant="outline" className="text-xs">AI</Badge>}
-                        {menuLink && <Badge variant="secondary" className="text-xs">Menu</Badge>}
-                        <Badge variant="secondary" className="text-xs">{b.status}</Badge>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {activeTab === 'opportunities' && (
-        <OpportunitiesPage />
-      )}
-
+      {activeTab === 'businesses' && <BusinessesTab agentId={id} businesses={gmapsBusinesses} />}
+      {activeTab === 'opportunities' && <OpportunitiesPage />}
       {activeTab === 'companies' && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Building2 className="w-4 h-4" />
-              Companies ({agentCompanies.length}{companiesPagination?.hasMore ? '+' : ''})
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleGmapsEnrich}
-                disabled={gmapsEnrich.isPending || agentCompanies.length === 0}
-                title="Search each company on Google Maps by name and fill in phone, website and a generic email (info@/contact@). Falls back to a Google search when Maps has no match."
-                className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <MapPin className="w-3.5 h-3.5" />
-                {gmapsEnrich.isPending ? 'Queuing…' : 'Enrich via Google Maps'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowOnlyWithData((v) => !v);
-                  setCursorStack([null]);
-                }}
-                className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
-              >
-                {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
-              </button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {agentCompanies.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                {showOnlyWithData
-                  ? 'No enriched companies yet. Toggle "Show all" to see discovered-but-unenriched stubs.'
-                  : 'No companies discovered yet.'}
-              </p>
-            ) : (
-              <div className="grid gap-3">
-                {agentCompanies.map((company) => {
-                  const raw = (company.rawData ?? {}) as Record<string, unknown>;
-                  const keyPeople = (raw.keyPeople as Array<{ name: string; title: string }>) ?? [];
-                  const completeness = company.dataCompleteness ?? 0;
-                  const hiringSignal = raw.hiringSignal === true;
-                  const openJob = typeof raw.openJob === 'string' ? raw.openJob : '';
-                  const jobUrl = typeof raw.jobUrl === 'string' ? raw.jobUrl : '';
-                  const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
-                  // Prefer the new continuous fitScore; fall back to nothing
-                  // for unscored companies (they're still shown — never hidden).
-                  const fitScore = (raw.fitScore as CompanyFitScoreVerdict | undefined);
-                  // list_verification mode flags (strict company-list enrichment).
-                  const isListEntry = raw.listEntry === true;
-                  const linkedinNotFound = raw.linkedinNotFound === true;
-                  const gmapsNotFound = raw.gmapsNotFound === true;
-                  const crawl = (raw.crawl as Record<string, { url?: string; markdownLength?: number }> | undefined) ?? {};
-                  const crawledCount = [crawl.sourceUrl, crawl.website].filter((c) => c && (c.markdownLength ?? 0) > 0).length;
-                  // Google Maps enrichment (phone/address land on the company's rawData).
-                  const gmapsPhone = typeof raw.phone === 'string' ? raw.phone : '';
-                  const gmapsAddress = typeof raw.address === 'string' ? raw.address : '';
-
-                  return (
-                    <Link key={company.id} href={`/agents/${id}/companies/${company.id}`} className="block">
-                      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors space-y-3">
-                        {/* Header: name + domain + badges */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium truncate">{company.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {[company.domain, company.industry, company.size].filter(Boolean).join(' · ')}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <FitScoreBadge score={fitScore?.buyer_fit_score} explanation={fitScore?.fit_summary} />
-                            {fitScore?.data_completeness === 'partial' && (
-                              <Badge variant="outline" className="text-2xs text-warn-fg border-warn/40">
-                                partial
-                              </Badge>
-                            )}
-                            {company.funding && (
-                              <Badge variant="outline" className="text-xs">{company.funding}</Badge>
-                            )}
-                            <Badge
-                              variant={completeness >= 50 ? 'default' : completeness >= 30 ? 'secondary' : 'outline'}
-                              className="text-xs"
-                            >
-                              {completeness > 0 ? `${completeness}%` : 'New'}
-                            </Badge>
-                          </div>
-                        </div>
-
-                        {/* Google Maps contact details (phone / address) */}
-                        {(gmapsPhone || gmapsAddress) && (
-                          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                            {gmapsPhone && (
-                              <span className="inline-flex items-center gap-1.5">
-                                <Phone className="w-3 h-3 shrink-0" />
-                                {gmapsPhone}
-                              </span>
-                            )}
-                            {gmapsAddress && (
-                              <span className="inline-flex items-center gap-1.5">
-                                <MapPin className="w-3 h-3 shrink-0" />
-                                <span className="truncate">{gmapsAddress}</span>
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* list_verification status row */}
-                        {isListEntry && (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {linkedinNotFound ? (
-                              <Badge variant="outline" className="text-2xs text-down border-down/40">No LinkedIn match</Badge>
-                            ) : company.linkedinUrl ? (
-                              <Badge variant="outline" className="text-2xs text-up border-up/40">LinkedIn ✓</Badge>
-                            ) : null}
-                            {gmapsNotFound ? (
-                              <Badge variant="outline" className="text-2xs text-down border-down/40">No Maps match</Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-2xs text-up border-up/40">Maps ✓</Badge>
-                            )}
-                            {crawledCount > 0 && (
-                              <Badge variant="outline" className="text-2xs text-info border-info/40">
-                                {crawledCount === 2 ? 'Site + source crawled' : 'Site crawled'}
-                              </Badge>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Hiring signal chip — shows what role this company is hiring for */}
-                        {hiringSignal && openJob && (
-                          <div className="flex flex-wrap items-center gap-2">
-                            {jobUrl ? (
-                              <a
-                                href={jobUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 text-xs bg-up/10 text-up hover:bg-up/20 px-2 py-0.5 rounded-full transition-colors"
-                              >
-                                <span className="font-medium">Hiring:</span>
-                                <span>{openJob}</span>
-                                <span className="text-up/70">↗</span>
-                              </a>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-xs bg-up/10 text-up px-2 py-0.5 rounded-full">
-                                <span className="font-medium">Hiring:</span>
-                                <span>{openJob}</span>
-                              </span>
-                            )}
-                            {jobPostedAt && (
-                              <span className="text-2xs text-muted-foreground">Posted {jobPostedAt}</span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Description */}
-                        {company.description && (
-                          <p className="text-xs text-muted-foreground line-clamp-2">{company.description}</p>
-                        )}
-
-                        {/* Key People */}
-                        {keyPeople.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {keyPeople.slice(0, 3).map((person, i) => (
-                              <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded-full">
-                                <span className="font-medium">{person.name}</span>
-                                {person.title && <span className="text-muted-foreground">· {person.title}</span>}
-                              </span>
-                            ))}
-                            {keyPeople.length > 3 && (
-                              <span className="text-xs text-muted-foreground px-2 py-0.5">
-                                +{keyPeople.length - 3} more
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Tech stack chips */}
-                        {Array.isArray(company.techStack) && company.techStack.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {company.techStack.slice(0, 5).map((tech, i) => (
-                              <span key={i} className="text-2xs bg-info/10 text-info px-1.5 py-0.5 rounded">
-                                {tech}
-                              </span>
-                            ))}
-                            {company.techStack.length > 5 && (
-                              <span className="text-2xs text-muted-foreground px-1.5 py-0.5">
-                                +{company.techStack.length - 5}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Progress bar */}
-                        {completeness > 0 && (
-                          <div className="w-full bg-muted rounded-full h-1">
-                            <div
-                              className={`h-1 rounded-full transition-all ${
-                                completeness >= 50 ? 'bg-up' : completeness >= 30 ? 'bg-warn' : 'bg-down'
-                              }`}
-                              style={{ width: `${Math.min(completeness, 100)}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-            {(cursorStack.length > 1 || companiesPagination?.hasMore) && (
-              <div className="flex items-center justify-between pt-4 mt-3 border-t">
-                <button
-                  type="button"
-                  disabled={cursorStack.length <= 1}
-                  onClick={() => setCursorStack((s) => s.slice(0, -1))}
-                  className="text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  ← Previous
-                </button>
-                <span className="text-xs text-muted-foreground">
-                  Page {cursorStack.length}
-                </span>
-                <button
-                  type="button"
-                  disabled={!companiesPagination?.hasMore || !companiesPagination?.nextCursor}
-                  onClick={() => {
-                    if (companiesPagination?.nextCursor) {
-                      setCursorStack((s) => [...s, companiesPagination.nextCursor!]);
-                    }
-                  }}
-                  className="text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  Next →
-                </button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <CompaniesTab
+          agentId={id}
+          state={companiesTab}
+          onGmapsEnrich={handleGmapsEnrich}
+          gmapsPending={gmapsEnrich.isPending}
+        />
       )}
-
-      {activeTab === 'documents' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              Documents ({agentDocuments.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {agentDocuments.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                No documents yet.
-              </p>
-            ) : (
-              agentDocuments.map((doc) => (
-                <div key={doc.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{doc.fileName || doc.type}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {doc.type} · {formatDate(doc.createdAt)}
-                    </p>
-                  </div>
-                  <Badge variant="secondary" className="text-xs">{doc.status}</Badge>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {activeTab === 'emails' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Mail className="w-4 h-4" />
-              Emails Sent ({emails?.length ?? 0})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 max-h-[500px] overflow-y-auto">
-            {!emails || emails.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
-                No emails sent yet. Emails are sent after scoring in the pipeline.
-              </p>
-            ) : (
-              emails.map((email) => (
-                <div key={email.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{email.subject ?? 'No subject'}</p>
-                    <p className="text-xs text-muted-foreground truncate">To: {email.toEmail}</p>
-                  </div>
-                  <div className="flex items-center gap-2 ml-2 shrink-0">
-                    {email.repliedAt && <Badge variant="success" className="text-xs">Replied</Badge>}
-                    {email.openedAt && !email.repliedAt && <Badge variant="outline" className="text-xs">Opened</Badge>}
-                    {email.sentAt && (
-                      <span className="text-xs text-muted-foreground">{formatDate(email.sentAt)}</span>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {activeTab === 'activity' && (
-        <ActivityFeed masterAgentId={id} />
-      )}
-
-      {activeTab === 'strategy' && (
-        <div className="space-y-4">
-          <IcpSegmentationCard
-            agentMission={agent?.mission ?? null}
-            segments={
-              ((agent?.config as Record<string, unknown> | undefined)?.salesStrategy as
-                | { icpSegmentation?: Array<{ name: string; rationale: string; suggestedSeparateAgent: boolean }> }
-                | undefined)?.icpSegmentation
-            }
-          />
-          <StrategyPanel masterAgentId={id} />
-        </div>
-      )}
-
-      {activeTab === 'room' && (
-        <AgentRoom masterAgentId={id} />
-      )}
-
-      {activeTab === 'settings' && (
-        <AgentSettingsTab agent={agent} />
-      )}
+      {activeTab === 'documents' && <DocumentsTab documents={agentDocuments} />}
+      {activeTab === 'emails' && <EmailsTab emails={emails} />}
+      {activeTab === 'activity' && <ActivityFeed masterAgentId={id} />}
+      {activeTab === 'strategy' && <StrategyTab agentId={id} agent={agent} />}
+      {activeTab === 'room' && <AgentRoom masterAgentId={id} />}
+      {activeTab === 'settings' && <AgentSettingsTab agent={agent} />}
     </div>
   );
 }

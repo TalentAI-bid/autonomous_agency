@@ -10,6 +10,7 @@ import {
   Info, AlertTriangle, XCircle, CheckCircle2, Globe, Chrome, SkipForward, Loader2, Search,
 } from 'lucide-react';
 
+import { Input } from '@/components/ui/input';
 const SEVERITY_STYLES: Record<string, { border: string; icon: React.ElementType; iconColor: string }> = {
   info:    { border: 'border-l-blue-500',    icon: Info,          iconColor: 'text-info' },
   warning: { border: 'border-l-amber-500',   icon: AlertTriangle, iconColor: 'text-warn-fg' },
@@ -177,13 +178,13 @@ function SearchQualityLowAlert({
           );
         })}
       </div>
-      <input
+      <Input
         type="text"
         value={userTerm}
         onChange={(e) => setUserTerm(e.target.value)}
         placeholder="Type a broader term (e.g. blockchain developer)"
         disabled={disabled}
-        className="mt-1.5 w-full h-7 px-2 text-xs bg-background border border-border rounded"
+        className="mt-1.5 h-7 px-2 text-xs"
       />
       <p className="text-2xs text-muted-foreground/70 italic">
         Or type your own broader term in the chat below.

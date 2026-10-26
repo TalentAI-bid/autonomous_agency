@@ -132,7 +132,7 @@ export function ActionCard({
   return (
     <div
       className={cn(
-        'rounded-[10px] border border-border p-3.5',
+        'rounded-card border border-border p-3.5',
         action.status === 'in_progress' ? 'bg-bg-panel' : 'bg-bg-sub',
         (action.status === 'completed' || action.status === 'skipped') && 'opacity-50',
       )}
@@ -183,7 +183,7 @@ export function ActionCard({
 
       {showDraft && (
         <div
-          className="border border-dashed border-border rounded-[6px] p-2 bg-bg-panel mb-2 cursor-pointer"
+          className="border border-dashed border-border rounded-chip p-2 bg-bg-panel mb-2 cursor-pointer"
           onClick={() => setDraftExpanded((v) => !v)}
         >
           {action.draftSubject && (
@@ -219,7 +219,7 @@ export function ActionCard({
                   key={alt.contactId}
                   onClick={() => handleRetarget(alt)}
                   disabled={retargetMut.isPending}
-                  className="flex items-center gap-1.5 py-1.5 px-2 bg-bg-panel border border-border rounded-[6px] text-left cursor-pointer text-label text-ink"
+                  className="flex items-center gap-1.5 py-1.5 px-2 bg-bg-panel border border-border rounded-chip text-left cursor-pointer text-label text-ink"
                 >
                   <span className="font-medium">{alt.name}</span>
                   {alt.title && <span className="text-ink-3">· {alt.title}</span>}

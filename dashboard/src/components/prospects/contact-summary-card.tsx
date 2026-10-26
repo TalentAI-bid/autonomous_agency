@@ -49,7 +49,7 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
 
   return (
     <div
-      className="border border-border rounded-[12px] p-4 bg-bg-sub flex flex-col gap-3"
+      className="border border-border rounded-panel p-4 bg-bg-sub flex flex-col gap-3"
     >
       <div>
         <div className="text-[18px] font-semibold">{fullName}</div>

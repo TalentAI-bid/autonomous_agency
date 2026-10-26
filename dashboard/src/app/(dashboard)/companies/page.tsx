@@ -48,7 +48,7 @@ function personInitials(name: string) {
 function CompanyGlyph({ name, size = 28 }: { name: string; size?: number }) {
   return (
     <span
-      className="rounded-[6px] grid place-items-center font-bold text-ink bg-bg-soft border border-line shrink-0" style={{ width: size, height: size, fontSize: size * 0.42 }}
+      className="rounded-chip grid place-items-center font-bold text-ink bg-bg-soft border border-line shrink-0" style={{ width: size, height: size, fontSize: size * 0.42 }}
     >
       {monogram(name)}
     </span>

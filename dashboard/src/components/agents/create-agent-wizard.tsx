@@ -16,6 +16,7 @@ import { Rocket, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 export function CreateAgentWizard() {
   const router = useRouter();
   const createAgent = useCreateAgent();
@@ -99,24 +100,22 @@ export function CreateAgentWizard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="location">Location</Label>
-            <input
+            <Input
               id="location"
               type="text"
               placeholder="e.g. France, Remote, New York"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="skills">Required Skills</Label>
-            <input
+            <Input
               id="skills"
               type="text"
               placeholder="e.g. React, Node.js, TypeScript"
               value={requiredSkills}
               onChange={(e) => setRequiredSkills(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             />
           </div>
         </div>

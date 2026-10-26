@@ -18,6 +18,8 @@
     --accent-weak: oklch(0.97 0.03 var(--accent-h));
     --accent-mid: oklch(0.90 0.08 var(--accent-h));
     --accent-fg: oklch(0.32 0.14 var(--accent-h));
+    --accent-tint: color-mix(in oklch, var(--accent) 4%, var(--bg-panel));   /* faint brand wash on a card */
+    --accent-line: color-mix(in oklch, var(--accent) 45%, var(--line));      /* brand-tinted hairline */
 
     --density: 1;
     --row-pad-y: calc(7px * var(--density));

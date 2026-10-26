@@ -30,7 +30,7 @@ export function TimelineFeed({
   if (events.length === 0) {
     return (
       <div
-        className="text-center p-8 text-ink-3 border border-border rounded-[8px]"
+        className="text-center p-8 text-ink-3 border border-border rounded-row"
       >
         No events yet.
       </div>
@@ -74,7 +74,7 @@ function EventCard({ event }: { event: TimelineEvent }) {
   const hasDetail = Boolean(event.description) || Object.keys(event.metadata ?? {}).length > 0;
   return (
     <div
-      className={cn('rounded-[8px] border border-border bg-bg-sub p-2.5', hasDetail ? 'cursor-pointer' : 'cursor-default')}
+      className={cn('rounded-row border border-border bg-bg-sub p-2.5', hasDetail ? 'cursor-pointer' : 'cursor-default')}
       onClick={() => hasDetail && setExpanded((v) => !v)}
     >
       <div className="flex justify-between items-baseline">

@@ -62,6 +62,8 @@ const config: Config = {
         'accent-weak': tok('accent-weak'),
         'accent-mid': tok('accent-mid'),
         'accent-fg': tok('accent-fg'),
+        'accent-tint': tok('accent-tint'),
+        'accent-line': tok('accent-line'),
         'a-master': tok('a-master'),
         'a-discovery': tok('a-discovery'),
         'a-enrichment': tok('a-enrichment'),
@@ -112,6 +114,12 @@ const config: Config = {
         },
       },
       borderRadius: {
+        // Named radius scale for the dense UI (tag < chip < row < card < panel)
+        tag: '4px',
+        chip: '6px',
+        row: '8px',
+        card: '10px',
+        panel: '12px',
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',

@@ -74,7 +74,7 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
 
   const refreshBanner = refreshInFlight ? (
     <div
-      className="flex items-center gap-2 py-2.5 px-3 border border-border rounded-[8px] bg-bg-panel text-body text-ink-2"
+      className="flex items-center gap-2 py-2.5 px-3 border border-border rounded-row bg-bg-panel text-body text-ink-2"
     >
       <span className="text-[14px]">{refreshTimedOut ? 'ℹ️' : '🔄'}</span>
       <span>

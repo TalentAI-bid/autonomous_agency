@@ -578,7 +578,7 @@ export default function AgentDetailPage() {
                           <div className="flex items-center gap-1.5 shrink-0">
                             <FitScoreBadge score={fitScore?.buyer_fit_score} explanation={fitScore?.fit_summary} />
                             {fitScore?.data_completeness === 'partial' && (
-                              <Badge variant="outline" className="text-[10px] text-warn-fg border-warn/40">
+                              <Badge variant="outline" className="text-2xs text-warn-fg border-warn/40">
                                 partial
                               </Badge>
                             )}
@@ -616,17 +616,17 @@ export default function AgentDetailPage() {
                         {isListEntry && (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {linkedinNotFound ? (
-                              <Badge variant="outline" className="text-[10px] text-down border-down/40">No LinkedIn match</Badge>
+                              <Badge variant="outline" className="text-2xs text-down border-down/40">No LinkedIn match</Badge>
                             ) : company.linkedinUrl ? (
-                              <Badge variant="outline" className="text-[10px] text-up border-up/40">LinkedIn ✓</Badge>
+                              <Badge variant="outline" className="text-2xs text-up border-up/40">LinkedIn ✓</Badge>
                             ) : null}
                             {gmapsNotFound ? (
-                              <Badge variant="outline" className="text-[10px] text-down border-down/40">No Maps match</Badge>
+                              <Badge variant="outline" className="text-2xs text-down border-down/40">No Maps match</Badge>
                             ) : (
-                              <Badge variant="outline" className="text-[10px] text-up border-up/40">Maps ✓</Badge>
+                              <Badge variant="outline" className="text-2xs text-up border-up/40">Maps ✓</Badge>
                             )}
                             {crawledCount > 0 && (
-                              <Badge variant="outline" className="text-[10px] text-info border-info/40">
+                              <Badge variant="outline" className="text-2xs text-info border-info/40">
                                 {crawledCount === 2 ? 'Site + source crawled' : 'Site crawled'}
                               </Badge>
                             )}
@@ -655,7 +655,7 @@ export default function AgentDetailPage() {
                               </span>
                             )}
                             {jobPostedAt && (
-                              <span className="text-[10px] text-muted-foreground">Posted {jobPostedAt}</span>
+                              <span className="text-2xs text-muted-foreground">Posted {jobPostedAt}</span>
                             )}
                           </div>
                         )}
@@ -686,12 +686,12 @@ export default function AgentDetailPage() {
                         {Array.isArray(company.techStack) && company.techStack.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {company.techStack.slice(0, 5).map((tech, i) => (
-                              <span key={i} className="text-[10px] bg-info/10 text-info px-1.5 py-0.5 rounded">
+                              <span key={i} className="text-2xs bg-info/10 text-info px-1.5 py-0.5 rounded">
                                 {tech}
                               </span>
                             ))}
                             {company.techStack.length > 5 && (
-                              <span className="text-[10px] text-muted-foreground px-1.5 py-0.5">
+                              <span className="text-2xs text-muted-foreground px-1.5 py-0.5">
                                 +{company.techStack.length - 5}
                               </span>
                             )}

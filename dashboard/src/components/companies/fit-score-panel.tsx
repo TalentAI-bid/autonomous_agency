@@ -289,7 +289,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
           </div>
         </div>
 
-        <p className="text-[10px] text-muted-foreground pt-2 border-t">
+        <p className="text-2xs text-muted-foreground pt-2 border-t">
           Scored at {new Date(triage.scored_at).toLocaleString()} · {triage.model_used} · Data: {triage.data_completeness}
         </p>
       </CardContent>

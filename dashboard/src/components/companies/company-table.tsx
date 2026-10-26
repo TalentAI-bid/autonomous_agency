@@ -125,16 +125,16 @@ export function CompanyTable({ companies, agentsById, isLoading }: CompanyTableP
                 <TableCell>
                   <div className="flex flex-wrap gap-1 max-w-[260px]">
                     {hiringChip && (
-                      <Badge variant="success" className="text-[10px]">Hiring</Badge>
+                      <Badge variant="success" className="text-2xs">Hiring</Badge>
                     )}
                     {fundedChip && (
-                      <Badge variant="blue" className="text-[10px]">Funded</Badge>
+                      <Badge variant="blue" className="text-2xs">Funded</Badge>
                     )}
                     {techShown.map((t) => (
-                      <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
+                      <Badge key={t} variant="secondary" className="text-2xs">{t}</Badge>
                     ))}
                     {techExtra > 0 && (
-                      <Badge variant="outline" className="text-[10px]">+{techExtra}</Badge>
+                      <Badge variant="outline" className="text-2xs">+{techExtra}</Badge>
                     )}
                     {!hiringChip && !fundedChip && techShown.length === 0 && (
                       <span className="text-xs text-muted-foreground">—</span>

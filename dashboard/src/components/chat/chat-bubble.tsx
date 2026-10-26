@@ -55,7 +55,7 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
         {files && files.length > 0 && (
           <div className={cn('flex flex-wrap gap-1.5', isUser && 'justify-end')}>
             {files.map((f, i) => (
-              <Badge key={i} variant="secondary" className="gap-1 text-[10px]">
+              <Badge key={i} variant="secondary" className="gap-1 text-2xs">
                 <FileText className="w-3 h-3" />
                 {f.fileName}
               </Badge>

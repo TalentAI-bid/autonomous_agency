@@ -21,7 +21,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
-const LABEL = 'mb-1.5 text-[10px] uppercase tracking-[0.4px] text-ink-3';
+const LABEL = 'mb-1.5 text-2xs uppercase tracking-[0.4px] text-ink-3';
 const ROW = 'flex items-center gap-1.5 text-xs text-ink';
 const SECTION = 'flex flex-col gap-1.5';
 
@@ -39,7 +39,7 @@ function Collapsible({ label, html }: { label: string; html: string }) {
     <div className={SECTION}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="cursor-pointer self-start rounded-full border border-border bg-bg-sub px-2.5 py-1 text-[11px] text-ink-2"
+        className="cursor-pointer self-start rounded-full border border-border bg-bg-sub px-2.5 py-1 text-xs text-ink-2"
       >
         {open ? `Hide ${label}` : `Show ${label}`}
       </button>
@@ -73,7 +73,7 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
             onClick={run}
             disabled={gen?.isPending}
             className={cn(
-              'rounded-full border border-border bg-bg-panel px-2.5 py-[3px] text-[11px] text-ink-2',
+              'rounded-full border border-border bg-bg-panel px-2.5 py-[3px] text-xs text-ink-2',
               gen?.isPending ? 'cursor-wait' : 'cursor-pointer',
             )}
           >
@@ -107,7 +107,7 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
           )}
         </div>
       )}
-      {!rec && <div className="text-[11px] text-ink-3">No recommendation yet.</div>}
+      {!rec && <div className="text-xs text-ink-3">No recommendation yet.</div>}
     </div>
   );
 }
@@ -153,7 +153,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
     <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-bg-sub p-4">
       <div className="flex items-center gap-1.5">
         <MapPin size={14} />
-        <div className="text-[13px] font-semibold">Google Maps</div>
+        <div className="text-body font-semibold">Google Maps</div>
       </div>
 
       {(category || rating != null || reviewsCount != null) && (
@@ -181,7 +181,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
       {(address || plusCode) && (
         <div className={SECTION}>
           {address && <div className={ROW}><MapPin size={13} />{address}</div>}
-          {plusCode && <div className="text-[11px] text-ink-3">{plusCode}</div>}
+          {plusCode && <div className="text-xs text-ink-3">{plusCode}</div>}
         </div>
       )}
 
@@ -255,7 +255,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
             </div>
           )}
           {str(menu.source) && (
-            <div className="text-[10px] text-ink-3">source: {str(menu.source)}</div>
+            <div className="text-2xs text-ink-3">source: {str(menu.source)}</div>
           )}
         </div>
       )}
@@ -263,7 +263,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
       {ratingDistribution.length > 0 && (
         <div>
           <div className={LABEL}>Rating breakdown</div>
-          <div className="flex flex-col gap-0.5 text-[11px] text-ink-2" dir="auto">
+          <div className="flex flex-col gap-0.5 text-xs text-ink-2" dir="auto">
             {ratingDistribution.map((r, i) => <div key={i}>{str(r.label)}</div>)}
           </div>
         </div>
@@ -277,7 +277,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
       )}
 
       {!phone && !website && !address && !mapsUrl && (
-        <div className="flex items-center gap-1 text-[11px] text-ink-3">
+        <div className="flex items-center gap-1 text-xs text-ink-3">
           <Tag size={11} /> Detail not fetched yet
         </div>
       )}

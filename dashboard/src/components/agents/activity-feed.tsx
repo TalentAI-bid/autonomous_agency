@@ -104,7 +104,7 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
                 }`} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${colorClass}`}>
+                    <Badge variant="outline" className={`text-2xs px-1 py-0 ${colorClass}`}>
                       {entry.agentType}
                     </Badge>
                     <span className="font-medium">{entry.action}</span>

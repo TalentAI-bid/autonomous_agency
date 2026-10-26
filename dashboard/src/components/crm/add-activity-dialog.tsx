@@ -179,7 +179,7 @@ export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: A
             <Label>Type</Label>
             {ACTIVITY_GROUPS.map((group) => (
               <div key={group.label} className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {group.label}
                 </p>
                 <div className="flex flex-wrap gap-1.5">

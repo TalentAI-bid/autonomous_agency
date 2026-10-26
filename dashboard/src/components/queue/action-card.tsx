@@ -143,24 +143,24 @@ export function ActionCard({
             <Badge variant={PRIORITY_VARIANT[action.priority]}>{action.priority}</Badge>
             <span className="text-[14px]">{labelInfo.icon} {labelInfo.label}</span>
             {action.priorityReason && (
-              <span className="text-[11px] text-ink-3">{action.priorityReason}</span>
+              <span className="text-xs text-ink-3">{action.priorityReason}</span>
             )}
             {action.draftConfidence != null && action.draftConfidence < 50 && (
               <Badge variant="warning">⚠️ Low context</Badge>
             )}
           </div>
           {/* Company name is the primary identifier. */}
-          <div className="text-[15px] font-semibold text-ink">
+          <div className="text-title font-semibold text-ink">
             {company.name}
             {company.score != null && (
-              <span className="text-[11px] text-ink-3 ml-2 font-normal">
+              <span className="text-xs text-ink-3 ml-2 font-normal">
                 score {company.score}
               </span>
             )}
           </div>
           {/* Recommended target. Null for research actions. */}
           {contact ? (
-            <div className="text-[12px] text-ink-2 mt-0.5">
+            <div className="text-label text-ink-2 mt-0.5">
               Recommended target:&nbsp;
               <Link href={`/prospects/${contact.id}`} className="text-ink no-underline">
                 {recommendedName}
@@ -168,7 +168,7 @@ export function ActionCard({
               {contact.title && <span className="text-ink-3"> · {contact.title}</span>}
             </div>
           ) : (
-            <div className="text-[12px] text-ink-3 mt-0.5 italic">
+            <div className="text-label text-ink-3 mt-0.5 italic">
               No contact yet — research needed
             </div>
           )}
@@ -176,7 +176,7 @@ export function ActionCard({
       </div>
 
       {action.whyNow && (
-        <div className="text-[12px] text-ink-2 mb-2 italic">
+        <div className="text-label text-ink-2 mb-2 italic">
           {action.whyNow}
         </div>
       )}
@@ -187,17 +187,17 @@ export function ActionCard({
           onClick={() => setDraftExpanded((v) => !v)}
         >
           {action.draftSubject && (
-            <div className="text-[12px] font-medium mb-1">
+            <div className="text-label font-medium mb-1">
               Re: {action.draftSubject}
             </div>
           )}
           <div
-            className="text-[12px] text-ink-2 whitespace-pre-wrap overflow-hidden" style={{ maxHeight: draftExpanded ? 'none' : 60 }}
+            className="text-label text-ink-2 whitespace-pre-wrap overflow-hidden" style={{ maxHeight: draftExpanded ? 'none' : 60 }}
           >
             {action.draftBody}
           </div>
           {!draftExpanded && action.draftBody && action.draftBody.length > 200 && (
-            <div className="text-[10px] text-ink-3 mt-1">
+            <div className="text-2xs text-ink-3 mt-1">
               Click to expand · {action.draftBody.length} chars
             </div>
           )}
@@ -208,7 +208,7 @@ export function ActionCard({
         <div className="mb-2">
           <button
             onClick={() => setAltsOpen((v) => !v)}
-            className="bg-transparent border-0 text-ink-2 text-[12px] cursor-pointer p-0"
+            className="bg-transparent border-0 text-ink-2 text-label cursor-pointer p-0"
           >
             {altsOpen ? '▼' : '▶'} Other contacts at this company ({alternatives.length})
           </button>
@@ -219,11 +219,11 @@ export function ActionCard({
                   key={alt.contactId}
                   onClick={() => handleRetarget(alt)}
                   disabled={retargetMut.isPending}
-                  className="flex items-center gap-1.5 py-1.5 px-2 bg-bg-panel border border-border rounded-[6px] text-left cursor-pointer text-[12px] text-ink"
+                  className="flex items-center gap-1.5 py-1.5 px-2 bg-bg-panel border border-border rounded-[6px] text-left cursor-pointer text-label text-ink"
                 >
                   <span className="font-medium">{alt.name}</span>
                   {alt.title && <span className="text-ink-3">· {alt.title}</span>}
-                  <span className="ml-auto text-[10px] text-ink-3">
+                  <span className="ml-auto text-2xs text-ink-3">
                     Switch & regenerate draft
                   </span>
                 </button>
@@ -260,7 +260,7 @@ export function ActionCard({
           </Button>
         )}
         {contact && (
-          <Link href={`/prospects/${contact.id}`} className="text-[11px] text-ink-3 self-center ml-auto">
+          <Link href={`/prospects/${contact.id}`} className="text-xs text-ink-3 self-center ml-auto">
             Open ↗
           </Link>
         )}

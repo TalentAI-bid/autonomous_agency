@@ -100,12 +100,12 @@ export function ActivityItem({ activity }: ActivityItemProps) {
               {activity.title}
             </p>
             <div className="mt-1 flex items-center gap-1.5">
-              <span className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide', CHANNEL_CHIP_CLASS[channel])}>
+              <span className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide', CHANNEL_CHIP_CLASS[channel])}>
                 {CHANNEL_LABEL[channel]}
               </span>
               {direction && (
                 <span className={cn(
-                  'inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                  'inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide',
                   direction === 'out' ? 'bg-bg-soft text-ink-3' : 'bg-up/15 text-up',
                 )}>
                   {direction === 'out' ? <ArrowUp className="h-2.5 w-2.5" /> : <ArrowDown className="h-2.5 w-2.5" />}

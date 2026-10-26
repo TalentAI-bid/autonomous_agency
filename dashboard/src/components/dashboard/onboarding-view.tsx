@@ -103,8 +103,8 @@ function FunnelCell({ label, last }: { label: string; last: boolean }) {
     <>
       <div className="min-w-0 text-center">
         <div className="caps-sm mb-1.5 text-ink-3">{label}</div>
-        <div className="mono text-[22px] font-semibold leading-none text-ink-2">0</div>
-        <div className="mono mt-1 text-[11px] text-ink-4">0%</div>
+        <div className="mono text-stat font-semibold leading-none text-ink-2">0</div>
+        <div className="mono mt-1 text-xs text-ink-4">0%</div>
       </div>
       {!last && <ChevronRight size={16} className="mt-[22px] shrink-0 self-start text-ink-5"/>}
     </>
@@ -140,10 +140,10 @@ export function OnboardingView() {
   };
 
   return (
-    <div className="page mx-auto max-w-[1120px] !px-6 !py-5">
+    <div className="page mx-auto max-w-[1120px] px-6 py-5">
       {/* Top strip: status pill · stat cards · deploy CTA */}
       <div className="mb-7 flex flex-wrap items-center gap-3">
-        <span className="pill !inline-flex items-center !gap-[7px] !border-warn/30 !bg-warn-weak !text-warn">
+        <span className="pill inline-flex items-center gap-[7px] border-warn/30 bg-warn-weak text-warn">
           <Sparkles size={12} />
           Setup in progress
         </span>
@@ -169,7 +169,7 @@ export function OnboardingView() {
       </div>
 
       {/* Hero */}
-      <h1 className="display mb-6 mt-0 !text-[34px] !font-normal !tracking-[-0.02em]">
+      <h1 className="display mb-6 mt-0 text-hero font-normal tracking-[-0.02em]">
         Let&apos;s get your first agent live
       </h1>
 
@@ -177,7 +177,7 @@ export function OnboardingView() {
       <div className="panel mb-5">
         <div className="px-4 pb-3.5 pt-4">
           <div className="mb-3 flex items-baseline">
-            <h2 className="m-0 text-[15px] font-semibold text-ink">Get set up</h2>
+            <h2 className="m-0 text-title font-semibold text-ink">Get set up</h2>
             <span className="mono ml-auto text-xs text-ink-3">{completedCount} of 4 complete</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full border border-line bg-bg-soft">

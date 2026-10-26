@@ -269,7 +269,7 @@ export default function ExtensionSettingsPage() {
               ))}
             </div>
           )}
-          <p className="mt-3 text-[11px] text-muted-foreground">
+          <p className="mt-3 text-xs text-muted-foreground">
             Click a row to see the full request params and the raw response from the
             extension. If a task shows "completed" with <span className="font-mono">items: 0</span>,
             the page loaded but the adapter didn't recognise it — inspect{' '}
@@ -373,11 +373,11 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px]">{task.site}</Badge>
+            <Badge variant="outline" className="text-2xs">{task.site}</Badge>
             <span className="font-mono truncate">{task.type}</span>
             {completed && (
               <span
-                className={`tabular-nums text-[10px] ${empty ? 'text-warn-fg' : 'text-up'}`}
+                className={`tabular-nums text-2xs ${empty ? 'text-warn-fg' : 'text-up'}`}
                 title="Items extracted by the adapter from the result blob"
               >
                 items: {task.itemCount}
@@ -412,8 +412,8 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
 function PayloadBlock({ label, value }: { label: string; value: unknown }) {
   return (
     <div className="rounded border border-border bg-muted/30 p-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
-      <pre className="text-[10px] font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">
+      <div className="text-2xs uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
+      <pre className="text-2xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">
         {value ? JSON.stringify(value, null, 2) : '—'}
       </pre>
     </div>
@@ -429,7 +429,7 @@ function StatusBadge({ status }: { status: string }) {
     failed: 'bg-down/15 text-down',
     cancelled: 'bg-ink-3/15 text-ink-3',
   }[status] ?? 'bg-ink-3/15 text-ink-3';
-  return <Badge className={`${style} hover:${style} text-[10px]`}>{status}</Badge>;
+  return <Badge className={`${style} hover:${style} text-2xs`}>{status}</Badge>;
 }
 
 function fmtDate(v: string | null): string {

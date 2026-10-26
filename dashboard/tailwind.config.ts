@@ -11,6 +11,9 @@ const tok = (name: string) =>
   }) as unknown as string;
 
 const config: Config = {
+  // Prefix every utility with :root so it out-ranks the hand-written rules in
+  // globals.css (.panel, .pill, .nav-item, ".panel-head h3" …) without !important.
+  important: ':root',
   content: [
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -23,9 +26,17 @@ const config: Config = {
         mono: ['var(--ff-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
         display: ['var(--ff-display)', 'Georgia', 'serif'],
       },
+      // Dense type scale. New steps keep line-height inherited (the body sets 1.4)
+      // so swapping text-[Npx] for a named step never shifts layout.
       fontSize: {
+        '3xs': ['9px', { lineHeight: 'inherit' }],
         '2xs': ['10px', { lineHeight: '14px' }],
         xs: ['11px', { lineHeight: '16px' }],
+        label: ['12px', { lineHeight: 'inherit' }],
+        body: ['13px', { lineHeight: 'inherit' }],
+        title: ['15px', { lineHeight: 'inherit' }],
+        stat: ['22px', { lineHeight: 'inherit' }],
+        hero: ['34px', { lineHeight: 'inherit' }],
       },
       colors: {
         // Design system tokens (OKLCH via CSS vars)

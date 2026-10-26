@@ -111,7 +111,7 @@ export function Sidebar() {
       <div className="sidebar-foot">
         <div className="avatar">{initials(user?.name ?? user?.email)}</div>
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium">{user?.name ?? user?.email ?? 'User'}</div>
+          <div className="text-label font-medium">{user?.name ?? user?.email ?? 'User'}</div>
           <div className="text-[10.5px] text-ink-3">
             {tenant?.name ?? 'Workspace'} · {user?.role ?? 'Member'}
           </div>
@@ -120,7 +120,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={handleLogout}
-          className="nav-item !p-1.5 !min-h-0 !w-7 !h-7 !justify-center !shrink-0"
+          className="nav-item p-1.5 min-h-0 w-7 h-7 justify-center shrink-0"
           title="Sign out"
           aria-label="Sign out"
         >

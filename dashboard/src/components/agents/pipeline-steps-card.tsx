@@ -56,7 +56,7 @@ export function PipelineStepsCard({ steps, message }: PipelineStepsCardProps) {
             <Workflow className="w-3.5 h-3.5 text-primary" />
           </div>
           <h4 className="text-xs font-semibold">Execution Pipeline</h4>
-          <Badge variant="secondary" className="text-[10px] ml-auto">{steps.length} steps</Badge>
+          <Badge variant="secondary" className="text-2xs ml-auto">{steps.length} steps</Badge>
         </div>
 
         {message && (
@@ -83,12 +83,12 @@ export function PipelineStepsCard({ steps, message }: PipelineStepsCardProps) {
                   <div className="flex items-center gap-1.5">
                     <p className="text-xs font-medium">{label}</p>
                     {step.dependsOn.length > 0 && (
-                      <span className="text-[9px] text-muted-foreground">
+                      <span className="text-3xs text-muted-foreground">
                         after {step.dependsOn.join(', ')}
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-muted-foreground truncate">
+                  <p className="text-xs text-muted-foreground truncate">
                     {step.action.replace(/_/g, ' ')}
                   </p>
                 </div>

@@ -126,23 +126,23 @@ export default function CompaniesPage() {
   );
 
   return (
-    <div className="page !py-5 !px-6 !flex !flex-col !gap-[18px]">
+    <div className="page py-5 px-6 flex flex-col gap-[18px]">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-start gap-4 flex-wrap">
         <div className="min-w-0">
           <h1
-            className="!flex !items-center !gap-3 !m-0 !text-[26px] !font-semibold !tracking-[-0.02em] !text-ink"
+            className="flex items-center gap-3 m-0 text-[26px] font-semibold tracking-[-0.02em] text-ink"
           >
-            <span className="display !italic">
+            <span className="display italic">
               Companies
             </span>
             <span className="text-ink-3 font-normal">—</span>
-            <span className="mono !text-[22px]">
+            <span className="mono text-stat">
               {count}
             </span>
-            {live && <span className="dot is-live !w-2 !h-2 !rounded-full"  />}
+            {live && <span className="dot is-live w-2 h-2 rounded-full"  />}
           </h1>
-          <p className="!mt-1.5 !mx-0 !mb-0 !text-[12.5px] !text-ink-3 !flex !items-center !gap-2">
+          <p className="mt-1.5 mx-0 mb-0 text-[12.5px] text-ink-3 flex items-center gap-2">
             {search ? (
               <>
                 Searching: <span className="text-ink-2 font-medium">{search}</span>
@@ -152,7 +152,7 @@ export default function CompaniesPage() {
             )}
             {live && (
               <span
-                className="pill is-accent !text-[10px] !py-px !px-2 !bg-accent-weak !text-accent-fg"
+                className="pill is-accent text-2xs py-px px-2 bg-accent-weak text-accent-fg"
               >
                 Live
               </span>
@@ -170,7 +170,7 @@ export default function CompaniesPage() {
 
       {/* ── Filter pills ───────────────────────────────────────── */}
       <div className="flex items-center gap-2.5 flex-wrap">
-        <label className="filter-pill !cursor-text">
+        <label className="filter-pill cursor-text">
           <Search size={14} className="text-ink-3"/>
           <input
             value={searchInput}
@@ -193,7 +193,7 @@ export default function CompaniesPage() {
           Scored only
         </button>
 
-        <span className="filter-pill !ml-auto">
+        <span className="filter-pill ml-auto">
           Sort by:
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'fit_score' | 'createdAt')}>
             <option value="fit_score">Fit score</option>
@@ -236,7 +236,7 @@ export default function CompaniesPage() {
               badge={
                 c.size ? (
                   <span
-                    className="pill !inline-flex !items-center !gap-[5px] !text-[10.5px] !text-ink-3"
+                    className="pill inline-flex items-center gap-[5px] text-[10.5px] text-ink-3"
                   >
                     <Users size={11} /> {c.size}
                   </span>
@@ -265,10 +265,10 @@ export default function CompaniesPage() {
 
       {/* ── Footer / pagination ────────────────────────────────── */}
       <div
-        className="flex items-center justify-between pt-2 border-t border-line text-[12px] text-ink-3"
+        className="flex items-center justify-between pt-2 border-t border-line text-label text-ink-3"
       >
         <span>
-          <span className="mono !text-ink-2">
+          <span className="mono text-ink-2">
             {count}
           </span>{' '}
           {count === 1 ? 'company' : 'companies'} shown
@@ -284,7 +284,7 @@ export default function CompaniesPage() {
             >
               ← Prev
             </Button>
-            <span className="mono !text-[11px]">
+            <span className="mono text-xs">
               Page {cursorStack.length}
             </span>
             <Button

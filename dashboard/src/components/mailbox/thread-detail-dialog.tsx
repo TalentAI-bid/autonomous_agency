@@ -130,7 +130,7 @@ export function ThreadDetailDialog({ thread, open, onOpenChange }: ThreadDetailD
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary" className="text-[10px]">
+                      <Badge variant="secondary" className="text-2xs">
                         {msg.direction === 'sent' ? 'Sent' : 'Received'}
                       </Badge>
                       <span className="text-xs text-muted-foreground">
@@ -148,7 +148,7 @@ export function ThreadDetailDialog({ thread, open, onOpenChange }: ThreadDetailD
                     {msg.body ?? '(No content)'}
                   </div>
                   {msg.classification && (
-                    <Badge className="mt-2 text-[10px]">{msg.classification.replace(/_/g, ' ')}</Badge>
+                    <Badge className="mt-2 text-2xs">{msg.classification.replace(/_/g, ' ')}</Badge>
                   )}
                 </div>
               ))}

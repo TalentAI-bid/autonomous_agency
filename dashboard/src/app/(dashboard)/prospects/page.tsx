@@ -117,23 +117,23 @@ export default function ProspectsPage() {
   const live = isFetching && !isLoading;
 
   return (
-    <div className="page !py-5 !px-6 !flex !flex-col !gap-[18px]">
+    <div className="page py-5 px-6 flex flex-col gap-[18px]">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-start gap-4 flex-wrap">
         <div className="min-w-0">
           <h1
-            className="!flex !items-center !gap-3 !m-0 !text-[26px] !font-semibold !tracking-[-0.02em] !text-ink"
+            className="flex items-center gap-3 m-0 text-[26px] font-semibold tracking-[-0.02em] text-ink"
           >
-            <span className="display !italic">
+            <span className="display italic">
               Prospects
             </span>
             <span className="text-ink-3 font-normal">—</span>
-            <span className="mono !text-[22px]">
+            <span className="mono text-stat">
               {count}
             </span>
-            {live && <span className="dot is-live !w-2 !h-2 !rounded-full"  />}
+            {live && <span className="dot is-live w-2 h-2 rounded-full"  />}
           </h1>
-          <p className="!mt-1.5 !mx-0 !mb-0 !text-[12.5px] !text-ink-3 !flex !items-center !gap-2">
+          <p className="mt-1.5 mx-0 mb-0 text-[12.5px] text-ink-3 flex items-center gap-2">
             {debouncedSearch ? (
               <>
                 Searching: <span className="text-ink-2 font-medium">{debouncedSearch}</span>
@@ -143,7 +143,7 @@ export default function ProspectsPage() {
             )}
             {live && (
               <span
-                className="pill is-accent !text-[10px] !py-px !px-2 !bg-accent-weak !text-accent-fg"
+                className="pill is-accent text-2xs py-px px-2 bg-accent-weak text-accent-fg"
               >
                 Live
               </span>
@@ -164,7 +164,7 @@ export default function ProspectsPage() {
 
       {/* ── Filter pills ───────────────────────────────────────── */}
       <div className="flex items-center gap-2.5 flex-wrap">
-        <label className="filter-pill !cursor-text">
+        <label className="filter-pill cursor-text">
           <Search size={14} className="text-ink-3"/>
           <input
             value={search}
@@ -197,7 +197,7 @@ export default function ProspectsPage() {
         </span>
 
         {tag && (
-          <span className="filter-pill !border-transparent !bg-accent-weak !text-accent-fg">
+          <span className="filter-pill border-transparent bg-accent-weak text-accent-fg">
             Tag: {tag}
             <button
               type="button"
@@ -210,7 +210,7 @@ export default function ProspectsPage() {
           </span>
         )}
 
-        <span className="filter-pill !ml-auto">
+        <span className="filter-pill ml-auto">
           Sort by:
           <select value={sort} onChange={(e) => setSort(e.target.value as 'score' | 'recent')}>
             <option value="score">Fit score</option>
@@ -256,7 +256,7 @@ export default function ProspectsPage() {
                 title={name}
                 badge={
                   p.doNotContact ? (
-                    <span className="pill is-warn !text-[10px]">
+                    <span className="pill is-warn text-2xs">
                       DNC
                     </span>
                   ) : undefined
@@ -281,17 +281,17 @@ export default function ProspectsPage() {
 
       {/* ── Footer ─────────────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between pt-2 border-t border-line text-[12px] text-ink-3"
+        className="flex items-center justify-between pt-2 border-t border-line text-label text-ink-3"
       >
         <span>
-          <span className="mono !text-ink-2">
+          <span className="mono text-ink-2">
             {count}
           </span>{' '}
           {count === 1 ? 'prospect' : 'prospects'} shown{hasMore ? ' · more available' : ''}
         </span>
         {live && (
           <span className="flex items-center gap-1.5">
-            <span className="pulse-dot !w-1.5 !h-1.5 !rounded-full !bg-accent"  />
+            <span className="pulse-dot w-1.5 h-1.5 rounded-full bg-accent"  />
             Auto-updating…
           </span>
         )}

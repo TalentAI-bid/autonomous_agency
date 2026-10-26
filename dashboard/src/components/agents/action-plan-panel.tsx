@@ -147,7 +147,7 @@ export function ActionPlanPanel({ masterAgentId }: Props) {
                   {item.question}
                 </label>
                 {item.required && !filled && (
-                  <Badge variant="outline" className="text-[10px] uppercase">required</Badge>
+                  <Badge variant="outline" className="text-2xs uppercase">required</Badge>
                 )}
               </div>
               <Textarea

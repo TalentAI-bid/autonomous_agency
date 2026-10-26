@@ -131,11 +131,11 @@ function SearchQualityLowAlert({
         Search quality {outcome === 'empty' ? '— 0 results' : `— only ${totalFound} companies`}
       </p>
       {content.message && (
-        <p className="text-[11px] text-muted-foreground">{String(content.message)}</p>
+        <p className="text-xs text-muted-foreground">{String(content.message)}</p>
       )}
       {jobTitle && (
-        <p className="text-[10px] text-muted-foreground/80">
-          Searched: <code className="text-[10px]">{jobTitle}</code>
+        <p className="text-2xs text-muted-foreground/80">
+          Searched: <code className="text-2xs">{jobTitle}</code>
         </p>
       )}
       {perLocation.length > 0 && (
@@ -143,7 +143,7 @@ function SearchQualityLowAlert({
           {perLocation.map((p) => (
             <div
               key={p.location}
-              className="flex items-center justify-between text-[10px] font-mono text-muted-foreground"
+              className="flex items-center justify-between text-2xs font-mono text-muted-foreground"
             >
               <span className="truncate">{p.location}</span>
               <span
@@ -169,7 +169,7 @@ function SearchQualityLowAlert({
               variant={c.id === 'broaden_auto' ? 'default' : 'secondary'}
               disabled={disabled || (c.id === 'broaden_manual' && !userTerm.trim())}
               onClick={() => handleChoice(c.id, c.id === 'broaden_manual' ? userTerm.trim() : undefined)}
-              className="h-7 text-[11px]"
+              className="h-7 text-xs"
             >
               {isActive && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
               {c.label}
@@ -183,9 +183,9 @@ function SearchQualityLowAlert({
         onChange={(e) => setUserTerm(e.target.value)}
         placeholder="Type a broader term (e.g. blockchain developer)"
         disabled={disabled}
-        className="mt-1.5 w-full h-7 px-2 text-[11px] bg-background border border-border rounded"
+        className="mt-1.5 w-full h-7 px-2 text-xs bg-background border border-border rounded"
       />
-      <p className="text-[10px] text-muted-foreground/70 italic">
+      <p className="text-2xs text-muted-foreground/70 italic">
         Or type your own broader term in the chat below.
       </p>
     </>
@@ -202,14 +202,14 @@ function BroadenAppliedAlert({ content }: { content: Record<string, unknown> }) 
         <Search className="w-3 h-3" />
         {originalTerm ? 'Auto-broadened search' : 'Broader search applied'}
       </p>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         {originalTerm ? (
           <>
-            <code className="text-[11px]">{originalTerm}</code> →{' '}
-            <code className="text-[11px]">{appliedTerm}</code>
+            <code className="text-xs">{originalTerm}</code> →{' '}
+            <code className="text-xs">{appliedTerm}</code>
           </>
         ) : (
-          <code className="text-[11px]">{appliedTerm}</code>
+          <code className="text-xs">{appliedTerm}</code>
         )}{' '}
         <span className="text-up font-medium">found {totalFound} companies</span>.
       </p>
@@ -221,7 +221,7 @@ function BroadenAutoFailedAlert({ content }: { content: Record<string, unknown> 
   return (
     <>
       <p className="text-xs font-medium">Couldn't auto-broaden</p>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         {content.message ? String(content.message) : 'No suggestion was generated — type a broader term in the chat.'}
       </p>
     </>
@@ -233,7 +233,7 @@ function SearchChoiceContinueAlert({ content }: { content: Record<string, unknow
     <>
       <p className="text-xs font-medium">Continuing with current results</p>
       {content.message && (
-        <p className="text-[11px] text-muted-foreground">{String(content.message)}</p>
+        <p className="text-xs text-muted-foreground">{String(content.message)}</p>
       )}
     </>
   );
@@ -253,14 +253,14 @@ function DataSourcesAlert({ content }: { content: Record<string, unknown> }) {
       {sources?.length && (
         <div className="flex flex-wrap gap-1">
           {sources.map((s) => (
-            <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+            <Badge key={s} variant="secondary" className="text-2xs">{s}</Badge>
           ))}
         </div>
       )}
       {quality && (
         <Badge
           variant="secondary"
-          className={cn('text-[10px]', {
+          className={cn('text-2xs', {
             'bg-up/20 text-up': quality === 'excellent',
             'bg-info/20 text-info': quality === 'good',
             'bg-warn/20 text-warn-fg': quality === 'medium',
@@ -270,7 +270,7 @@ function DataSourcesAlert({ content }: { content: Record<string, unknown> }) {
           Quality: {quality}
         </Badge>
       )}
-      {userNotes && <p className="text-[11px] text-muted-foreground">{userNotes}</p>}
+      {userNotes && <p className="text-xs text-muted-foreground">{userNotes}</p>}
     </>
   );
 }
@@ -286,19 +286,19 @@ function ExtensionTasksAlert({ content }: { content: Record<string, unknown> }) 
         Extension Tasks Enqueued
       </p>
       {count != null && (
-        <p className="text-[11px] text-muted-foreground">{count} tasks queued for processing</p>
+        <p className="text-xs text-muted-foreground">{count} tasks queued for processing</p>
       )}
       {companies?.length && (
         <div className="flex flex-wrap gap-1">
           {companies.slice(0, 5).map((c) => (
-            <Badge key={c} variant="secondary" className="text-[10px]">{c}</Badge>
+            <Badge key={c} variant="secondary" className="text-2xs">{c}</Badge>
           ))}
           {companies.length > 5 && (
-            <Badge variant="secondary" className="text-[10px]">+{companies.length - 5} more</Badge>
+            <Badge variant="secondary" className="text-2xs">+{companies.length - 5} more</Badge>
           )}
         </div>
       )}
-      {content.message && <p className="text-[11px] text-muted-foreground">{String(content.message)}</p>}
+      {content.message && <p className="text-xs text-muted-foreground">{String(content.message)}</p>}
     </>
   );
 }
@@ -310,11 +310,11 @@ function CrawlerSkippedAlert({ content }: { content: Record<string, unknown> }) 
         <SkipForward className="w-3 h-3" />
         Crawler Discovery Skipped
       </p>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         {content.message ? String(content.message) : 'Web crawling was skipped for this region. Falling back to alternative discovery method.'}
       </p>
       {content.reason && (
-        <p className="text-[10px] text-muted-foreground/70 italic">{String(content.reason)}</p>
+        <p className="text-2xs text-muted-foreground/70 italic">{String(content.reason)}</p>
       )}
     </>
   );
@@ -324,11 +324,11 @@ function ServiceUnavailableAlert({ content }: { content: Record<string, unknown>
   return (
     <>
       <p className="text-xs font-medium">Service Unavailable</p>
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         {content.message ? String(content.message) : 'A required service is temporarily unavailable.'}
       </p>
       {content.service && (
-        <Badge variant="secondary" className="text-[10px]">{String(content.service)}</Badge>
+        <Badge variant="secondary" className="text-2xs">{String(content.service)}</Badge>
       )}
     </>
   );
@@ -341,9 +341,9 @@ function GenericAlert({ content }: { content: Record<string, unknown> }) {
   return (
     <>
       {action && <p className="text-xs font-medium capitalize">{action}</p>}
-      {msg && <p className="text-[11px] text-muted-foreground">{msg}</p>}
+      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
       {!msg && !action && (
-        <pre className="text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap">
+        <pre className="text-2xs text-muted-foreground overflow-x-auto whitespace-pre-wrap">
           {JSON.stringify(content, null, 2)}
         </pre>
       )}

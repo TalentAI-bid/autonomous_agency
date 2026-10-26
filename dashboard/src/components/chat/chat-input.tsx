@@ -96,7 +96,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           {files.map((file, i) => (
             <Badge key={i} variant="secondary" className="gap-1 pr-1">
               <FileText className="w-3 h-3" />
-              <span className="max-w-32 truncate text-[10px]">{file.name}</span>
+              <span className="max-w-32 truncate text-2xs">{file.name}</span>
               <button
                 onClick={() => removeFile(i)}
                 className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"

@@ -197,16 +197,16 @@ export function EmailComposeModal({
                 </p>
                 {isPartnership && draftMeta.partnershipAngle && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    <Badge variant="warning" className="text-[10px]">Angle: {draftMeta.partnershipAngle}</Badge>
+                    <Badge variant="warning" className="text-2xs">Angle: {draftMeta.partnershipAngle}</Badge>
                     {draftMeta.proposedExchange && (
-                      <Badge variant="outline" className="text-[10px]" title={draftMeta.proposedExchange}>
+                      <Badge variant="outline" className="text-2xs" title={draftMeta.proposedExchange}>
                         Exchange: {draftMeta.proposedExchange.slice(0, 40)}{draftMeta.proposedExchange.length > 40 ? '…' : ''}
                       </Badge>
                     )}
                   </div>
                 )}
                 {isCollaboration && draftMeta.collaborationAngle && (
-                  <Badge variant="blue" className="text-[10px] mt-2">Angle: {draftMeta.collaborationAngle}</Badge>
+                  <Badge variant="blue" className="text-2xs mt-2">Angle: {draftMeta.collaborationAngle}</Badge>
                 )}
               </div>
             )}

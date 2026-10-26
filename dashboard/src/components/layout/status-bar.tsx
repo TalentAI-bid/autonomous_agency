@@ -30,7 +30,7 @@ export function StatusBar() {
     <div className="status-bar">
       <span className="inline-flex items-center gap-1.5">
         <span
-          className={cn('dot', connected ? '!bg-up' : '!bg-ink-4')}
+          className={cn('dot', connected ? 'bg-up' : 'bg-ink-4')}
         />
         <span>{connected ? 'WS connected' : 'WS disconnected'}</span>
       </span>

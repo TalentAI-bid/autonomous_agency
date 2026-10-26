@@ -12,7 +12,6 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
 import { Rocket, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { Textarea } from '@/components/ui/textarea';

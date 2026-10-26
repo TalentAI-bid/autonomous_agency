@@ -10,7 +10,7 @@ interface AgentQueueTabProps {
 export function AgentQueueTab({ agentId, agentName }: AgentQueueTabProps) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-[13px] text-ink-3">
+      <div className="text-body text-ink-3">
         Daily queue for <strong className="text-ink">{agentName ?? 'this agent'}</strong>.
         Only actions for companies this agent owns are shown.
       </div>

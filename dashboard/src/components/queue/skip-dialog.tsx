@@ -45,7 +45,7 @@ export function SkipDialog({
           <DialogTitle>Skip this action</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          <div className="text-[12px] text-ink-3">
+          <div className="text-label text-ink-3">
             Reason — tracked for future prompt-tuning analysis.
           </div>
           <div className="flex flex-col gap-1">
@@ -58,7 +58,7 @@ export function SkipDialog({
                   checked={reason === r.value}
                   onChange={() => setReason(r.value)}
                 />
-                <span className="text-[13px]">{r.label}</span>
+                <span className="text-body">{r.label}</span>
               </label>
             ))}
           </div>

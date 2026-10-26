@@ -227,7 +227,7 @@ export default function LinkedInExtensionPage() {
             </Button>
           </div>
 
-          <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-3 pt-1 text-xs text-muted-foreground">
             {statusQ.data?.connected && (
               <span className="inline-flex items-center gap-1.5 text-up">
                 <PlugZap className="w-3.5 h-3.5" /> Extension connected
@@ -241,7 +241,7 @@ export default function LinkedInExtensionPage() {
           </div>
 
           {latestQ.isError && (
-            <div className="flex items-start gap-2 text-[11px] text-warn-fg">
+            <div className="flex items-start gap-2 text-xs text-warn-fg">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>
                 No release has been cut yet. Run{' '}
@@ -251,7 +251,7 @@ export default function LinkedInExtensionPage() {
             </div>
           )}
 
-          <div className="flex items-center gap-4 pt-2 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-4 pt-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5" /> Signed · SHA256 verified
             </span>
@@ -376,7 +376,7 @@ function ShortcutsPanel() {
             {combo.map((k) => (
               <kbd
                 key={k}
-                className="px-2 py-0.5 rounded-md border border-border bg-muted/40 text-[11px] font-mono tabular-nums"
+                className="px-2 py-0.5 rounded-md border border-border bg-muted/40 text-xs font-mono tabular-nums"
               >
                 {k}
               </kbd>
@@ -384,7 +384,7 @@ function ShortcutsPanel() {
           </div>
         </div>
       ))}
-      <div className="px-4 py-2.5 text-[11px] text-muted-foreground bg-muted/20">
+      <div className="px-4 py-2.5 text-xs text-muted-foreground bg-muted/20">
         On Windows/Linux, ⌥ maps to <kbd className="px-1 font-mono">Alt</kbd>.
       </div>
     </div>
@@ -403,11 +403,11 @@ function WhatsNewPanel() {
             <div className="text-sm font-mono">{entry.version}</div>
             <Badge
               variant={entry.kind === 'Latest' ? 'default' : 'outline'}
-              className="text-[10px] h-5"
+              className="text-2xs h-5"
             >
               {entry.kind}
             </Badge>
-            <div className="text-[11px] text-muted-foreground">{entry.date}</div>
+            <div className="text-xs text-muted-foreground">{entry.date}</div>
           </div>
           <ul className="space-y-1.5 text-sm text-muted-foreground">
             {entry.notes.map((n) => (
@@ -444,7 +444,7 @@ function ProfilePreview() {
             <div className="text-xs text-muted-foreground">
               VP of Revenue Operations · Atlas BioOps
             </div>
-            <div className="text-[11px] text-muted-foreground mt-1">
+            <div className="text-xs text-muted-foreground mt-1">
               San Francisco Bay Area · 1st
             </div>
           </div>
@@ -455,7 +455,7 @@ function ProfilePreview() {
       <div className="p-5 space-y-4 bg-muted/10">
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div className="text-2xs uppercase tracking-wider text-muted-foreground">
               TalentAI · live read
             </div>
             <div className="flex items-baseline gap-2 mt-1">
@@ -475,7 +475,7 @@ function ProfilePreview() {
         </div>
 
         <div className="rounded-md border border-border bg-background/60 p-3">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+          <div className="text-2xs uppercase tracking-wider text-muted-foreground mb-1">
             Why now
           </div>
           <p className="text-xs leading-relaxed">

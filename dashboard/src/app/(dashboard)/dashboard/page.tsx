@@ -53,13 +53,13 @@ function AgentTile({ agent }: { agent: MasterAgent }) {
     <Panel className="cursor-pointer" onClick={() => router.push(`/agents/${agent.id}`)}>
       <PanelHead>
         <Dot state={agent.status === 'running' ? 'live' : agent.status === 'error' ? 'warn' : 'paused'} />
-        <h3 className="!m-0 !text-[12.5px] !font-medium !normal-case !tracking-[-0.005em] !text-ink">{agent.name}</h3>
+        <h3 className="m-0 text-[12.5px] font-medium normal-case tracking-[-0.005em] text-ink">{agent.name}</h3>
         <span className="meta">{agent.useCase}</span>
       </PanelHead>
-      <PanelBody className="!p-3">
+      <PanelBody className="p-3">
         <div className="mb-2.5 flex items-end gap-3.5">
           <div>
-            <div className="caps mb-0.5 text-[10px] text-ink-3">Status</div>
+            <div className="caps mb-0.5 text-2xs text-ink-3">Status</div>
             <div className="mono text-sm font-medium leading-none">{agent.status}</div>
           </div>
           <div className="ml-auto">
@@ -88,7 +88,7 @@ function AgentTile({ agent }: { agent: MasterAgent }) {
         </div>
         <div className="mt-[3px] flex gap-1">
           {LANES.map((lane) => (
-            <div key={lane} className="flex-1 text-center text-[9px] uppercase tracking-[0.04em] text-ink-3">
+            <div key={lane} className="flex-1 text-center text-3xs uppercase tracking-[0.04em] text-ink-3">
               {lane.slice(0, 3)}
             </div>
           ))}
@@ -145,7 +145,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <div className="page-head !pb-[18px]">
+      <div className="page-head pb-[18px]">
         <div className="page-title-group">
           <h1>
             <span className="display">
@@ -220,7 +220,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 border-b border-line bg-bg-sub px-3.5 py-3">
             <Dot state="live" />
             <div className="caps-sm font-semibold text-ink-2">Live lead stream</div>
-            <span className="ml-auto font-mono text-[10px] text-ink-3">{contacts.length} · streaming</span>
+            <span className="ml-auto font-mono text-2xs text-ink-3">{contacts.length} · streaming</span>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             {contacts.length === 0 && (
@@ -242,7 +242,7 @@ export default function DashboardPage() {
                   style={i === 0 ? { animation: 'slide-in 0.4s ease-out' } : undefined}
                 >
                   <div
-                    className="avatar !h-7 !w-7 !text-[10px]"
+                    className="avatar h-7 w-7 text-2xs"
                     style={{ background: `oklch(0.65 0.10 ${(name.charCodeAt(0) * 7) % 360})` }}
                   >
                     {initials(c)}
@@ -254,7 +254,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-0.5">
-                    <div className={cn('mono text-[11px] font-semibold', score >= 85 ? 'text-up' : score >= 65 ? 'text-ink' : 'text-ink-3')}>
+                    <div className={cn('mono text-xs font-semibold', score >= 85 ? 'text-up' : score >= 65 ? 'text-ink' : 'text-ink-3')}>
                       {score || '—'}
                     </div>
                   </div>
@@ -269,8 +269,8 @@ export default function DashboardPage() {
           <div className="border-b border-line px-[22px] py-[18px]">
             <div className="mb-3 flex items-baseline gap-3">
               <h3 className="caps-sm m-0 font-semibold text-ink-2">Pipeline funnel</h3>
-              <span className="font-mono text-[11px] text-ink-3">n={total.toLocaleString()}</span>
-              <span className="ml-auto text-[11px] text-ink-3">
+              <span className="font-mono text-xs text-ink-3">n={total.toLocaleString()}</span>
+              <span className="ml-auto text-xs text-ink-3">
                 conv rate <span className="mono text-ink">{overallConv}</span>
               </span>
             </div>
@@ -282,7 +282,7 @@ export default function DashboardPage() {
           <div className="flex-1 px-[22px] py-3.5">
             <div className="mb-2.5 flex items-baseline gap-2.5">
               <h3 className="caps-sm m-0 font-semibold text-ink-2">Your fleet</h3>
-              <span className="text-[11px] text-ink-3">
+              <span className="text-xs text-ink-3">
                 Seven agents operate the pipeline: discovery, enrichment, scoring, outreach, reply,
                 action, and the master.
               </span>
@@ -308,7 +308,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 border-b border-line px-3.5 py-3">
             <Icon name="radio" size={13} className="text-accent" />
             <div className="caps-sm font-semibold text-ink-2">Agent console</div>
-            <span className="ml-auto font-mono text-[10px] text-ink-3">tail -f</span>
+            <span className="ml-auto font-mono text-2xs text-ink-3">tail -f</span>
           </div>
           <div className="flex-1 overflow-auto">
             {feed.length === 0 && eventFeed.length === 0 && (

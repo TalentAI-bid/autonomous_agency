@@ -91,16 +91,16 @@ function MessageCard({ message }: { message: AgentMessage }) {
           <span className={cn('text-xs font-semibold', style.color)}>
             {style.label}
           </span>
-          <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium', typeBadge.variant)}>
+          <span className={cn('inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium', typeBadge.variant)}>
             {typeBadge.label}
           </span>
           {message.toAgent && message.toAgent !== 'all' && (
-            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-0.5 text-2xs text-muted-foreground">
               <ArrowRight className="w-3 h-3" />
               {message.toAgent}
             </span>
           )}
-          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">{time}</span>
+          <span className="text-2xs text-muted-foreground ml-auto shrink-0">{time}</span>
         </div>
 
         {/* Body — type-specific rendering */}
@@ -111,7 +111,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
             <p className="text-xs text-foreground/90 leading-relaxed">{summary}</p>
             {content.dataCompleteness != null && (
               <div className="mt-2 max-w-xs">
-                <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                <div className="flex justify-between text-2xs text-muted-foreground mb-1">
                   <span>Data completeness</span>
                   <span>{String(content.dataCompleteness)}%</span>
                 </div>
@@ -135,7 +135,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
               {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             </button>
             {expanded && (
-              <pre className="mt-2 p-2.5 bg-muted/50 rounded-md text-[10px] overflow-x-auto whitespace-pre-wrap border border-border/50">
+              <pre className="mt-2 p-2.5 bg-muted/50 rounded-md text-2xs overflow-x-auto whitespace-pre-wrap border border-border/50">
                 {JSON.stringify(content, null, 2)}
               </pre>
             )}
@@ -162,13 +162,13 @@ function MessageCard({ message }: { message: AgentMessage }) {
               <>
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  className="flex items-center gap-1 text-muted-foreground hover:text-foreground mt-1 text-[10px] transition-colors"
+                  className="flex items-center gap-1 text-muted-foreground hover:text-foreground mt-1 text-2xs transition-colors"
                 >
                   {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                   {expanded ? 'Less' : 'Details'}
                 </button>
                 {expanded && (
-                  <pre className="mt-1.5 p-2 bg-muted/50 rounded-md text-[10px] overflow-x-auto whitespace-pre-wrap border border-border/50">
+                  <pre className="mt-1.5 p-2 bg-muted/50 rounded-md text-2xs overflow-x-auto whitespace-pre-wrap border border-border/50">
                     {JSON.stringify(content, null, 2)}
                   </pre>
                 )}
@@ -284,7 +284,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
                 )}
               >
                 All
-                {count > 0 && <span className="text-[10px] opacity-70">{count}</span>}
+                {count > 0 && <span className="text-2xs opacity-70">{count}</span>}
               </button>
             );
           }
@@ -302,7 +302,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
               )}
             >
               {s.label}
-              {count > 0 && <span className="text-[10px] opacity-70">{count}</span>}
+              {count > 0 && <span className="text-2xs opacity-70">{count}</span>}
             </button>
           );
         })}

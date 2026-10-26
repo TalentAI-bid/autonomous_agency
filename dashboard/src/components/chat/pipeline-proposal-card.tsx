@@ -38,26 +38,26 @@ export function PipelineProposalCard({
         {/* Config Details */}
         <div className="flex flex-wrap gap-1.5">
           {!!config.targetRole && (
-            <Badge variant="secondary" className="text-[10px]">{'Role: ' + String(config.targetRole)}</Badge>
+            <Badge variant="secondary" className="text-2xs">{'Role: ' + String(config.targetRole)}</Badge>
           )}
           {Array.isArray(config.skills) && config.skills.length > 0 && (
-            <Badge variant="secondary" className="text-[10px]">{'Skills: ' + (config.skills as string[]).join(', ')}</Badge>
+            <Badge variant="secondary" className="text-2xs">{'Skills: ' + (config.skills as string[]).join(', ')}</Badge>
           )}
           {Array.isArray(config.locations) && config.locations.length > 0 && (
-            <Badge variant="secondary" className="text-[10px]">{'Locations: ' + (config.locations as string[]).join(', ')}</Badge>
+            <Badge variant="secondary" className="text-2xs">{'Locations: ' + (config.locations as string[]).join(', ')}</Badge>
           )}
           {config.scoringThreshold !== undefined && (
-            <Badge variant="secondary" className="text-[10px]">{'Threshold: ' + String(config.scoringThreshold)}</Badge>
+            <Badge variant="secondary" className="text-2xs">{'Threshold: ' + String(config.scoringThreshold)}</Badge>
           )}
           {!!config.emailAccountId && (
-            <Badge variant="secondary" className="text-[10px]">Sending account selected</Badge>
+            <Badge variant="secondary" className="text-2xs">Sending account selected</Badge>
           )}
         </div>
 
         {/* Email Rules */}
         {Array.isArray(config.emailRules) && (config.emailRules as string[]).length > 0 && (
           <div className="space-y-1">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Email Rules</p>
+            <p className="text-2xs font-medium text-muted-foreground uppercase tracking-wide">Email Rules</p>
             {(config.emailRules as string[]).map((rule, i) => (
               <div key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <span className="text-primary shrink-0">*</span>

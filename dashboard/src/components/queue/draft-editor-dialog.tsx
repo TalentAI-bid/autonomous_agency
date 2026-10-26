@@ -54,7 +54,7 @@ export function DraftEditorDialog({
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
-          <div className="text-[11px] text-ink-3 self-end">
+          <div className="text-xs text-ink-3 self-end">
             {body.length} chars · {body.trim().split(/\s+/).filter(Boolean).length} words
           </div>
         </div>

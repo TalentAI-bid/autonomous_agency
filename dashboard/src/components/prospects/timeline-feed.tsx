@@ -49,7 +49,7 @@ export function TimelineFeed({
       {Object.entries(grouped).map(([day, items]) => (
         <div key={day}>
           <div
-            className="text-[11px] uppercase tracking-[0.5px] text-ink-3 mb-1.5"
+            className="text-xs uppercase tracking-[0.5px] text-ink-3 mb-1.5"
           >
             {day}
           </div>
@@ -61,7 +61,7 @@ export function TimelineFeed({
         </div>
       ))}
       {hasMore && (
-        <div className="text-center text-[11px] text-ink-3">
+        <div className="text-center text-xs text-ink-3">
           Load more — cursor pagination coming with the next interaction
         </div>
       )}
@@ -80,16 +80,16 @@ function EventCard({ event }: { event: TimelineEvent }) {
       <div className="flex justify-between items-baseline">
         <div className="flex items-center gap-2">
           <span className="text-[16px]">{eventIcon(event.type)}</span>
-          <span className="text-[13px] font-medium">{event.title ?? event.type.replace(/_/g, ' ')}</span>
-          <span className="text-[10px] text-ink-3">{event.actorType}</span>
+          <span className="text-body font-medium">{event.title ?? event.type.replace(/_/g, ' ')}</span>
+          <span className="text-2xs text-ink-3">{event.actorType}</span>
         </div>
-        <span className="text-[11px] text-ink-3">{formatRelative(event.occurredAt)}</span>
+        <span className="text-xs text-ink-3">{formatRelative(event.occurredAt)}</span>
       </div>
       {expanded && (
-        <div className="mt-2 text-[12px] text-ink-2">
+        <div className="mt-2 text-label text-ink-2">
           {event.description && <div className="mb-1.5 whitespace-pre-wrap">{event.description}</div>}
           {event.metadata && Object.keys(event.metadata).length > 0 && (
-            <pre className="text-[10px] text-ink-3 whitespace-pre-wrap m-0">
+            <pre className="text-2xs text-ink-3 whitespace-pre-wrap m-0">
               {JSON.stringify(event.metadata, null, 2)}
             </pre>
           )}

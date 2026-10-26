@@ -1,7 +1,17 @@
 import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
 import type { AgentType, ContactStatus } from '@/types';
+
+// Teach tailwind-merge the custom font-size steps (tailwind.config.ts), otherwise
+// it reads text-label / text-2xs as colors and drops the real color class.
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [{ text: ['3xs', '2xs', 'xs', 'label', 'body', 'title', 'stat', 'hero'] }],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));

@@ -114,7 +114,7 @@ export function ExportButton({ masterAgentId, showFullBatch = false, className }
         <div className="absolute right-0 top-full z-50 mt-1 w-[280px] rounded-md border border-border bg-popover shadow-md">
           {showFullBatch && (
             <div className="px-3 py-2 border-b border-border">
-              <label className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+              <label className="block text-2xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                 Since (optional)
               </label>
               <Input
@@ -123,7 +123,7 @@ export function ExportButton({ masterAgentId, showFullBatch = false, className }
                 onChange={(e) => setSince(e.target.value)}
                 className="h-7 text-xs"
               />
-              <p className="mt-1 text-[10px] text-muted-foreground">
+              <p className="mt-1 text-2xs text-muted-foreground">
                 Filters companies/contacts/emails to those created after this date.
               </p>
             </div>

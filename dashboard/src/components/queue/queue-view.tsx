@@ -74,7 +74,7 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
 
   const refreshBanner = refreshInFlight ? (
     <div
-      className="flex items-center gap-2 py-2.5 px-3 border border-border rounded-[8px] bg-bg-panel text-[13px] text-ink-2"
+      className="flex items-center gap-2 py-2.5 px-3 border border-border rounded-[8px] bg-bg-panel text-body text-ink-2"
     >
       <span className="text-[14px]">{refreshTimedOut ? 'ℹ️' : '🔄'}</span>
       <span>
@@ -129,16 +129,16 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
       <div className="flex justify-between items-end flex-wrap gap-3">
         {showGreeting ? (
           <div>
-            <h1 className="!text-[22px] !font-semibold">
+            <h1 className="text-stat font-semibold">
               {greeting}{name ? `, ${name}` : ''}.
             </h1>
-            <p className="!text-[13px] !text-ink-3">
+            <p className="text-body text-ink-3">
               <strong className="text-ink">{data.count}</strong> actions today
               {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
             </p>
           </div>
         ) : (
-          <p className="!text-[13px] !text-ink-3">
+          <p className="text-body text-ink-3">
             <strong className="text-ink">{data.count}</strong> actions
             {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
           </p>
@@ -174,8 +174,8 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
               <span className="text-[14px] font-medium">
                 {PRIORITY_DESC[b.priority] ?? b.priority}
               </span>
-              <span className="text-[12px] text-ink-3">({b.count})</span>
-              <span className="ml-auto text-[12px] text-ink-3">
+              <span className="text-label text-ink-3">({b.count})</span>
+              <span className="ml-auto text-label text-ink-3">
                 {open ? '▼' : '▶'}
               </span>
             </button>

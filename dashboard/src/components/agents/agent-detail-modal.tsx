@@ -87,7 +87,7 @@ export function AgentDetailModal({ agentType, masterAgentId, onClose }: AgentDet
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium">{entry.action}</span>
-                    <Badge variant="outline" className="text-[10px] px-1 py-0">{entry.status}</Badge>
+                    <Badge variant="outline" className="text-2xs px-1 py-0">{entry.status}</Badge>
                     {entry.durationMs != null && (
                       <span className="text-muted-foreground ml-auto">{entry.durationMs}ms</span>
                     )}

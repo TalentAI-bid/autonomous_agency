@@ -61,12 +61,12 @@ export function FitGauge({
         className="absolute flex flex-col items-center justify-center leading-[1]" style={{ inset: 0 }}
       >
         <span
-          className="mono !font-semibold"
+          className="mono font-semibold"
           style={{ fontSize: size * 0.3, color: discovering ? 'var(--ink-4)' : 'var(--ink)' }}
         >
           {discovering ? '—' : Math.round(score!)}
         </span>
-        <span className="mono !text-ink-4 !mt-px" style={{ fontSize: size * 0.15 }}>
+        <span className="mono text-ink-4 mt-px" style={{ fontSize: size * 0.15 }}>
           /100
         </span>
       </div>

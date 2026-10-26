@@ -53,9 +53,9 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
     >
       <div>
         <div className="text-[18px] font-semibold">{fullName}</div>
-        {prospect.title && <div className="text-[12px] text-ink-3">{prospect.title}</div>}
-        {prospect.companyName && <div className="text-[12px] text-ink-2">{prospect.companyName}</div>}
-        {prospect.location && <div className="text-[11px] text-ink-3">{prospect.location}</div>}
+        {prospect.title && <div className="text-label text-ink-3">{prospect.title}</div>}
+        {prospect.companyName && <div className="text-label text-ink-2">{prospect.companyName}</div>}
+        {prospect.location && <div className="text-xs text-ink-3">{prospect.location}</div>}
       </div>
 
       <div className="flex gap-1.5 flex-wrap">
@@ -68,14 +68,14 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
           {stage.replace(/_/g, ' ')}
         </Badge>
         {prospect.prospectStage?.stageEnteredAt && (
-          <span className="text-[11px] text-ink-3">
+          <span className="text-xs text-ink-3">
             entered {formatRelative(prospect.prospectStage.stageEnteredAt)}
           </span>
         )}
         {prospect.doNotContact && <Badge variant="error">DNC</Badge>}
       </div>
 
-      <div className="flex gap-3 text-[11px] text-ink-3">
+      <div className="flex gap-3 text-xs text-ink-3">
         <span>Score: <strong className="text-ink">{prospect.score ?? '—'}</strong></span>
         <span>Touches: <strong className="text-ink">{prospect.prospectStage?.totalTouches ?? 0}</strong></span>
         {prospect.prospectStage?.lastResponseAt && (
@@ -83,7 +83,7 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
         )}
       </div>
 
-      <div className="flex flex-col gap-1 text-[12px]">
+      <div className="flex flex-col gap-1 text-label">
         {prospect.email && <a href={`mailto:${prospect.email}`}>{prospect.email}</a>}
         {prospect.linkedinUrl && <a href={prospect.linkedinUrl} target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>}
         {prospect.phone && <a href={`tel:${prospect.phone}`}>{prospect.phone}</a>}
@@ -92,10 +92,10 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
       </div>
 
       <div>
-        <div className="text-[10px] text-ink-3 uppercase tracking-[0.4px] mb-1.5">Tags</div>
+        <div className="text-2xs text-ink-3 uppercase tracking-[0.4px] mb-1.5">Tags</div>
         <div className="flex gap-1 flex-wrap mb-2">
           {prospect.customTags.length === 0 ? (
-            <span className="text-[11px] text-ink-3">No tags</span>
+            <span className="text-xs text-ink-3">No tags</span>
           ) : prospect.customTags.map((t) => (
             <Badge key={t} variant="outline" className="cursor-pointer" onClick={() => removeTag(t)} title="Click to remove">
               {t} ×
@@ -108,16 +108,16 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
-            className="flex-1 text-[12px]"
+            className="flex-1 text-label"
           />
           <Button onClick={addTag} disabled={!tagInput.trim() || tagsMut.isPending} size="sm">Add</Button>
         </div>
       </div>
 
       <div>
-        <div className="text-[10px] text-ink-3 uppercase tracking-[0.4px] mb-1.5">Source</div>
-        <div className="text-[12px]">{prospect.sourceType}</div>
-        <div className="text-[10px] text-ink-3">Added {formatDate(prospect.createdAt)}</div>
+        <div className="text-2xs text-ink-3 uppercase tracking-[0.4px] mb-1.5">Source</div>
+        <div className="text-label">{prospect.sourceType}</div>
+        <div className="text-2xs text-ink-3">Added {formatDate(prospect.createdAt)}</div>
       </div>
 
       <div className="flex gap-1.5 flex-wrap mt-2">

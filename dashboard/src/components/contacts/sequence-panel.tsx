@@ -208,8 +208,8 @@ function SequencePanelContent({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">Touch {step.stepNumber}</span>
-                      <Badge variant="outline" className="text-[10px]">{step.stepType.replace(/_/g, ' ')}</Badge>
-                      {isInactive && <Badge variant="outline" className="text-[10px] text-muted-foreground">disabled</Badge>}
+                      <Badge variant="outline" className="text-2xs">{step.stepType.replace(/_/g, ' ')}</Badge>
+                      {isInactive && <Badge variant="outline" className="text-2xs text-muted-foreground">disabled</Badge>}
                       {sent && <span className="text-muted-foreground">— sent {formatLocal(send!.sentAt, data.contact.timezone)}</span>}
                       {isCurrent && !sent && <span className="text-muted-foreground">— scheduled {formatLocal(cc.nextScheduledAt, data.contact.timezone)}</span>}
                     </div>
@@ -223,7 +223,7 @@ function SequencePanelContent({
           </ol>
         </div>
 
-        <p className="text-[10px] text-muted-foreground border-t pt-2">
+        <p className="text-2xs text-muted-foreground border-t pt-2">
           Campaign: {seq.campaign.name}{cc.lastActionAt ? ` · last touch ${formatLocal(cc.lastActionAt)}` : ''}
         </p>
       </CardContent>

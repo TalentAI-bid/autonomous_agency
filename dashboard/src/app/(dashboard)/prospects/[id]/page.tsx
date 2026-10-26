@@ -55,7 +55,7 @@ export default function ProspectDetailPage() {
               key={c.label}
               onClick={() => setCategory(c.value)}
               className={cn(
-                'cursor-pointer rounded-full border border-border px-2.5 py-1 text-[11px]',
+                'cursor-pointer rounded-full border border-border px-2.5 py-1 text-xs',
                 category === c.value ? 'bg-accent-weak text-accent-fg' : 'bg-bg-sub text-ink-2',
               )}
             >

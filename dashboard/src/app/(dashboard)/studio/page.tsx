@@ -281,7 +281,7 @@ export default function StudioPage() {
             <CardTitle className="text-base flex items-center gap-2">
               {channelMeta && <span>{channelMeta.icon}</span>}
               {channelMeta?.label ?? 'Output'}
-              {result && <Badge variant="secondary" className="text-[10px] ml-auto">{result.track} track</Badge>}
+              {result && <Badge variant="secondary" className="text-2xs ml-auto">{result.track} track</Badge>}
             </CardTitle>
           </CardHeader>
           <CardContent>

@@ -55,7 +55,7 @@ const tagStyle: Record<NonNullable<LeadTag['tone']>, CSSProperties> = {
 function TagChip({ tag }: { tag: LeadTag }) {
   return (
     <span
-      className="inline-flex items-center py-[3px] px-2 rounded-full text-[11px] font-medium whitespace-nowrap" style={{ ...tagStyle[tag.tone ?? 'default'] }}
+      className="inline-flex items-center py-[3px] px-2 rounded-full text-xs font-medium whitespace-nowrap" style={{ ...tagStyle[tag.tone ?? 'default'] }}
     >
       {tag.label}
     </span>
@@ -80,7 +80,7 @@ export function DiscoveringCard() {
           {bar(70)}
         </div>
         <span
-          className="pill is-accent !text-[10px] !bg-accent-weak !text-accent-fg"
+          className="pill is-accent text-2xs bg-accent-weak text-accent-fg"
         >
           New
         </span>
@@ -88,7 +88,7 @@ export function DiscoveringCard() {
       <div className="flex items-center gap-2.5">
         <span className="w-10 h-10 rounded-full bg-bg-soft"/>
         <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-ink-3">Discovering lead…</span>
+          <span className="text-label text-ink-3">Discovering lead…</span>
           {bar(48)}
         </div>
         <span
@@ -101,9 +101,9 @@ export function DiscoveringCard() {
       </div>
       <div className="mt-auto flex items-center gap-1.5 text-accent-fg">
         <span
-          className="pulse-dot !w-1.5 !h-1.5 !rounded-full !bg-accent"
+          className="pulse-dot w-1.5 h-1.5 rounded-full bg-accent"
         />
-        <span className="text-[11px]">Adding to results…</span>
+        <span className="text-xs">Adding to results…</span>
       </div>
     </div>
   );
@@ -150,7 +150,7 @@ export function LeadCard({
         <div className="min-w-0 flex-1">
           {contactName && (
             <div
-              className="text-[13px] font-medium text-ink whitespace-nowrap overflow-hidden text-ellipsis"
+              className="text-body font-medium text-ink whitespace-nowrap overflow-hidden text-ellipsis"
             >
               {contactName}
             </div>
@@ -174,7 +174,7 @@ export function LeadCard({
           {roles.map((role, i) => (
             <span
               key={`${role}-${i}`}
-              className="inline-flex items-center gap-1 py-0.5 px-2 rounded-[6px] text-[11px] font-medium text-ink-2 bg-bg-soft border border-line whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
+              className="inline-flex items-center gap-1 py-0.5 px-2 rounded-[6px] text-xs font-medium text-ink-2 bg-bg-soft border border-line whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
             >
               <Briefcase size={11} className="text-ink-3 shrink-0"/>
               {role}
@@ -186,7 +186,7 @@ export function LeadCard({
       {/* Description */}
       {description && (
         <p
-          className="!m-0 !text-[12px] !leading-[1.5] !text-ink-3 !overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
+          className="m-0 text-label leading-[1.5] text-ink-3 overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
         >
           {description}
         </p>

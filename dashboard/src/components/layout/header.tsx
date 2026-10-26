@@ -57,7 +57,7 @@ export function Header() {
         <span className="val">
           {runningAgents}/{totalAgents}
         </span>
-        <span className="delta !text-up">
+        <span className="delta text-up">
           active
         </span>
       </div>
@@ -89,10 +89,10 @@ export function Header() {
         </Link></Button>
         <button className="topbar-cell" type="button" aria-label="Notifications">
           <Icon name="bell" size={13} />
-          {unread > 0 && <span className="text-[11px]">{Math.min(unread, 9)}</span>}
+          {unread > 0 && <span className="text-xs">{Math.min(unread, 9)}</span>}
         </button>
         <button
-          className="topbar-cell !text-ink-2"
+          className="topbar-cell text-ink-2"
           type="button"
           onClick={handleLogout}
           title="Logout"

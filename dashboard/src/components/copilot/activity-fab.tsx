@@ -211,7 +211,7 @@ function FabPanel({ onClose }: { onClose: () => void }) {
                 {ocrText && !isOcring && (
                   <details className="text-xs text-muted-foreground">
                     <summary className="cursor-pointer">Extracted text ({ocrText.length} chars)</summary>
-                    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-[11px]">{ocrText}</pre>
+                    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-xs">{ocrText}</pre>
                   </details>
                 )}
               </div>
@@ -386,7 +386,7 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
                   </span>
                   <span className="ml-2 flex shrink-0 items-center gap-2">
                     {c.matchType === 'email' && (
-                      <span className="rounded bg-up/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-up">
+                      <span className="rounded bg-up/10 px-1.5 py-0.5 text-2xs font-semibold uppercase text-up">
                         email
                       </span>
                     )}
@@ -450,7 +450,7 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
         />
       </div>
 
-      <div className="rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground flex items-start gap-1.5">
+      <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground flex items-start gap-1.5">
         <ArrowRight className="h-3 w-3 mt-0.5 shrink-0" />
         Click "Save activity" to log this. You can still tweak any field above.
       </div>

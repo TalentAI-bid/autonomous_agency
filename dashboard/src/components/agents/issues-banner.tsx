@@ -63,7 +63,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
 
   return (
     <Panel
-      className="mb-4 !border-down"
+      className="mb-4 border-down"
     >
       <PanelHead className="flex items-center gap-2.5">
         <Icon name="flag" size={14} />
@@ -80,12 +80,12 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
             <div className="flex flex-col gap-0.5 min-w-0">
               <div className="inline-flex items-center gap-1.5 flex-wrap">
                 <Pill variant={severityVariant(row.severity)}>{row.errorType}</Pill>
-                <span className="text-[11px] text-ink-3">
+                <span className="text-xs text-ink-3">
                   {row.step} · {row.tool} · {timeAgo(row.createdAt)}
                 </span>
               </div>
               <span
-                className="text-[13px] text-ink overflow-hidden text-ellipsis whitespace-nowrap"
+                className="text-body text-ink overflow-hidden text-ellipsis whitespace-nowrap"
                 title={row.message}
               >
                 {row.message}

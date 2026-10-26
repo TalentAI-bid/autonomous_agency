@@ -14,13 +14,14 @@ import { KpiTile } from '@/components/ui/kpi-tile';
 import { FunnelRow } from '@/components/ui/funnel-row';
 import { StreamRow } from '@/components/ui/stream-row';
 import { AgentGlyph, type AgentType } from '@/components/ui/agent-glyph';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { Panel, PanelBody, PanelHead } from '@/components/ui/panel';
 import { ExportButton } from '@/components/shared/export-button';
 import { OnboardingView } from '@/components/dashboard/onboarding-view';
 import { useSetupStatus } from '@/hooks/use-setup-status';
 import type { Contact, MasterAgent } from '@/types';
 
-import { Button } from '@/components/ui/button';
 const LANES: AgentType[] = ['discovery', 'enrichment', 'scoring', 'outreach', 'reply', 'action'];
 
 function greeting() {
@@ -49,42 +50,19 @@ function AgentTile({ agent }: { agent: MasterAgent }) {
     agent.status === 'running' ? ['discovery', 'enrichment', 'scoring', 'outreach'] : [];
 
   return (
-    <Panel style={{ cursor: 'pointer' }} onClick={() => router.push(`/agents/${agent.id}`)}>
+    <Panel className="cursor-pointer" onClick={() => router.push(`/agents/${agent.id}`)}>
       <PanelHead>
         <Dot state={agent.status === 'running' ? 'live' : agent.status === 'error' ? 'warn' : 'paused'} />
-        <h3
-          style={{
-            textTransform: 'none',
-            letterSpacing: '-0.005em',
-            fontSize: 12.5,
-            fontWeight: 500,
-            color: 'var(--ink)',
-            margin: 0,
-          }}
-        >
-          {agent.name}
-        </h3>
+        <h3 className="!m-0 !text-[12.5px] !font-medium !normal-case !tracking-[-0.005em] !text-ink">{agent.name}</h3>
         <span className="meta">{agent.useCase}</span>
       </PanelHead>
-      <PanelBody style={{ padding: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'end', gap: 14, marginBottom: 10 }}>
+      <PanelBody className="!p-3">
+        <div className="mb-2.5 flex items-end gap-3.5">
           <div>
-            <div
-              style={{
-                fontSize: 10,
-                color: 'var(--ink-3)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                marginBottom: 2,
-              }}
-            >
-              Status
-            </div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 500, lineHeight: 1 }}>
-              {agent.status}
-            </div>
+            <div className="caps mb-0.5 text-[10px] text-ink-3">Status</div>
+            <div className="mono text-sm font-medium leading-none">{agent.status}</div>
           </div>
-          <div style={{ marginLeft: 'auto' }}>
+          <div className="ml-auto">
             <Spark
               data={[2, 3, 4, 5, 4, 6, 7, 6, 8, 9, 10, 11]}
               width={100}
@@ -95,38 +73,22 @@ function AgentTile({ agent }: { agent: MasterAgent }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div className="flex gap-1">
           {LANES.map((lane) => {
             const on = activeLanes.includes(lane);
             return (
               <div
                 key={lane}
                 title={lane}
-                style={{
-                  flex: 1,
-                  height: 6,
-                  borderRadius: 1,
-                  background: on ? `var(--a-${lane})` : 'var(--bg-soft)',
-                  opacity: on ? 1 : 0.6,
-                  border: '1px solid ' + (on ? 'transparent' : 'var(--line)'),
-                }}
+                className={cn('h-1.5 flex-1 rounded-[1px] border', on ? 'border-transparent' : 'border-line bg-bg-soft opacity-60')}
+                style={on ? { background: `var(--a-${lane})` } : undefined}
               />
             );
           })}
         </div>
-        <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
+        <div className="mt-[3px] flex gap-1">
           {LANES.map((lane) => (
-            <div
-              key={lane}
-              style={{
-                flex: 1,
-                fontSize: 9,
-                textAlign: 'center',
-                color: 'var(--ink-3)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-              }}
-            >
+            <div key={lane} className="flex-1 text-center text-[9px] uppercase tracking-[0.04em] text-ink-3">
               {lane.slice(0, 3)}
             </div>
           ))}
@@ -183,7 +145,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <div className="page-head" style={{ paddingBottom: 18 }}>
+      <div className="page-head !pb-[18px]">
         <div className="page-title-group">
           <h1>
             <span className="display">
@@ -217,13 +179,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI row */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          borderBottom: '1px solid var(--line)',
-        }}
-      >
+      <div className="grid grid-cols-5 border-b border-line">
         <KpiTile
           label="Pipeline leads"
           value={total.toLocaleString()}
@@ -258,40 +214,17 @@ export default function DashboardPage() {
       </div>
 
       {/* Hero layout: Left = lead stream, center = funnel + agents, right = live feed */}
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr 360px', minHeight: 560 }}>
+      <div className="grid min-h-[560px] grid-cols-[320px_1fr_360px]">
         {/* LEFT: Live lead stream */}
-        <div
-          className="hairline-r"
-          style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}
-        >
-          <div
-            style={{
-              padding: '12px 14px',
-              borderBottom: '1px solid var(--line)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: 'var(--bg-sub)',
-            }}
-          >
+        <div className="hairline-r flex min-h-0 min-w-0 flex-col">
+          <div className="flex items-center gap-2 border-b border-line bg-bg-sub px-3.5 py-3">
             <Dot state="live" />
-            <div className="caps-sm" style={{ color: 'var(--ink-2)', fontWeight: 600 }}>
-              Live lead stream
-            </div>
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontFamily: 'var(--ff-mono)',
-                fontSize: 10,
-                color: 'var(--ink-3)',
-              }}
-            >
-              {contacts.length} · streaming
-            </span>
+            <div className="caps-sm font-semibold text-ink-2">Live lead stream</div>
+            <span className="ml-auto font-mono text-[10px] text-ink-3">{contacts.length} · streaming</span>
           </div>
-          <div style={{ overflow: 'auto', minHeight: 0, flex: 1 }}>
+          <div className="min-h-0 flex-1 overflow-auto">
             {contacts.length === 0 && (
-              <div style={{ padding: '18px', fontSize: 12, color: 'var(--ink-3)' }}>
+              <div className="p-[18px] text-xs text-ink-3">
                 No leads yet. Deploy an agent to start streaming.
               </div>
             )}
@@ -302,71 +235,26 @@ export default function DashboardPage() {
                 <Link
                   key={c.id}
                   href={c.masterAgentId ? `/agents/${c.masterAgentId}/contacts/${c.id}` : '/agents'}
-                  style={{
-                    padding: '10px 14px',
-                    borderBottom: '1px solid var(--line)',
-                    display: 'grid',
-                    gridTemplateColumns: '28px 1fr auto',
-                    gap: 10,
-                    alignItems: 'center',
-                    animation: i === 0 ? 'slide-in 0.4s ease-out' : undefined,
-                    background: i === 0 ? 'var(--accent-weak)' : 'transparent',
-                    textDecoration: 'none',
-                    color: 'inherit',
-                  }}
+                  className={cn(
+                    'grid grid-cols-[28px_1fr_auto] items-center gap-2.5 border-b border-line px-3.5 py-2.5',
+                    i === 0 ? 'bg-accent-weak' : 'bg-transparent',
+                  )}
+                  style={i === 0 ? { animation: 'slide-in 0.4s ease-out' } : undefined}
                 >
                   <div
-                    className="avatar"
-                    style={{
-                      background: `oklch(0.65 0.10 ${(name.charCodeAt(0) * 7) % 360})`,
-                      width: 28,
-                      height: 28,
-                      fontSize: 10,
-                    }}
+                    className="avatar !h-7 !w-7 !text-[10px]"
+                    style={{ background: `oklch(0.65 0.10 ${(name.charCodeAt(0) * 7) % 360})` }}
                   >
                     {initials(c)}
                   </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 500,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10.5,
-                        color: 'var(--ink-3)',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
+                  <div className="min-w-0">
+                    <div className="truncate text-[12.5px] font-medium">{name}</div>
+                    <div className="truncate text-[10.5px] text-ink-3">
                       {c.title ?? '—'} · {c.companyName ?? '—'}
                     </div>
                   </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-end',
-                      gap: 2,
-                    }}
-                  >
-                    <div
-                      className="mono"
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color:
-                          score >= 85 ? 'var(--up)' : score >= 65 ? 'var(--ink)' : 'var(--ink-3)',
-                      }}
-                    >
+                  <div className="flex flex-col items-end gap-0.5">
+                    <div className={cn('mono text-[11px] font-semibold', score >= 85 ? 'text-up' : score >= 65 ? 'text-ink' : 'text-ink-3')}>
                       {score || '—'}
                     </div>
                   </div>
@@ -377,20 +265,13 @@ export default function DashboardPage() {
         </div>
 
         {/* CENTER: funnel + agents */}
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
-              <h3
-                className="caps-sm"
-                style={{ margin: 0, color: 'var(--ink-2)', fontWeight: 600 }}
-              >
-                Pipeline funnel
-              </h3>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--ff-mono)' }}>
-                n={total.toLocaleString()}
-              </span>
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)' }}>
-                conv rate <span className="mono" style={{ color: 'var(--ink)' }}>{overallConv}</span>
+        <div className="flex min-w-0 flex-col">
+          <div className="border-b border-line px-[22px] py-[18px]">
+            <div className="mb-3 flex items-baseline gap-3">
+              <h3 className="caps-sm m-0 font-semibold text-ink-2">Pipeline funnel</h3>
+              <span className="font-mono text-[11px] text-ink-3">n={total.toLocaleString()}</span>
+              <span className="ml-auto text-[11px] text-ink-3">
+                conv rate <span className="mono text-ink">{overallConv}</span>
               </span>
             </div>
             {funnel.map((s, i) => (
@@ -398,38 +279,22 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div style={{ padding: '14px 22px', flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-              <h3
-                className="caps-sm"
-                style={{ margin: 0, color: 'var(--ink-2)', fontWeight: 600 }}
-              >
-                Your fleet
-              </h3>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+          <div className="flex-1 px-[22px] py-3.5">
+            <div className="mb-2.5 flex items-baseline gap-2.5">
+              <h3 className="caps-sm m-0 font-semibold text-ink-2">Your fleet</h3>
+              <span className="text-[11px] text-ink-3">
                 Seven agents operate the pipeline: discovery, enrichment, scoring, outreach, reply,
                 action, and the master.
               </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="grid grid-cols-2 gap-3">
               {(agents ?? []).slice(0, 6).map((a) => (
                 <AgentTile key={a.id} agent={a} />
               ))}
               {(agents ?? []).length === 0 && (
-                <div
-                  style={{
-                    gridColumn: 'span 2',
-                    padding: 18,
-                    border: '1px dashed var(--line)',
-                    borderRadius: 3,
-                    background: 'var(--bg-sub)',
-                    color: 'var(--ink-3)',
-                    fontSize: 12,
-                    textAlign: 'center',
-                  }}
-                >
+                <div className="col-span-2 rounded-[3px] border border-dashed border-line bg-bg-sub p-[18px] text-center text-xs text-ink-3">
                   No agents deployed yet.{' '}
-                  <Link href="/agents/new" style={{ color: 'var(--accent-fg)' }}>
+                  <Link href="/agents/new" className="text-accent-fg">
                     Deploy your first agent →
                   </Link>
                 </div>
@@ -439,42 +304,15 @@ export default function DashboardPage() {
         </div>
 
         {/* RIGHT: Live agent console */}
-        <div
-          className="hairline-l"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            minWidth: 0,
-            background: 'var(--bg-sub)',
-          }}
-        >
-          <div
-            style={{
-              padding: '12px 14px',
-              borderBottom: '1px solid var(--line)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <Icon name="radio" size={13} style={{ color: 'var(--accent)' }} />
-            <div className="caps-sm" style={{ color: 'var(--ink-2)', fontWeight: 600 }}>
-              Agent console
-            </div>
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontFamily: 'var(--ff-mono)',
-                fontSize: 10,
-                color: 'var(--ink-3)',
-              }}
-            >
-              tail -f
-            </span>
+        <div className="hairline-l flex min-w-0 flex-col bg-bg-sub">
+          <div className="flex items-center gap-2 border-b border-line px-3.5 py-3">
+            <Icon name="radio" size={13} className="text-accent" />
+            <div className="caps-sm font-semibold text-ink-2">Agent console</div>
+            <span className="ml-auto font-mono text-[10px] text-ink-3">tail -f</span>
           </div>
-          <div style={{ overflow: 'auto', flex: 1 }}>
+          <div className="flex-1 overflow-auto">
             {feed.length === 0 && eventFeed.length === 0 && (
-              <div style={{ padding: 18, fontSize: 12, color: 'var(--ink-3)' }}>
+              <div className="p-[18px] text-xs text-ink-3">
                 Waiting for agents to come online…
               </div>
             )}

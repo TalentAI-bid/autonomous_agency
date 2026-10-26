@@ -18,6 +18,7 @@ import {
 import { useSetupStatus, type SetupSteps } from '@/hooks/use-setup-status';
 import { useDashboardAnalytics } from '@/hooks/use-analytics';
 
+import { Button } from '@/components/ui/button';
 /* ── Top-strip stat card ──────────────────────────────────────────────── */
 function StatCard({
   icon,
@@ -214,13 +215,13 @@ export function OnboardingView() {
 
         <div style={{ marginLeft: 'auto' }}>
           {canDeploy ? (
-            <Link href="/agents/new" className="btn is-accent">
+            <Button asChild variant="brand" size="dense"><Link href="/agents/new">
               <Rocket size={14} /> Deploy agent
-            </Link>
+            </Link></Button>
           ) : (
-            <button className="btn" type="button" disabled title="Finish setup to deploy">
+            <Button variant="panel" size="dense" type="button" disabled title="Finish setup to deploy">
               <Rocket size={14} /> Deploy agent
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -271,9 +272,9 @@ export function OnboardingView() {
             sub={steps.company ? { text: 'Done', tone: 'up' } : undefined}
             action={
               !steps.company && (
-                <Link href="/settings/company" className="btn is-sm">
+                <Button asChild variant="panel" size="xs"><Link href="/settings/company">
                   Set up
-                </Link>
+                </Link></Button>
               )
             }
           />
@@ -285,9 +286,9 @@ export function OnboardingView() {
             sub={steps.mailbox ? { text: 'Done', tone: 'up' } : undefined}
             action={
               steps.mailbox ? undefined : (
-                <Link href="/settings/email" className="btn is-accent is-sm">
+                <Button asChild variant="brand" size="xs"><Link href="/settings/email">
                   Connect
-                </Link>
+                </Link></Button>
               )
             }
           />
@@ -303,14 +304,9 @@ export function OnboardingView() {
             }
             action={
               steps.extension ? undefined : (
-                <Link
-                  href="/linkedin-extension"
-                  className="btn is-sm"
-                  style={{ paddingRight: 6 }}
-                  aria-label="Install the LinkedIn extension"
-                >
+                <Button asChild variant="panel" size="xs"><Link href="/linkedin-extension" style={{ paddingRight: 6 }} aria-label="Install the LinkedIn extension">
                   Install <ChevronRight size={14} />
-                </Link>
+                </Link></Button>
               )
             }
           />
@@ -321,9 +317,9 @@ export function OnboardingView() {
             kind={rowFor('agent')}
             action={
               canDeploy ? (
-                <Link href="/agents/new" className="btn is-accent is-sm">
+                <Button asChild variant="brand" size="xs"><Link href="/agents/new">
                   Deploy
-                </Link>
+                </Link></Button>
               ) : (
                 <span style={{ color: 'var(--ink-4)', display: 'grid', placeItems: 'center' }}>
                   <Lock size={14} />

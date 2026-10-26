@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/shared/empty-state';
 import { LeadCard, DiscoveringCard, type LeadTag } from '@/components/leads/lead-card';
 import type { Company } from '@/types';
 
+import { Button } from '@/components/ui/button';
 const PAGE_SIZE = 24;
 const AVATAR_HUES = [255, 210, 160, 95, 35, 320, 285];
 const TH = 55; // component-score threshold for surfacing a qualifier tag
@@ -194,9 +195,9 @@ export default function CompaniesPage() {
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <ExportButton />
-          <Link href="/agents/new" className="btn is-accent">
+          <Button asChild variant="brand" size="dense"><Link href="/agents/new">
             <Rocket size={14} /> Deploy agent
-          </Link>
+          </Link></Button>
         </div>
       </div>
 
@@ -252,9 +253,9 @@ export default function CompaniesPage() {
               : 'Deploy an agent — discovered companies will show up here as they’re scored.'
           }
           action={
-            <Link href="/agents/new" className="btn is-accent">
+            <Button asChild variant="brand" size="dense"><Link href="/agents/new">
               <Rocket size={14} /> Deploy agent
-            </Link>
+            </Link></Button>
           }
         />
       ) : (
@@ -328,27 +329,27 @@ export default function CompaniesPage() {
 
         {(cursorStack.length > 1 || pagination?.hasMore) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
+            <Button
               type="button"
-              className="btn is-sm"
+              variant="panel" size="xs"
               disabled={cursorStack.length <= 1}
               onClick={() => setCursorStack((s) => s.slice(0, -1))}
             >
               ← Prev
-            </button>
+            </Button>
             <span className="mono" style={{ fontSize: 11 }}>
               Page {cursorStack.length}
             </span>
-            <button
+            <Button
               type="button"
-              className="btn is-sm"
+              variant="panel" size="xs"
               disabled={!pagination?.hasMore || !pagination?.nextCursor}
               onClick={() => {
                 if (pagination?.nextCursor) setCursorStack((s) => [...s, pagination.nextCursor!]);
               }}
             >
               Next →
-            </button>
+            </Button>
           </div>
         )}
       </div>

@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/shared/empty-state';
 import { LeadCard, DiscoveringCard, type LeadTag } from '@/components/leads/lead-card';
 import { Users } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 const STAGES = [
   { value: '', label: 'All stages' },
   { value: 'new', label: 'New' },
@@ -172,13 +173,13 @@ export default function ProspectsPage() {
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Link href="/prospects/new" className="btn">
+          <Button asChild variant="panel" size="dense"><Link href="/prospects/new">
             <Plus size={14} /> Add prospect
-          </Link>
+          </Link></Button>
           <ExportButton />
-          <Link href="/agents/new" className="btn is-accent">
+          <Button asChild variant="brand" size="dense"><Link href="/agents/new">
             <Rocket size={14} /> Deploy agent
-          </Link>
+          </Link></Button>
         </div>
       </div>
 
@@ -253,9 +254,9 @@ export default function ProspectsPage() {
           title="No prospects match these filters"
           description="Try clearing the filters, or add a prospect manually."
           action={
-            <Link href="/prospects/new" className="btn is-accent">
+            <Button asChild variant="brand" size="dense"><Link href="/prospects/new">
               <Plus size={14} /> Add prospect
-            </Link>
+            </Link></Button>
           }
         />
       ) : (

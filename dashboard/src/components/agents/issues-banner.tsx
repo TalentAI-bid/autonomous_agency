@@ -9,6 +9,7 @@ import { Icon } from '@/components/ui/icon';
 import { useAgentErrors, useResolveError, useStartAgent, type PipelineErrorRow } from '@/hooks/use-agents';
 import { useRealtimeStore } from '@/stores/realtime.store';
 
+import { Button } from '@/components/ui/button';
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -108,47 +109,47 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
             </div>
             <div style={{ display: 'inline-flex', gap: 6 }}>
               {row.retryable && (
-                <button
-                  className="btn is-sm"
+                <Button
+                  variant="panel" size="xs"
                   type="button"
                   disabled={startAgent.isPending}
                   onClick={() => startAgent.mutate(masterAgentId)}
                   title="Retry pipeline"
                 >
                   Retry
-                </button>
+                </Button>
               )}
-              <button
-                className="btn is-sm"
+              <Button
+                variant="panel" size="xs"
                 type="button"
                 disabled={resolveError.isPending}
                 onClick={() => resolveError.mutate(row.id)}
                 title="Dismiss"
               >
                 Dismiss
-              </button>
+              </Button>
             </div>
           </div>
         ))}
         {hidden > 0 && !expanded && (
-          <button
-            className="btn is-sm"
+          <Button
+            variant="panel" size="xs"
             type="button"
             style={{ alignSelf: 'flex-start', marginTop: 6 }}
             onClick={() => setExpanded(true)}
           >
             Show {hidden} more
-          </button>
+          </Button>
         )}
         {expanded && rows.length > 3 && (
-          <button
-            className="btn is-sm"
+          <Button
+            variant="panel" size="xs"
             type="button"
             style={{ alignSelf: 'flex-start', marginTop: 6 }}
             onClick={() => setExpanded(false)}
           >
             Collapse
-          </button>
+          </Button>
         )}
       </PanelBody>
     </Panel>

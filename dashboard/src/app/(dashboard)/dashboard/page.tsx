@@ -20,6 +20,7 @@ import { OnboardingView } from '@/components/dashboard/onboarding-view';
 import { useSetupStatus } from '@/hooks/use-setup-status';
 import type { Contact, MasterAgent } from '@/types';
 
+import { Button } from '@/components/ui/button';
 const LANES: AgentType[] = ['discovery', 'enrichment', 'scoring', 'outreach', 'reply', 'action'];
 
 function greeting() {
@@ -202,16 +203,16 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn" type="button">
+          <Button variant="panel" size="dense" type="button">
             <Icon name="filter" /> Filters
-          </button>
-          <button className="btn" type="button">
+          </Button>
+          <Button variant="panel" size="dense" type="button">
             <Icon name="calendar" /> Today
-          </button>
+          </Button>
           <ExportButton />
-          <Link href="/agents/new" className="btn is-primary">
+          <Button asChild variant="ink" size="dense"><Link href="/agents/new">
             <Icon name="plus" /> Deploy agent
-          </Link>
+          </Link></Button>
         </div>
       </div>
 

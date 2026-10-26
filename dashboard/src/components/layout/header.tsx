@@ -11,6 +11,7 @@ import { Dot } from '@/components/ui/dot';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { apiPost } from '@/lib/api';
 
+import { Button } from '@/components/ui/button';
 function fmtMoney(n?: number | null) {
   if (n == null) return '—';
   if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
@@ -83,9 +84,9 @@ export function Header() {
 
       <div className="topbar-right">
         <WorkspaceSwitcher />
-        <Link href="/agents/new" className="btn is-primary is-sm" style={{ gap: 6 }}>
+        <Button asChild variant="ink" size="xs"><Link href="/agents/new" style={{ gap: 6 }}>
           <Icon name="plus" size={12} /> New agent
-        </Link>
+        </Link></Button>
         <button className="topbar-cell" type="button" aria-label="Notifications">
           <Icon name="bell" size={13} />
           {unread > 0 && <span style={{ fontSize: 11 }}>{Math.min(unread, 9)}</span>}

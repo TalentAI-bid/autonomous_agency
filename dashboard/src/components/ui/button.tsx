@@ -14,12 +14,18 @@ const buttonVariants = cva(
         secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
         ghost: 'hover:bg-accent-weak hover:text-accent-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
+        // Dense app-chrome buttons (replace the old .btn CSS classes)
+        panel: 'border border-line-2 bg-bg-panel text-ink hover:bg-hover hover:border-line-strong',
+        ink: 'border border-ink bg-ink text-bg hover:bg-ink/90',
+        brand: 'border border-accent bg-accent text-white hover:bg-accent/90',
       },
       size: {
         default: 'h-9 px-4 py-2',
         sm: 'h-8 rounded-md px-3 text-xs',
         lg: 'h-10 rounded-md px-8',
         icon: 'h-9 w-9',
+        dense: 'h-7 gap-1.5 px-3 text-xs',
+        xs: 'h-6 gap-1.5 px-2 text-[11px]',
       },
     },
     defaultVariants: { variant: 'default', size: 'default' },

@@ -323,34 +323,6 @@
 .page-title-group p { margin: 4px 0 0; color: var(--ink-3); font-size: 12.5px; }
 .page-actions { display: flex; align-items: center; gap: 8px; }
 
-/* ─── Buttons ───────────────────────────────────────────────────── */
-.btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 12px;
-  font-size: 12px; font-weight: 500;
-  border: 1px solid var(--line-2);
-  background: var(--bg-panel);
-  color: var(--ink);
-  border-radius: 3px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 80ms, border-color 80ms;
-}
-.btn:hover { background: var(--hover); border-color: var(--line-strong); }
-.btn.is-primary {
-  background: var(--ink); color: var(--bg);
-  border-color: var(--ink);
-}
-.btn.is-primary:hover { background: oklch(0.15 0.012 60); }
-.btn.is-accent {
-  background: var(--accent); color: white;
-  border-color: var(--accent);
-}
-.btn.is-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
-.btn.is-ghost:hover { background: var(--hover); color: var(--ink); }
-.btn.is-sm { height: 24px; padding: 0 8px; font-size: 11px; }
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
 /* ─── Panel / Card ──────────────────────────────────────────────── */
 .panel {
   background: var(--bg-panel);

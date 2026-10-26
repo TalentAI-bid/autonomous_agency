@@ -111,7 +111,7 @@ export default function DealDetailPage() {
                       className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                         stage.id === deal.stageId
                           ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                          : 'border-border text-muted-foreground hover:bg-accent-weak hover:text-accent-foreground'
                       }`}
                       style={stage.id === deal.stageId ? { borderColor: stage.color, color: stage.color } : undefined}
                     >

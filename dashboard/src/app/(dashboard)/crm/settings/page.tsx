@@ -336,7 +336,7 @@ export default function CrmSettingsPage() {
                             ? 'opacity-40 cursor-not-allowed border-border text-muted-foreground'
                             : stage.followUpEligible
                               ? 'border-up/50 bg-up/10 text-up'
-                              : 'border-border text-muted-foreground hover:bg-accent'
+                              : 'border-border text-muted-foreground hover:bg-accent-weak'
                         }`}
                       >
                         {stage.followUpEligible && !stage.isWon && !stage.isLost

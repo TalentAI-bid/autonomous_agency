@@ -426,7 +426,7 @@ export default function ContactDetailPage() {
                     <Link
                       key={deal.id}
                       href={`/crm/deals/${deal.id}`}
-                      className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-accent/50 transition-colors"
+                      className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-accent-weak transition-colors"
                     >
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">{deal.title}</p>

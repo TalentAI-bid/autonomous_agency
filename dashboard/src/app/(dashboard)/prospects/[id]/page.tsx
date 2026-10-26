@@ -64,7 +64,7 @@ export default function ProspectDetailPage() {
                 padding: '4px 10px',
                 borderRadius: 999,
                 border: '1px solid var(--border)',
-                background: category === c.value ? 'var(--accent-1)' : 'var(--bg-2)',
+                background: category === c.value ? 'var(--accent-weak)' : 'var(--bg-sub)',
                 color: category === c.value ? 'var(--accent-fg)' : 'var(--ink-2)',
                 cursor: 'pointer',
               }}

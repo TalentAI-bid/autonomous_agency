@@ -128,7 +128,7 @@ export function ContactPicker({
                       <button
                         type="button"
                         onClick={() => handlePick(c)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent-weak"
                       >
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{displayName(c)}</span>
@@ -150,7 +150,7 @@ export function ContactPicker({
                   <button
                     type="button"
                     onClick={() => { setOpen(false); setCreating(true); }}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent-weak"
                   >
                     <UserPlus className="h-3.5 w-3.5" />
                     Create new contact{query ? ` "${query}"` : ''}

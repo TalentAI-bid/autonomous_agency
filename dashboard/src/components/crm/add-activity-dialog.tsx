@@ -192,7 +192,7 @@ export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: A
                         'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
                         type === o.value
                           ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-input bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                          : 'border-input bg-transparent text-muted-foreground hover:bg-accent-weak hover:text-accent-foreground',
                       )}
                     >
                       {o.label}

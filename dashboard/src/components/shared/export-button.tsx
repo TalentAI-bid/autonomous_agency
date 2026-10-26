@@ -137,7 +137,7 @@ export function ExportButton({ masterAgentId, showFullBatch = false, className }
                     type="button"
                     onClick={() => runExport(opt)}
                     disabled={downloading !== null}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent-weak disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />

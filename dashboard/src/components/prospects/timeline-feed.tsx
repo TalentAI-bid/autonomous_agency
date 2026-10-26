@@ -90,7 +90,7 @@ function EventCard({ event }: { event: TimelineEvent }) {
         border: '1px solid var(--border)',
         borderRadius: 8,
         padding: 10,
-        background: 'var(--bg-2)',
+        background: 'var(--bg-sub)',
         cursor: hasDetail ? 'pointer' : 'default',
       }}
       onClick={() => hasDetail && setExpanded((v) => !v)}

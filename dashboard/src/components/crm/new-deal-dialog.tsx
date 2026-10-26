@@ -151,7 +151,7 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
                     'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
                     stageId === s.id
                       ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-input bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                      : 'border-input bg-transparent text-muted-foreground hover:bg-accent-weak hover:text-accent-foreground',
                   )}
                   style={stageId === s.id ? undefined : { borderLeftColor: s.color, borderLeftWidth: 3 }}
                 >

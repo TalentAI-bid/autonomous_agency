@@ -81,7 +81,7 @@ export default function AnalyticsPage() {
                   }}
                 />
                 <Bar dataKey="discovered" name="Discovered" fill="var(--primary)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="contacted" name="Contacted" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="contacted" name="Contacted" fill="var(--accent)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

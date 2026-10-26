@@ -278,7 +278,7 @@ function ImageDrop({ onFile, imageUrl }: { onFile: (f: File | null) => void; ima
           type="button"
           onClick={() => onFile(null)}
           aria-label="Remove image"
-          className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-card shadow ring-1 ring-border hover:bg-accent"
+          className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-card shadow ring-1 ring-border hover:bg-accent-weak"
         >
           <X className="h-3 w-3" />
         </button>
@@ -293,7 +293,7 @@ function ImageDrop({ onFile, imageUrl }: { onFile: (f: File | null) => void; ima
       onDrop={handleDrop}
       className={cn(
         'flex h-24 cursor-pointer items-center justify-center rounded-md border border-dashed transition-colors',
-        dragOver ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/30',
+        dragOver ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent-weak',
       )}
     >
       <input
@@ -377,7 +377,7 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
                   onClick={() => onPick(isPicked ? null : c)}
                   className={cn(
                     'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors',
-                    isPicked ? 'border-primary bg-primary/5' : 'border-input hover:bg-accent/30',
+                    isPicked ? 'border-primary bg-primary/5' : 'border-input hover:bg-accent-weak',
                   )}
                 >
                   <span className="min-w-0">
@@ -413,7 +413,7 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
             <button
               type="button"
               onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-xs font-medium hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-xs font-medium hover:bg-accent-weak hover:text-accent-foreground"
             >
               <UserPlus className="h-3 w-3" />
               Create contact &ldquo;{draft.contactName}&rdquo;

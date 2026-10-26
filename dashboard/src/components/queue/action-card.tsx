@@ -134,7 +134,7 @@ export function ActionCard({
         border: '1px solid var(--border)',
         borderRadius: 10,
         padding: 14,
-        background: action.status === 'in_progress' ? 'var(--bg-1)' : 'var(--bg-2)',
+        background: action.status === 'in_progress' ? 'var(--bg-panel)' : 'var(--bg-sub)',
         opacity: action.status === 'completed' || action.status === 'skipped' ? 0.5 : 1,
       }}
     >
@@ -151,7 +151,7 @@ export function ActionCard({
             )}
           </div>
           {/* Company name is the primary identifier. */}
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink-1)' }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>
             {company.name}
             {company.score != null && (
               <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 8, fontWeight: 400 }}>
@@ -163,7 +163,7 @@ export function ActionCard({
           {contact ? (
             <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 2 }}>
               Recommended target:&nbsp;
-              <Link href={`/prospects/${contact.id}`} style={{ color: 'var(--ink-1)', textDecoration: 'none' }}>
+              <Link href={`/prospects/${contact.id}`} style={{ color: 'var(--ink)', textDecoration: 'none' }}>
                 {recommendedName}
               </Link>
               {contact.title && <span style={{ color: 'var(--ink-3)' }}> · {contact.title}</span>}
@@ -188,7 +188,7 @@ export function ActionCard({
             border: '1px dashed var(--border)',
             borderRadius: 6,
             padding: 8,
-            background: 'var(--bg-1)',
+            background: 'var(--bg-panel)',
             marginBottom: 8,
             cursor: 'pointer',
           }}
@@ -245,13 +245,13 @@ export function ActionCard({
                     alignItems: 'center',
                     gap: 6,
                     padding: '6px 8px',
-                    background: 'var(--bg-1)',
+                    background: 'var(--bg-panel)',
                     border: '1px solid var(--border)',
                     borderRadius: 6,
                     textAlign: 'left',
                     cursor: 'pointer',
                     fontSize: 12,
-                    color: 'var(--ink-1)',
+                    color: 'var(--ink)',
                   }}
                 >
                   <span style={{ fontWeight: 500 }}>{alt.name}</span>

@@ -53,7 +53,7 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
         border: '1px solid var(--border)',
         borderRadius: 12,
         padding: 16,
-        background: 'var(--bg-2)',
+        background: 'var(--bg-sub)',
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
@@ -84,10 +84,10 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
       </div>
 
       <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--ink-3)' }}>
-        <span>Score: <strong style={{ color: 'var(--ink-1)' }}>{prospect.score ?? '—'}</strong></span>
-        <span>Touches: <strong style={{ color: 'var(--ink-1)' }}>{prospect.prospectStage?.totalTouches ?? 0}</strong></span>
+        <span>Score: <strong style={{ color: 'var(--ink)' }}>{prospect.score ?? '—'}</strong></span>
+        <span>Touches: <strong style={{ color: 'var(--ink)' }}>{prospect.prospectStage?.totalTouches ?? 0}</strong></span>
         {prospect.prospectStage?.lastResponseAt && (
-          <span>Replied: <strong style={{ color: 'var(--ink-1)' }}>{formatRelative(prospect.prospectStage.lastResponseAt)}</strong></span>
+          <span>Replied: <strong style={{ color: 'var(--ink)' }}>{formatRelative(prospect.prospectStage.lastResponseAt)}</strong></span>
         )}
       </div>
 

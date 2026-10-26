@@ -8,11 +8,11 @@
 
 export function scoreColor(score: number | null | undefined): string {
   if (score == null) return 'var(--ink-5)';
-  if (score >= 80) return '#059669'; // emerald-600
-  if (score >= 60) return '#10b981'; // emerald-500
-  if (score >= 40) return '#f59e0b'; // amber-500
-  if (score >= 20) return '#f97316'; // orange-500
-  return '#a1a1aa'; // zinc-400
+  if (score >= 80) return 'var(--up)';
+  if (score >= 60) return 'var(--accent)';
+  if (score >= 40) return 'var(--warn)';
+  if (score >= 20) return 'var(--down)';
+  return 'var(--ink-4)';
 }
 
 export function FitGauge({

@@ -84,7 +84,7 @@ export function Breadcrumb({ items, showBack = false, backFallback = '/dashboard
         <button
           type="button"
           onClick={handleBack}
-          className="mr-2 inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="mr-2 inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground hover:bg-accent-weak hover:text-accent-foreground"
           aria-label="Back"
         >
           <ArrowLeft className="w-3.5 h-3.5" />

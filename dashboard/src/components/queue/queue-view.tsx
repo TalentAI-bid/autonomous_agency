@@ -81,7 +81,7 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
         padding: '10px 12px',
         border: '1px solid var(--border)',
         borderRadius: 8,
-        background: 'var(--bg-1)',
+        background: 'var(--bg-panel)',
         fontSize: 13,
         color: 'var(--ink-2)',
       }}
@@ -143,14 +143,14 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
               {greeting}{name ? `, ${name}` : ''}.
             </h1>
             <p style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-              <strong style={{ color: 'var(--ink-1)' }}>{data.count}</strong> actions today
-              {' · ~'}<strong style={{ color: 'var(--ink-1)' }}>{data.etaMinutes}</strong> min estimated
+              <strong style={{ color: 'var(--ink)' }}>{data.count}</strong> actions today
+              {' · ~'}<strong style={{ color: 'var(--ink)' }}>{data.etaMinutes}</strong> min estimated
             </p>
           </div>
         ) : (
           <p style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-            <strong style={{ color: 'var(--ink-1)' }}>{data.count}</strong> actions
-            {' · ~'}<strong style={{ color: 'var(--ink-1)' }}>{data.etaMinutes}</strong> min estimated
+            <strong style={{ color: 'var(--ink)' }}>{data.count}</strong> actions
+            {' · ~'}<strong style={{ color: 'var(--ink)' }}>{data.etaMinutes}</strong> min estimated
           </p>
         )}
         <Button
@@ -179,7 +179,7 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
                 padding: '8px 0',
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--ink-1)',
+                color: 'var(--ink)',
                 cursor: 'pointer',
                 textAlign: 'left',
               }}

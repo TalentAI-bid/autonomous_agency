@@ -96,7 +96,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
               <span
                 style={{
                   fontSize: 13,
-                  color: 'var(--ink-1)',
+                  color: 'var(--ink)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',

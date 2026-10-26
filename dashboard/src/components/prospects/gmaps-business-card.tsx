@@ -23,7 +23,7 @@ const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const LABEL: React.CSSProperties = {
   fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6,
 };
-const ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-1)' };
+const ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink)' };
 const SECTION: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
 
 function LinkRow({ icon, href, children }: { icon: React.ReactNode; href: string; children: React.ReactNode }) {
@@ -42,7 +42,7 @@ function Collapsible({ label, html }: { label: string; html: string }) {
         onClick={() => setOpen((o) => !o)}
         style={{
           fontSize: 11, padding: '4px 10px', borderRadius: 999, border: '1px solid var(--border)',
-          background: 'var(--bg-2)', color: 'var(--ink-2)', cursor: 'pointer', alignSelf: 'flex-start',
+          background: 'var(--bg-sub)', color: 'var(--ink-2)', cursor: 'pointer', alignSelf: 'flex-start',
         }}
       >
         {open ? `Hide ${label}` : `Show ${label}`}
@@ -52,7 +52,7 @@ function Collapsible({ label, html }: { label: string; html: string }) {
           dir="auto"
           style={{
             maxHeight: 360, overflow: 'auto', fontSize: 12, lineHeight: 1.5,
-            border: '1px solid var(--border)', borderRadius: 8, padding: 10, background: 'var(--bg-1)',
+            border: '1px solid var(--border)', borderRadius: 8, padding: 10, background: 'var(--bg-panel)',
           }}
           // Sanitized at capture time in maps-core.js (no scripts/handlers).
           dangerouslySetInnerHTML={{ __html: html }}
@@ -81,7 +81,7 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
             disabled={gen?.isPending}
             style={{
               fontSize: 11, padding: '3px 10px', borderRadius: 999, border: '1px solid var(--border)',
-              background: 'var(--bg-1)', color: 'var(--ink-2)', cursor: gen?.isPending ? 'wait' : 'pointer',
+              background: 'var(--bg-panel)', color: 'var(--ink-2)', cursor: gen?.isPending ? 'wait' : 'pointer',
             }}
           >
             {gen?.isPending ? 'Generating…' : rec ? 'Regenerate' : 'Generate'}
@@ -159,7 +159,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
   return (
     <div
       style={{
-        border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'var(--bg-2)',
+        border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'var(--bg-sub)',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}
     >

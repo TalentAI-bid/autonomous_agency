@@ -98,8 +98,8 @@ export default function AgentsPage() {
             <Card key={agent.id} className="group hover:border-border/80 transition-colors">
               <CardContent className="p-5">
                 <div className="flex items-start gap-4">
-                  <div className="p-2.5 rounded-lg bg-blue-500/10 shrink-0">
-                    <Bot className="w-5 h-5 text-blue-400" />
+                  <div className="p-2.5 rounded-lg bg-info/10 shrink-0">
+                    <Bot className="w-5 h-5 text-info" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">

@@ -48,8 +48,8 @@ export default function CampaignsPage() {
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 min-w-0">
-                    <div className="p-2 rounded-lg bg-purple-500/10 shrink-0">
-                      <Megaphone className="w-4 h-4 text-purple-400" />
+                    <div className="p-2 rounded-lg bg-a-master/10 shrink-0">
+                      <Megaphone className="w-4 h-4 text-a-master" />
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{campaign.name}</p>

@@ -386,7 +386,7 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
                   </span>
                   <span className="ml-2 flex shrink-0 items-center gap-2">
                     {c.matchType === 'email' && (
-                      <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-400">
+                      <span className="rounded bg-up/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-up">
                         email
                       </span>
                     )}

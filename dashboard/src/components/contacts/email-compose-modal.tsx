@@ -159,15 +159,15 @@ export function EmailComposeModal({
           </div>
         ) : isSkip ? (
           <div className="space-y-4">
-            <div className="rounded-lg border border-zinc-700 bg-zinc-900/40 p-4">
+            <div className="rounded-lg border border-line-2 bg-bg-soft p-4">
               <div className="flex items-center gap-2 mb-2">
-                <Ban className="w-4 h-4 text-zinc-400" />
-                <h3 className="text-sm font-semibold text-zinc-200">Skipped — Wrong Fit</h3>
+                <Ban className="w-4 h-4 text-ink-3" />
+                <h3 className="text-sm font-semibold text-ink-3">Skipped — Wrong Fit</h3>
               </div>
-              <p className="text-sm text-zinc-400">
+              <p className="text-sm text-ink-3">
                 {draftMeta?.skipReason || 'Classified as wrong fit — no commercial relationship makes sense.'}
               </p>
-              <p className="text-xs text-zinc-500 mt-2">
+              <p className="text-xs text-ink-3 mt-2">
                 If this looks wrong (e.g. the company does actually hire engineers), regenerate a normal pitch below.
               </p>
             </div>
@@ -178,21 +178,21 @@ export function EmailComposeModal({
               <div
                 className={`rounded-lg border p-3 ${
                   isPartnership
-                    ? 'border-amber-700/50 bg-amber-950/30'
-                    : 'border-blue-700/50 bg-blue-950/30'
+                    ? 'border-warn/50 bg-warn/15'
+                    : 'border-info/50 bg-info/15'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
                   {isPartnership ? (
-                    <Handshake className="w-4 h-4 text-amber-400" />
+                    <Handshake className="w-4 h-4 text-warn-fg" />
                   ) : (
-                    <Globe className="w-4 h-4 text-blue-400" />
+                    <Globe className="w-4 h-4 text-info" />
                   )}
-                  <h3 className={`text-sm font-semibold ${isPartnership ? 'text-amber-300' : 'text-blue-300'}`}>
+                  <h3 className={`text-sm font-semibold ${isPartnership ? 'text-warn-fg' : 'text-info'}`}>
                     {isPartnership ? 'Partnership Email — Direct Competitor Detected' : 'Collaboration Email — Adjacent Partner'}
                   </h3>
                 </div>
-                <p className={`text-xs ${isPartnership ? 'text-amber-200/80' : 'text-blue-200/80'}`}>
+                <p className={`text-xs ${isPartnership ? 'text-warn-fg/80' : 'text-info/80'}`}>
                   {draftMeta.warningMessage}
                 </p>
                 {isPartnership && draftMeta.partnershipAngle && (

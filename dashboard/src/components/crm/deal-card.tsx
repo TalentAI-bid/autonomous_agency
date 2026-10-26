@@ -51,7 +51,7 @@ export function DealCard({ deal, className, onClick }: DealCardProps) {
         {/* Footer: value + stage badge */}
         <div className="flex items-center justify-between gap-2 pt-1">
           {formattedValue ? (
-            <span className="text-xs font-medium text-emerald-400">{formattedValue}</span>
+            <span className="text-xs font-medium text-up">{formattedValue}</span>
           ) : (
             <span />
           )}

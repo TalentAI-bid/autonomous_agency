@@ -229,7 +229,7 @@ export default function LinkedInExtensionPage() {
 
           <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
             {statusQ.data?.connected && (
-              <span className="inline-flex items-center gap-1.5 text-emerald-400">
+              <span className="inline-flex items-center gap-1.5 text-up">
                 <PlugZap className="w-3.5 h-3.5" /> Extension connected
               </span>
             )}
@@ -241,7 +241,7 @@ export default function LinkedInExtensionPage() {
           </div>
 
           {latestQ.isError && (
-            <div className="flex items-start gap-2 text-[11px] text-amber-400">
+            <div className="flex items-start gap-2 text-[11px] text-warn-fg">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>
                 No release has been cut yet. Run{' '}
@@ -353,7 +353,7 @@ function InstallPanel() {
         </div>
       ))}
       <div className="md:col-span-2 rounded-lg border border-border bg-muted/30 p-4 flex items-start gap-3">
-        <ShieldCheck className="w-4 h-4 mt-0.5 text-emerald-400 shrink-0" />
+        <ShieldCheck className="w-4 h-4 mt-0.5 text-up shrink-0" />
         <p className="text-xs text-muted-foreground">
           The package is signed and the SHA256 is published next to the download link.
           Your browser sessions stay local — the extension only ever forwards results to your workspace.
@@ -412,7 +412,7 @@ function WhatsNewPanel() {
           <ul className="space-y-1.5 text-sm text-muted-foreground">
             {entry.notes.map((n) => (
               <li key={n} className="flex gap-2">
-                <Check className="w-3.5 h-3.5 text-emerald-400 mt-1 shrink-0" />
+                <Check className="w-3.5 h-3.5 text-up mt-1 shrink-0" />
                 <span>{n}</span>
               </li>
             ))}
@@ -436,7 +436,7 @@ function ProfilePreview() {
       {/* Profile header */}
       <div className="p-5 border-b border-border">
         <div className="flex items-start gap-3">
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-semibold text-lg shrink-0">
+          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-a-master to-info flex items-center justify-center text-white font-semibold text-lg shrink-0">
             MO
           </div>
           <div className="min-w-0 flex-1">
@@ -463,7 +463,7 @@ function ProfilePreview() {
               <div className="text-xs text-muted-foreground">ICP fit</div>
             </div>
           </div>
-          <Badge className="bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/20">
+          <Badge className="bg-up/15 text-up hover:bg-up/20">
             Strong fit
           </Badge>
         </div>
@@ -513,7 +513,7 @@ function SignalRow({
     <div className="flex items-center justify-between text-xs">
       <span className="text-muted-foreground">{label}</span>
       <span
-        className={`tabular-nums ${tone === 'good' ? 'text-emerald-400' : 'text-amber-400'}`}
+        className={`tabular-nums ${tone === 'good' ? 'text-up' : 'text-warn-fg'}`}
       >
         {value}
       </span>

@@ -279,7 +279,7 @@ export default function ContactDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               {deep.githubUrl && (
-                <a href={deep.githubUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-blue-400 hover:underline">
+                <a href={deep.githubUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-info hover:underline">
                   {deep.githubUrl} <ExternalLink className="w-3 h-3" />
                 </a>
               )}
@@ -344,12 +344,12 @@ export default function ContactDetailPage() {
               size="inline"
             />
             {contact.linkedinUrl && (
-              <a href={contact.linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-blue-400 hover:underline">
+              <a href={contact.linkedinUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-info hover:underline">
                 <Linkedin className="w-3.5 h-3.5" /> LinkedIn <ExternalLink className="w-3 h-3" />
               </a>
             )}
             {deep.personalWebsite && (
-              <a href={deep.personalWebsite} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-blue-400 hover:underline">
+              <a href={deep.personalWebsite} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-info hover:underline">
                 <Globe className="w-3.5 h-3.5" /> {deep.personalWebsite} <ExternalLink className="w-3 h-3" />
               </a>
             )}
@@ -364,7 +364,7 @@ export default function ContactDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <Star className="w-4 h-4 text-amber-400" /> Score Breakdown
+                <Star className="w-4 h-4 text-warn-fg" /> Score Breakdown
                 <Badge variant="outline" className="ml-auto">{contact.score}</Badge>
               </CardTitle>
             </CardHeader>

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import { captureProspect, type CaptureInput } from '@/lib/api/prospects';
 
+import { Select } from '@/components/ui/select';
 // Source labels match the option values that the agentcore captureSchema
 // accepts. Adding a new option here without updating SOURCE_TYPES in
 // contact.routes.ts will still work — the backend logs and accepts the
@@ -124,8 +125,8 @@ export function CaptureForm() {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-xl">
       <div className="grid gap-2">
-        <Label htmlFor="sourceType">Source <span className="text-red-500">*</span></Label>
-        <select
+        <Label htmlFor="sourceType">Source <span className="text-down">*</span></Label>
+        <Select
           id="sourceType"
           value={form.sourceType ?? 'manual_linkedin'}
           onChange={(e) => update('sourceType', e.target.value)}
@@ -135,11 +136,11 @@ export function CaptureForm() {
           {SOURCE_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="name">Name <span className="text-red-500">*</span></Label>
+        <Label htmlFor="name">Name <span className="text-down">*</span></Label>
         <Input
           id="name"
           value={form.name ?? ''}

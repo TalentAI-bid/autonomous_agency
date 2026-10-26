@@ -24,21 +24,21 @@ import type { MailboxEmail, MailboxThread } from '@/types';
 function classificationBadge(c?: string) {
   if (!c) return null;
   const colorMap: Record<string, string> = {
-    interested: 'bg-emerald-900/30 text-emerald-400',
-    inquiry: 'bg-blue-900/30 text-blue-400',
-    application: 'bg-indigo-900/30 text-indigo-400',
-    partnership: 'bg-purple-900/30 text-purple-400',
-    introduction: 'bg-cyan-900/30 text-cyan-400',
-    objection: 'bg-orange-900/30 text-orange-400',
-    not_now: 'bg-yellow-900/30 text-yellow-400',
-    out_of_office: 'bg-zinc-800 text-zinc-400',
-    unsubscribe: 'bg-red-900/30 text-red-400',
-    bounce: 'bg-red-900/30 text-red-400',
-    spam: 'bg-red-900/30 text-red-300',
-    support_request: 'bg-amber-900/30 text-amber-400',
+    interested: 'bg-up/15 text-up',
+    inquiry: 'bg-info/15 text-info',
+    application: 'bg-info/15 text-info',
+    partnership: 'bg-a-master/15 text-a-master',
+    introduction: 'bg-a-enrichment/15 text-a-enrichment',
+    objection: 'bg-warn/15 text-warn-fg',
+    not_now: 'bg-warn/15 text-warn-fg',
+    out_of_office: 'bg-bg-soft text-ink-3',
+    unsubscribe: 'bg-down/15 text-down',
+    bounce: 'bg-down/15 text-down',
+    spam: 'bg-down/15 text-down',
+    support_request: 'bg-warn/15 text-warn-fg',
   };
   return (
-    <Badge className={colorMap[c] ?? 'bg-zinc-800 text-zinc-400'}>
+    <Badge className={colorMap[c] ?? 'bg-bg-soft text-ink-3'}>
       {c.replace(/_/g, ' ')}
     </Badge>
   );
@@ -47,30 +47,30 @@ function classificationBadge(c?: string) {
 function statusBadge(s?: string) {
   if (!s) return null;
   const colorMap: Record<string, string> = {
-    sent: 'bg-emerald-900/30 text-emerald-400',
-    queued: 'bg-blue-900/30 text-blue-400',
-    sending: 'bg-yellow-900/30 text-yellow-400',
-    failed: 'bg-red-900/30 text-red-400',
-    cancelled: 'bg-zinc-800 text-zinc-400',
+    sent: 'bg-up/15 text-up',
+    queued: 'bg-info/15 text-info',
+    sending: 'bg-warn/15 text-warn-fg',
+    failed: 'bg-down/15 text-down',
+    cancelled: 'bg-bg-soft text-ink-3',
   };
   return (
-    <Badge className={colorMap[s] ?? 'bg-zinc-800 text-zinc-400'}>
+    <Badge className={colorMap[s] ?? 'bg-bg-soft text-ink-3'}>
       {s}
     </Badge>
   );
 }
 
 const priorityColors: Record<string, string> = {
-  high: 'bg-red-900/30 text-red-400',
-  medium: 'bg-yellow-900/30 text-yellow-400',
-  low: 'bg-zinc-800 text-zinc-400',
+  high: 'bg-down/15 text-down',
+  medium: 'bg-warn/15 text-warn-fg',
+  low: 'bg-bg-soft text-ink-3',
 };
 
 const threadStatusColors: Record<string, string> = {
-  active: 'bg-emerald-900/30 text-emerald-400',
-  needs_action: 'bg-red-900/30 text-red-400',
-  waiting: 'bg-blue-900/30 text-blue-400',
-  archived: 'bg-zinc-800 text-zinc-400',
+  active: 'bg-up/15 text-up',
+  needs_action: 'bg-down/15 text-down',
+  waiting: 'bg-info/15 text-info',
+  archived: 'bg-bg-soft text-ink-3',
 };
 
 export default function MailboxPage() {
@@ -125,7 +125,7 @@ export default function MailboxPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Mail className="w-6 h-6 text-blue-400" />
+        <Mail className="w-6 h-6 text-info" />
         <div>
           <h1 className="text-2xl font-bold">Mailbox</h1>
           <p className="text-muted-foreground text-sm mt-0.5">Manage email threads and conversations</p>
@@ -140,8 +140,8 @@ export default function MailboxPage() {
           <>
             <Card>
               <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-blue-500/10">
-                  <ArrowDown className="w-4 h-4 text-blue-400" />
+                <div className="p-2 rounded-lg bg-info/10">
+                  <ArrowDown className="w-4 h-4 text-info" />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Received Today</p>
@@ -151,8 +151,8 @@ export default function MailboxPage() {
             </Card>
             <Card>
               <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-emerald-500/10">
-                  <ArrowUp className="w-4 h-4 text-emerald-400" />
+                <div className="p-2 rounded-lg bg-up/10">
+                  <ArrowUp className="w-4 h-4 text-up" />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Sent Today</p>
@@ -162,8 +162,8 @@ export default function MailboxPage() {
             </Card>
             <Card>
               <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-indigo-500/10">
-                  <MessageSquare className="w-4 h-4 text-indigo-400" />
+                <div className="p-2 rounded-lg bg-info/10">
+                  <MessageSquare className="w-4 h-4 text-info" />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Total Threads</p>
@@ -173,8 +173,8 @@ export default function MailboxPage() {
             </Card>
             <Card>
               <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-red-500/10">
-                  <AlertCircle className="w-4 h-4 text-red-400" />
+                <div className="p-2 rounded-lg bg-down/10">
+                  <AlertCircle className="w-4 h-4 text-down" />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Needs Action</p>
@@ -184,8 +184,8 @@ export default function MailboxPage() {
             </Card>
             <Card>
               <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-orange-500/10">
-                  <ArrowUp className="w-4 h-4 text-orange-400" />
+                <div className="p-2 rounded-lg bg-warn/10">
+                  <ArrowUp className="w-4 h-4 text-warn-fg" />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">High Priority</p>
@@ -332,7 +332,7 @@ export default function MailboxPage() {
                         )}
                       </TableCell>
                       <TableCell onClick={() => setSelectedThread(thread)}>
-                        <Badge className={threadStatusColors[thread.status] ?? 'bg-zinc-800 text-zinc-400'}>
+                        <Badge className={threadStatusColors[thread.status] ?? 'bg-bg-soft text-ink-3'}>
                           {thread.status.replace(/_/g, ' ')}
                         </Badge>
                       </TableCell>
@@ -345,7 +345,7 @@ export default function MailboxPage() {
                         {thread.deal ? (
                           <Link
                             href={`/crm?dealId=${thread.deal.id}`}
-                            className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300"
+                            className="flex items-center gap-1.5 text-xs text-info hover:text-info"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div
@@ -422,11 +422,11 @@ export default function MailboxPage() {
                           <TableCell>{statusBadge(email.status)}</TableCell>
                           <TableCell>
                             {email.openedAt ? (
-                              <Badge className="bg-emerald-900/30 text-emerald-400" title={formatDate(email.openedAt, 'MMM d, h:mm a')}>
+                              <Badge className="bg-up/15 text-up" title={formatDate(email.openedAt, 'MMM d, h:mm a')}>
                                 Opened {formatRelative(email.openedAt)}
                               </Badge>
                             ) : (
-                              <Badge className="bg-zinc-800 text-zinc-400">Not opened</Badge>
+                              <Badge className="bg-bg-soft text-ink-3">Not opened</Badge>
                             )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">

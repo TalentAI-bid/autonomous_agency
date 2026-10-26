@@ -11,10 +11,10 @@ import {
 } from 'lucide-react';
 
 const SEVERITY_STYLES: Record<string, { border: string; icon: React.ElementType; iconColor: string }> = {
-  info:    { border: 'border-l-blue-500',    icon: Info,          iconColor: 'text-blue-400' },
-  warning: { border: 'border-l-amber-500',   icon: AlertTriangle, iconColor: 'text-amber-400' },
-  error:   { border: 'border-l-red-500',     icon: XCircle,       iconColor: 'text-red-400' },
-  success: { border: 'border-l-emerald-500', icon: CheckCircle2,  iconColor: 'text-emerald-400' },
+  info:    { border: 'border-l-blue-500',    icon: Info,          iconColor: 'text-info' },
+  warning: { border: 'border-l-amber-500',   icon: AlertTriangle, iconColor: 'text-warn-fg' },
+  error:   { border: 'border-l-red-500',     icon: XCircle,       iconColor: 'text-down' },
+  success: { border: 'border-l-emerald-500', icon: CheckCircle2,  iconColor: 'text-up' },
 };
 
 interface SystemAlertCardProps {
@@ -149,7 +149,7 @@ function SearchQualityLowAlert({
               <span
                 className={cn(
                   'tabular-nums',
-                  p.count === 0 ? 'text-red-400' : p.count < 5 ? 'text-amber-400' : 'text-emerald-400',
+                  p.count === 0 ? 'text-down' : p.count < 5 ? 'text-warn-fg' : 'text-up',
                 )}
               >
                 {p.count}
@@ -211,7 +211,7 @@ function BroadenAppliedAlert({ content }: { content: Record<string, unknown> }) 
         ) : (
           <code className="text-[11px]">{appliedTerm}</code>
         )}{' '}
-        <span className="text-emerald-400 font-medium">found {totalFound} companies</span>.
+        <span className="text-up font-medium">found {totalFound} companies</span>.
       </p>
     </>
   );
@@ -261,10 +261,10 @@ function DataSourcesAlert({ content }: { content: Record<string, unknown> }) {
         <Badge
           variant="secondary"
           className={cn('text-[10px]', {
-            'bg-emerald-500/20 text-emerald-300': quality === 'excellent',
-            'bg-blue-500/20 text-blue-300': quality === 'good',
-            'bg-amber-500/20 text-amber-300': quality === 'medium',
-            'bg-red-500/20 text-red-300': quality === 'limited',
+            'bg-up/20 text-up': quality === 'excellent',
+            'bg-info/20 text-info': quality === 'good',
+            'bg-warn/20 text-warn-fg': quality === 'medium',
+            'bg-down/20 text-down': quality === 'limited',
           })}
         >
           Quality: {quality}

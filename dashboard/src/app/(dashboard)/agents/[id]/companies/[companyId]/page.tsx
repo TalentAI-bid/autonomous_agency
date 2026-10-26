@@ -176,7 +176,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               <div>
                 <p className="text-muted-foreground">LinkedIn</p>
                 {company.linkedinUrl ? (
-                  <a href={company.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline font-medium">
+                  <a href={company.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-info hover:underline font-medium">
                     View Profile
                   </a>
                 ) : (
@@ -192,7 +192,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               {company.seoScore != null && (
                 <div>
                   <p className="text-muted-foreground">SEO Score</p>
-                  <p className={`font-medium ${company.seoScore >= 70 ? 'text-emerald-500' : company.seoScore >= 40 ? 'text-amber-500' : 'text-rose-500'}`}>
+                  <p className={`font-medium ${company.seoScore >= 70 ? 'text-up' : company.seoScore >= 40 ? 'text-warn-fg' : 'text-down'}`}>
                     {company.seoScore}/100
                   </p>
                 </div>
@@ -444,14 +444,14 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               {deep.contactEmail && (
                 <div>
                   <p className="text-muted-foreground text-xs">Company Email</p>
-                  <a href={`mailto:${deep.contactEmail}`} className="text-blue-400 hover:underline">{deep.contactEmail}</a>
+                  <a href={`mailto:${deep.contactEmail}`} className="text-info hover:underline">{deep.contactEmail}</a>
                 </div>
               )}
               {(deep.hiringContactEmails ?? []).length > 0 && (
                 <div>
                   <p className="text-muted-foreground text-xs">HR / Recruiting</p>
                   {deep.hiringContactEmails!.map((email, i) => (
-                    <a key={i} href={`mailto:${email}`} className="block text-blue-400 hover:underline">{email}</a>
+                    <a key={i} href={`mailto:${email}`} className="block text-info hover:underline">{email}</a>
                   ))}
                 </div>
               )}

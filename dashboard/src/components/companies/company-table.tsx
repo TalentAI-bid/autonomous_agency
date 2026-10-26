@@ -41,8 +41,8 @@ function readFitScore(company: Company): number | null {
 
 function fitColorClass(score: number | null): string {
   if (score == null) return 'text-muted-foreground';
-  if (score >= 80) return 'text-emerald-400 font-semibold';
-  if (score >= 60) return 'text-amber-400 font-medium';
+  if (score >= 80) return 'text-up font-semibold';
+  if (score >= 60) return 'text-warn-fg font-medium';
   return 'text-muted-foreground';
 }
 
@@ -106,7 +106,7 @@ export function CompanyTable({ companies, agentsById, isLoading }: CompanyTableP
                   {company.masterAgentId ? (
                     <Link
                       href={`/agents/${company.masterAgentId}`}
-                      className="text-blue-400 hover:underline truncate"
+                      className="text-info hover:underline truncate"
                     >
                       {agent?.name ?? '—'}
                     </Link>

@@ -15,11 +15,11 @@ interface FitScoreBadgeProps {
 //   20-39  orange
 //   0-19   gray
 function bucket(score: number) {
-  if (score >= 80) return { color: 'bg-emerald-500/25 text-emerald-200 border-emerald-400/50', star: true };
-  if (score >= 60) return { color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', star: false };
-  if (score >= 40) return { color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', star: false };
-  if (score >= 20) return { color: 'bg-orange-500/15 text-orange-400 border-orange-500/30', star: false };
-  return { color: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30', star: false };
+  if (score >= 80) return { color: 'bg-up/25 text-up border-up/50', star: true };
+  if (score >= 60) return { color: 'bg-up/15 text-up border-up/30', star: false };
+  if (score >= 40) return { color: 'bg-warn/15 text-warn-fg border-warn/30', star: false };
+  if (score >= 20) return { color: 'bg-warn/15 text-warn-fg border-warn/30', star: false };
+  return { color: 'bg-ink-3/15 text-ink-3 border-line-2', star: false };
 }
 
 export function FitScoreBadge({ score, explanation }: FitScoreBadgeProps) {

@@ -18,15 +18,15 @@ interface SequencePanelProps {
 }
 
 const STATUS_LABEL: Record<string, { label: string; className: string }> = {
-  in_sequence:    { label: 'In sequence', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  pending:        { label: 'Pending',     className: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30' },
-  active:         { label: 'Active',      className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  completed:      { label: 'Completed',   className: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
-  stopped_manual: { label: 'Stopped',     className: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
-  failed:         { label: 'Failed',      className: 'bg-red-500/15 text-red-400 border-red-500/30' },
-  replied:        { label: 'Replied',     className: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
-  bounced:        { label: 'Bounced',     className: 'bg-red-500/15 text-red-400 border-red-500/30' },
-  unsubscribed:   { label: 'Unsubscribed', className: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  in_sequence:    { label: 'In sequence', className: 'bg-up/15 text-up border-up/30' },
+  pending:        { label: 'Pending',     className: 'bg-ink-3/15 text-ink-3 border-line-2' },
+  active:         { label: 'Active',      className: 'bg-up/15 text-up border-up/30' },
+  completed:      { label: 'Completed',   className: 'bg-info/15 text-info border-info/30' },
+  stopped_manual: { label: 'Stopped',     className: 'bg-warn/15 text-warn-fg border-warn/30' },
+  failed:         { label: 'Failed',      className: 'bg-down/15 text-down border-down/30' },
+  replied:        { label: 'Replied',     className: 'bg-info/15 text-info border-info/30' },
+  bounced:        { label: 'Bounced',     className: 'bg-down/15 text-down border-down/30' },
+  unsubscribed:   { label: 'Unsubscribed', className: 'bg-warn/15 text-warn-fg border-warn/30' },
 };
 
 function formatLocal(dateStr: string | null, tz?: string | null): string {
@@ -140,7 +140,7 @@ function SequencePanelContent({
               variant="outline"
               onClick={() => setShowUnsubConfirm(true)}
               disabled={unsubMutation.isPending}
-              className="h-7 text-xs text-red-400 border-red-500/40 hover:bg-red-500/10"
+              className="h-7 text-xs text-down border-down/40 hover:bg-down/10"
             >
               <MailX className="w-3 h-3 mr-1" />
               Unsubscribe
@@ -150,8 +150,8 @@ function SequencePanelContent({
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         {isUnsubscribed && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+          <div className="rounded-md border border-warn/30 bg-warn/10 p-3 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-warn-fg" />
             <div>
               <p className="font-medium">This contact is unsubscribed</p>
               <p className="text-xs text-muted-foreground">No further emails will be sent automatically.</p>
@@ -201,8 +201,8 @@ function SequencePanelContent({
               return (
                 <li key={step.id} className="flex items-start gap-3 text-xs">
                   <div className="mt-0.5">
-                    {sent ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> :
-                     isCurrent ? <Clock className="w-4 h-4 text-amber-500" /> :
+                    {sent ? <CheckCircle2 className="w-4 h-4 text-up" /> :
+                     isCurrent ? <Clock className="w-4 h-4 text-warn-fg" /> :
                      <div className="w-4 h-4 rounded-full border border-muted-foreground/30" />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -233,7 +233,7 @@ function SequencePanelContent({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowUnsubConfirm(false)}>
           <div className="bg-background border rounded-lg p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-3 mb-4">
-              <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+              <AlertTriangle className="w-5 h-5 text-down mt-0.5 shrink-0" />
               <div>
                 <h3 className="font-medium">Unsubscribe this contact?</h3>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -243,7 +243,7 @@ function SequencePanelContent({
             </div>
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" onClick={() => setShowUnsubConfirm(false)}>Cancel</Button>
-              <Button size="sm" variant="outline" onClick={handleUnsubscribe} disabled={unsubMutation.isPending} className="text-red-400 border-red-500/40 hover:bg-red-500/10">
+              <Button size="sm" variant="outline" onClick={handleUnsubscribe} disabled={unsubMutation.isPending} className="text-down border-down/40 hover:bg-down/10">
                 {unsubMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <MailX className="w-3 h-3 mr-1" />}
                 Unsubscribe
               </Button>

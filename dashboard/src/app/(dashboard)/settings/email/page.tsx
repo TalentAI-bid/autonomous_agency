@@ -32,6 +32,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Mail, Plus, Trash2, Send, Plug, RefreshCw } from 'lucide-react';
 import { formatRelative } from '@/lib/utils';
 
+import { Select } from '@/components/ui/select';
 type Tab = 'accounts' | 'listeners';
 
 export default function EmailSettingsPage() {
@@ -265,7 +266,7 @@ function AddAccountDialog() {
             </div>
             <div className="space-y-1.5">
               <Label>Provider</Label>
-              <select
+              <Select
                 value={form.provider}
                 onChange={(e) => updateField('provider', e.target.value)}
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
@@ -274,7 +275,7 @@ function AddAccountDialog() {
                 <option value="ses">AWS SES</option>
                 <option value="sendgrid">SendGrid</option>
                 <option value="custom">Custom</option>
-              </select>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>SMTP Host</Label>
@@ -479,7 +480,7 @@ function AddListenerDialog() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Protocol</Label>
-              <select
+              <Select
                 value={form.protocol}
                 onChange={(e) => {
                   updateField('protocol', e.target.value);
@@ -489,7 +490,7 @@ function AddListenerDialog() {
               >
                 <option value="imap">IMAP</option>
                 <option value="pop3">POP3</option>
-              </select>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Port</Label>

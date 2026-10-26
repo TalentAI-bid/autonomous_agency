@@ -20,7 +20,7 @@ export default function SchedulePage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <CalendarClock className="w-6 h-6 text-purple-400" />
+        <CalendarClock className="w-6 h-6 text-a-master" />
         <div>
           <h1 className="text-2xl font-bold">Agent Schedule</h1>
           <p className="text-muted-foreground text-sm mt-0.5">Upcoming emails and agent tasks</p>
@@ -30,11 +30,11 @@ export default function SchedulePage() {
       {/* Summary */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Mail className="w-4 h-4 text-blue-400" />
+          <Mail className="w-4 h-4 text-info" />
           <span>{emailCount} queued email{emailCount !== 1 ? 's' : ''}</span>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Bot className="w-4 h-4 text-purple-400" />
+          <Bot className="w-4 h-4 text-a-master" />
           <span>{taskCount} active task{taskCount !== 1 ? 's' : ''}</span>
         </div>
       </div>

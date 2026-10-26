@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SystemAlertCard } from './system-alert-card';
 import { cn } from '@/lib/utils';
+import { Select } from '@/components/ui/select';
 import {
   Bot, Send, ChevronDown, ChevronRight, User, ArrowRight, MessageSquare,
   Search, Database, Star, Mail, AlertCircle, Brain,
@@ -16,35 +17,35 @@ import {
 // ── Agent styles for avatars and filter pills ──────────────────────────────────
 
 const AGENT_STYLES: Record<string, { color: string; bg: string; activeBg: string; icon: React.ElementType; label: string }> = {
-  master:     { color: 'text-purple-400', bg: 'bg-purple-500/10',  activeBg: 'bg-purple-500/25',  icon: Bot,         label: 'Master' },
-  discovery:  { color: 'text-blue-400',   bg: 'bg-blue-500/10',    activeBg: 'bg-blue-500/25',    icon: Search,      label: 'Discovery' },
-  enrichment: { color: 'text-cyan-400',   bg: 'bg-cyan-500/10',    activeBg: 'bg-cyan-500/25',    icon: Database,    label: 'Enrichment' },
-  scoring:    { color: 'text-amber-400',  bg: 'bg-amber-500/10',   activeBg: 'bg-amber-500/25',   icon: Star,        label: 'Scoring' },
-  outreach:   { color: 'text-emerald-400',bg: 'bg-emerald-500/10', activeBg: 'bg-emerald-500/25', icon: Mail,        label: 'Outreach' },
-  system:     { color: 'text-orange-400', bg: 'bg-orange-500/10',  activeBg: 'bg-orange-500/25',  icon: AlertCircle, label: 'System' },
-  human:      { color: 'text-rose-400',   bg: 'bg-rose-500/10',    activeBg: 'bg-rose-500/25',    icon: User,        label: 'Human' },
+  master:     { color: 'text-a-master', bg: 'bg-a-master/10',  activeBg: 'bg-a-master/25',  icon: Bot,         label: 'Master' },
+  discovery:  { color: 'text-info',   bg: 'bg-info/10',    activeBg: 'bg-info/25',    icon: Search,      label: 'Discovery' },
+  enrichment: { color: 'text-a-enrichment',   bg: 'bg-a-enrichment/10',    activeBg: 'bg-a-enrichment/25',    icon: Database,    label: 'Enrichment' },
+  scoring:    { color: 'text-warn-fg',  bg: 'bg-warn/10',   activeBg: 'bg-warn/25',   icon: Star,        label: 'Scoring' },
+  outreach:   { color: 'text-up',bg: 'bg-up/10', activeBg: 'bg-up/25', icon: Mail,        label: 'Outreach' },
+  system:     { color: 'text-warn-fg', bg: 'bg-warn/10',  activeBg: 'bg-warn/25',  icon: AlertCircle, label: 'System' },
+  human:      { color: 'text-down',   bg: 'bg-down/10',    activeBg: 'bg-down/25',    icon: User,        label: 'Human' },
 };
 
 const FILTER_KEYS = ['all', 'master', 'discovery', 'enrichment', 'scoring', 'outreach', 'system', 'human'] as const;
 
 const MESSAGE_TYPE_BADGES: Record<string, { label: string; variant: string }> = {
-  task_assignment: { label: 'Task',     variant: 'bg-purple-500/20 text-purple-300' },
-  data_handoff:    { label: 'Data',     variant: 'bg-blue-500/20 text-blue-300' },
-  reasoning:       { label: 'Thinking', variant: 'bg-amber-500/20 text-amber-300' },
-  status_update:   { label: 'Status',   variant: 'bg-green-500/20 text-green-300' },
-  human_message:   { label: 'Human',    variant: 'bg-rose-500/20 text-rose-300' },
-  agent_response:  { label: 'Response', variant: 'bg-indigo-500/20 text-indigo-300' },
-  system_alert:    { label: 'System',   variant: 'bg-orange-500/20 text-orange-300' },
+  task_assignment: { label: 'Task',     variant: 'bg-a-master/20 text-a-master' },
+  data_handoff:    { label: 'Data',     variant: 'bg-info/20 text-info' },
+  reasoning:       { label: 'Thinking', variant: 'bg-warn/20 text-warn-fg' },
+  status_update:   { label: 'Status',   variant: 'bg-up/20 text-up' },
+  human_message:   { label: 'Human',    variant: 'bg-down/20 text-down' },
+  agent_response:  { label: 'Response', variant: 'bg-info/20 text-info' },
+  system_alert:    { label: 'System',   variant: 'bg-warn/20 text-warn-fg' },
 };
 
 // ── Status dot color helper ────────────────────────────────────────────────────
 
 function getStatusDotColor(content: Record<string, unknown>): string {
   const status = String(content.status ?? content.state ?? '').toLowerCase();
-  if (['completed', 'success', 'running', 'active', 'done'].some(s => status.includes(s))) return 'bg-emerald-400';
-  if (['pending', 'waiting', 'paused', 'warning', 'queued'].some(s => status.includes(s))) return 'bg-amber-400';
-  if (['failed', 'error', 'rejected', 'timeout'].some(s => status.includes(s))) return 'bg-red-400';
-  return 'bg-zinc-400';
+  if (['completed', 'success', 'running', 'active', 'done'].some(s => status.includes(s))) return 'bg-up';
+  if (['pending', 'waiting', 'paused', 'warning', 'queued'].some(s => status.includes(s))) return 'bg-warn';
+  if (['failed', 'error', 'rejected', 'timeout'].some(s => status.includes(s))) return 'bg-down';
+  return 'bg-ink-4';
 }
 
 // ── MessageCard ────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ function getStatusDotColor(content: Record<string, unknown>): string {
 function MessageCard({ message }: { message: AgentMessage }) {
   const [expanded, setExpanded] = useState(false);
   const content = message.content;
-  const typeBadge = MESSAGE_TYPE_BADGES[message.messageType] ?? { label: message.messageType, variant: 'bg-gray-500/20 text-gray-300' };
+  const typeBadge = MESSAGE_TYPE_BADGES[message.messageType] ?? { label: message.messageType, variant: 'bg-ink-3/20 text-ink-3' };
 
   // Resolve agent style
   const agentKey = message.messageType === 'system_alert' ? 'system'
@@ -116,7 +117,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
                 </div>
                 <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                    className="h-full bg-info rounded-full transition-all duration-500"
                     style={{ width: `${Number(content.dataCompleteness)}%` }}
                   />
                 </div>
@@ -129,7 +130,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Brain className="w-3 h-3 text-amber-400" />
+              <Brain className="w-3 h-3 text-warn-fg" />
               <span className="italic">{summary}</span>
               {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             </button>
@@ -148,7 +149,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
           <div>
             <p className="text-xs text-foreground/90 leading-relaxed">
               {content.action ? (
-                <span className="font-medium text-purple-300">{String(content.action).replace(/_/g, ' ')}</span>
+                <span className="font-medium text-a-master">{String(content.action).replace(/_/g, ' ')}</span>
               ) : null}
               {content.action && content.message ? ' — ' : ''}
               {content.message ? String(content.message) : (!content.action ? summary : '')}
@@ -326,7 +327,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
 
       {/* Human input */}
       <div className="flex items-center gap-2 pt-3 border-t border-border mt-2">
-        <select
+        <Select
           value={targetAgent}
           onChange={(e) => setTargetAgent(e.target.value)}
           className="h-10 rounded-md border border-input bg-background px-3 text-xs min-w-[130px] focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -337,7 +338,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
           <option value="enrichment">Enrichment</option>
           <option value="scoring">Scoring</option>
           <option value="outreach">Outreach</option>
-        </select>
+        </Select>
         <Input
           placeholder="Send instruction to agents..."
           value={messageText}

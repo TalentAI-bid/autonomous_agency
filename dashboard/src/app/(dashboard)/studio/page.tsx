@@ -13,6 +13,7 @@ import { Sparkles, Copy, RefreshCw, ExternalLink, Mail, MessageSquare, Handshake
 import Link from 'next/link';
 import { useGenerateStudioMessage, type StudioChannel, type StudioTrack, type MessageType, type StudioComposition } from '@/hooks/use-studio';
 
+import { Select } from '@/components/ui/select';
 const CHANNELS: Array<{ id: StudioChannel; label: string; icon: string }> = [
   { id: 'email_cold', label: 'Cold Email', icon: '📧' },
   { id: 'linkedin_dm', label: 'LinkedIn DM', icon: '💼' },
@@ -136,12 +137,12 @@ export default function StudioPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-amber-400" />
+            <Sparkles className="w-6 h-6 text-warn-fg" />
             Message Studio
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
             Generate a one-shot outreach message for any prospect on any channel. Uses your{' '}
-            <Link href="/settings/messaging" className="text-blue-400 hover:underline">configured messaging</Link>.
+            <Link href="/settings/messaging" className="text-info hover:underline">configured messaging</Link>.
           </p>
         </div>
       </div>
@@ -156,7 +157,7 @@ export default function StudioPage() {
           <CardContent className="space-y-4">
             <div>
               <Label className="text-sm font-medium mb-1.5 block">Channel *</Label>
-              <select
+              <Select
                 value={channel}
                 onChange={(e) => setChannel(e.target.value as StudioChannel)}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
@@ -164,12 +165,12 @@ export default function StudioPage() {
                 {CHANNELS.map(c => (
                   <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div>
               <Label className="text-sm font-medium mb-1.5 block">Message Type *</Label>
-              <select
+              <Select
                 value={messageType}
                 onChange={(e) => setMessageType(e.target.value as MessageType)}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
@@ -177,7 +178,7 @@ export default function StudioPage() {
                 {MESSAGE_TYPES.map(t => (
                   <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
-              </select>
+              </Select>
               {messageType === 'reactivation' && (
                 <p className="text-xs text-muted-foreground mt-1.5">
                   💡 Mention something specific that changed (their company news, market shift, your new offering).
@@ -259,7 +260,7 @@ export default function StudioPage() {
                 rows={3}
               />
               {messageType === 'post_meeting' && !customContext.trim() && (
-                <p className="text-xs text-amber-500 mt-1">Post-Meeting requires a recap of the conversation.</p>
+                <p className="text-xs text-warn-fg mt-1">Post-Meeting requires a recap of the conversation.</p>
               )}
             </div>
 
@@ -294,7 +295,7 @@ export default function StudioPage() {
                 <p className="text-sm">👋 Fill in the form and click <span className="font-medium">Generate Message</span>.</p>
                 <p className="text-xs">
                   The system uses your configured ICP and value proposition from{' '}
-                  <Link href="/settings/messaging" className="text-blue-400 hover:underline">Settings → Messaging</Link>.
+                  <Link href="/settings/messaging" className="text-info hover:underline">Settings → Messaging</Link>.
                 </p>
               </div>
             ) : channel === 'email_cold' ? (

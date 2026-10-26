@@ -78,7 +78,7 @@ export function AgentDetailModal({ agentType, masterAgentId, onClose }: AgentDet
             activities.map((entry: any) => (
               <div key={entry.id} className="flex items-start gap-2 py-1 text-xs border-l-2 border-border pl-2">
                 {entry.status === 'completed' ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-up shrink-0 mt-0.5" />
                 ) : entry.status === 'failed' ? (
                   <XCircle className="w-3.5 h-3.5 text-destructive shrink-0 mt-0.5" />
                 ) : (

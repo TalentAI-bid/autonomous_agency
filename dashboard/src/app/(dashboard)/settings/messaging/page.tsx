@@ -61,7 +61,7 @@ export default function MessagingSettingsPage() {
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
           Configure the sender identity + value proposition used by every message generated in the{' '}
-          <a href="/studio" className="text-blue-400 hover:underline">Studio</a>.
+          <a href="/studio" className="text-info hover:underline">Studio</a>.
         </p>
       </div>
 
@@ -156,7 +156,7 @@ export default function MessagingSettingsPage() {
           </Card>
 
           {savedPreview && (
-            <div className="rounded-lg border border-emerald-700/50 bg-emerald-950/30 p-3 text-sm text-emerald-200 flex items-start gap-2">
+            <div className="rounded-lg border border-up/50 bg-up/15 p-3 text-sm text-up flex items-start gap-2">
               <Sparkles className="w-4 h-4 mt-0.5 shrink-0" />
               <span>{savedPreview}</span>
             </div>

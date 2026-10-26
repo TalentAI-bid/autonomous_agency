@@ -17,9 +17,9 @@ interface ContactTableProps {
 }
 
 function scoreColor(score: number) {
-  if (score >= 80) return 'text-emerald-500';
-  if (score >= 60) return 'text-amber-500';
-  if (score > 0) return 'text-rose-500';
+  if (score >= 80) return 'text-up';
+  if (score >= 60) return 'text-warn-fg';
+  if (score > 0) return 'text-down';
   return 'text-muted-foreground';
 }
 

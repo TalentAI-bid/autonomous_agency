@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Zap, TrendingUp, Clock, Target, ExternalLink, Building2, User, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Opportunity, OpportunityType, OpportunityUrgency, OpportunityStatus } from '@/types';
 
+import { Select } from '@/components/ui/select';
 const TYPE_LABELS: Record<OpportunityType, string> = {
   hiring_signal: 'Hiring Signal',
   direct_request: 'Direct Request',
@@ -23,26 +24,26 @@ const TYPE_LABELS: Record<OpportunityType, string> = {
 };
 
 const URGENCY_COLORS: Record<OpportunityUrgency, string> = {
-  immediate: 'bg-red-500/10 text-red-500',
-  soon: 'bg-orange-500/10 text-orange-500',
-  exploring: 'bg-blue-500/10 text-blue-500',
-  none: 'bg-gray-500/10 text-gray-400',
+  immediate: 'bg-down/10 text-down',
+  soon: 'bg-warn/10 text-warn-fg',
+  exploring: 'bg-info/10 text-info',
+  none: 'bg-ink-3/10 text-ink-3',
 };
 
 const STATUS_COLORS: Record<OpportunityStatus, string> = {
-  new: 'bg-blue-500/10 text-blue-500',
-  researching: 'bg-purple-500/10 text-purple-500',
-  qualified: 'bg-emerald-500/10 text-emerald-500',
-  contacted: 'bg-amber-500/10 text-amber-500',
-  converted: 'bg-green-500/10 text-green-500',
-  skipped: 'bg-gray-500/10 text-gray-400',
+  new: 'bg-info/10 text-info',
+  researching: 'bg-a-master/10 text-a-master',
+  qualified: 'bg-up/10 text-up',
+  contacted: 'bg-warn/10 text-warn-fg',
+  converted: 'bg-up/10 text-up',
+  skipped: 'bg-ink-3/10 text-ink-3',
 };
 
 function scoreColor(score: number): string {
-  if (score >= 80) return 'text-emerald-500';
-  if (score >= 60) return 'text-blue-500';
-  if (score >= 40) return 'text-amber-500';
-  return 'text-gray-400';
+  if (score >= 80) return 'text-up';
+  if (score >= 60) return 'text-info';
+  if (score >= 40) return 'text-warn-fg';
+  return 'text-ink-3';
 }
 
 export default function OpportunitiesPage() {
@@ -70,7 +71,7 @@ export default function OpportunitiesPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-amber-500" />
+                <Zap className="w-4 h-4 text-warn-fg" />
                 <span className="text-sm text-muted-foreground">Total</span>
               </div>
               <p className="text-2xl font-bold mt-1">{stats.total}</p>
@@ -79,7 +80,7 @@ export default function OpportunitiesPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
+                <TrendingUp className="w-4 h-4 text-up" />
                 <span className="text-sm text-muted-foreground">Avg Intent</span>
               </div>
               <p className={`text-2xl font-bold mt-1 ${scoreColor(stats.avgBuyingIntentScore)}`}>
@@ -90,7 +91,7 @@ export default function OpportunitiesPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-red-500" />
+                <Clock className="w-4 h-4 text-down" />
                 <span className="text-sm text-muted-foreground">Immediate</span>
               </div>
               <p className="text-2xl font-bold mt-1">
@@ -101,7 +102,7 @@ export default function OpportunitiesPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-2">
-                <Target className="w-4 h-4 text-blue-500" />
+                <Target className="w-4 h-4 text-info" />
                 <span className="text-sm text-muted-foreground">Qualified</span>
               </div>
               <p className="text-2xl font-bold mt-1">
@@ -114,7 +115,7 @@ export default function OpportunitiesPage() {
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
-        <select
+        <Select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
           className="text-sm bg-background border border-border rounded-md px-3 py-1.5"
@@ -123,8 +124,8 @@ export default function OpportunitiesPage() {
           {Object.entries(TYPE_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
-        </select>
-        <select
+        </Select>
+        <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="text-sm bg-background border border-border rounded-md px-3 py-1.5"
@@ -133,7 +134,7 @@ export default function OpportunitiesPage() {
           {['new', 'researching', 'qualified', 'contacted', 'converted', 'skipped'].map((s) => (
             <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
       {/* Opportunity List */}
@@ -204,7 +205,7 @@ export default function OpportunitiesPage() {
                     <div className="flex items-center gap-2">
                       {opp.sourceUrl && (
                         <a href={opp.sourceUrl} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-blue-400 hover:underline flex items-center gap-1">
+                          className="text-xs text-info hover:underline flex items-center gap-1">
                           <ExternalLink className="w-3 h-3" />Source
                         </a>
                       )}

@@ -10,15 +10,15 @@ import { Activity, CheckCircle2, XCircle, Clock, Pause, Play } from 'lucide-reac
 import type { AgentType } from '@/types';
 
 const AGENT_TYPE_COLORS: Record<string, string> = {
-  discovery: 'bg-blue-500/10 text-blue-500',
-  enrichment: 'bg-purple-500/10 text-purple-500',
-  scoring: 'bg-amber-500/10 text-amber-500',
-  outreach: 'bg-emerald-500/10 text-emerald-500',
-  reply: 'bg-cyan-500/10 text-cyan-500',
-  document: 'bg-indigo-500/10 text-indigo-500',
-  action: 'bg-rose-500/10 text-rose-500',
-  strategy: 'bg-violet-500/10 text-violet-500',
-  strategist: 'bg-sky-500/10 text-sky-500',
+  discovery: 'bg-info/10 text-info',
+  enrichment: 'bg-a-master/10 text-a-master',
+  scoring: 'bg-warn/10 text-warn-fg',
+  outreach: 'bg-up/10 text-up',
+  reply: 'bg-a-enrichment/10 text-a-enrichment',
+  document: 'bg-info/10 text-info',
+  action: 'bg-down/10 text-down',
+  strategy: 'bg-a-master/10 text-a-master',
+  strategist: 'bg-info/10 text-info',
 };
 
 const STATUS_ICONS = {
@@ -50,7 +50,7 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-500" />
+            <Activity className="w-4 h-4 text-up" />
             Activity Feed
           </CardTitle>
           <Button
@@ -93,12 +93,12 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
         ) : (
           activities.map((entry: any) => {
             const StatusIcon = STATUS_ICONS[entry.status as keyof typeof STATUS_ICONS] ?? Clock;
-            const colorClass = AGENT_TYPE_COLORS[entry.agentType] ?? 'bg-slate-500/10 text-slate-500';
+            const colorClass = AGENT_TYPE_COLORS[entry.agentType] ?? 'bg-ink-3/10 text-ink-3';
 
             return (
               <div key={entry.id} className="flex items-start gap-2 py-1.5 text-xs border-l-2 border-border pl-2">
                 <StatusIcon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${
-                  entry.status === 'completed' ? 'text-emerald-500' :
+                  entry.status === 'completed' ? 'text-up' :
                   entry.status === 'failed' ? 'text-destructive' :
                   'text-muted-foreground'
                 }`} />

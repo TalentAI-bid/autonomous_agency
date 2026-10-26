@@ -317,7 +317,7 @@ export default function CrmSettingsPage() {
                       <span className="text-xs text-muted-foreground w-12 text-center">#{stage.position}</span>
                       <div className="flex gap-1 flex-1 items-center">
                         {stage.isDefault && <Badge variant="secondary" className="text-xs">Default</Badge>}
-                        {stage.isWon && <Badge className="text-xs bg-green-600">Won</Badge>}
+                        {stage.isWon && <Badge className="text-xs bg-up">Won</Badge>}
                         {stage.isLost && <Badge variant="destructive" className="text-xs">Lost</Badge>}
                       </div>
                       <button
@@ -335,7 +335,7 @@ export default function CrmSettingsPage() {
                           stage.isWon || stage.isLost
                             ? 'opacity-40 cursor-not-allowed border-border text-muted-foreground'
                             : stage.followUpEligible
-                              ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              ? 'border-up/50 bg-up/10 text-up'
                               : 'border-border text-muted-foreground hover:bg-accent'
                         }`}
                       >

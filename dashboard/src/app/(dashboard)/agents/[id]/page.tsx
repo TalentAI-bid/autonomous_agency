@@ -152,10 +152,10 @@ export default function AgentDetailPage() {
   const byStatus = stats?.byStatus ?? {};
 
   const funnelStages = [
-    { label: 'Discovered', value: byStatus.discovered ?? 0, color: 'bg-blue-500' },
-    { label: 'Enriched', value: byStatus.enriched ?? 0, color: 'bg-indigo-500' },
-    { label: 'Scored', value: byStatus.scored ?? 0, color: 'bg-purple-500' },
-    { label: 'Contacted', value: byStatus.contacted ?? 0, color: 'bg-emerald-500' },
+    { label: 'Discovered', value: byStatus.discovered ?? 0, color: 'bg-info' },
+    { label: 'Enriched', value: byStatus.enriched ?? 0, color: 'bg-info' },
+    { label: 'Scored', value: byStatus.scored ?? 0, color: 'bg-a-master' },
+    { label: 'Contacted', value: byStatus.contacted ?? 0, color: 'bg-up' },
   ];
 
   const tabs: { key: Tab; label: string; icon: React.ElementType; count?: number }[] = [
@@ -191,8 +191,8 @@ export default function AgentDetailPage() {
       <Card>
         <CardContent className="p-6">
           <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-blue-500/10">
-              <Bot className="w-6 h-6 text-blue-400" />
+            <div className="p-3 rounded-lg bg-info/10">
+              <Bot className="w-6 h-6 text-info" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
@@ -379,7 +379,7 @@ export default function AgentDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Activity className="w-4 h-4 text-emerald-500" />
+                <Activity className="w-4 h-4 text-up" />
                 Live Events
               </CardTitle>
             </CardHeader>
@@ -578,7 +578,7 @@ export default function AgentDetailPage() {
                           <div className="flex items-center gap-1.5 shrink-0">
                             <FitScoreBadge score={fitScore?.buyer_fit_score} explanation={fitScore?.fit_summary} />
                             {fitScore?.data_completeness === 'partial' && (
-                              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/40">
+                              <Badge variant="outline" className="text-[10px] text-warn-fg border-warn/40">
                                 partial
                               </Badge>
                             )}
@@ -616,17 +616,17 @@ export default function AgentDetailPage() {
                         {isListEntry && (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {linkedinNotFound ? (
-                              <Badge variant="outline" className="text-[10px] text-red-400 border-red-500/40">No LinkedIn match</Badge>
+                              <Badge variant="outline" className="text-[10px] text-down border-down/40">No LinkedIn match</Badge>
                             ) : company.linkedinUrl ? (
-                              <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/40">LinkedIn ✓</Badge>
+                              <Badge variant="outline" className="text-[10px] text-up border-up/40">LinkedIn ✓</Badge>
                             ) : null}
                             {gmapsNotFound ? (
-                              <Badge variant="outline" className="text-[10px] text-red-400 border-red-500/40">No Maps match</Badge>
+                              <Badge variant="outline" className="text-[10px] text-down border-down/40">No Maps match</Badge>
                             ) : (
-                              <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/40">Maps ✓</Badge>
+                              <Badge variant="outline" className="text-[10px] text-up border-up/40">Maps ✓</Badge>
                             )}
                             {crawledCount > 0 && (
-                              <Badge variant="outline" className="text-[10px] text-sky-400 border-sky-500/40">
+                              <Badge variant="outline" className="text-[10px] text-info border-info/40">
                                 {crawledCount === 2 ? 'Site + source crawled' : 'Site crawled'}
                               </Badge>
                             )}
@@ -642,14 +642,14 @@ export default function AgentDetailPage() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 text-xs bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 px-2 py-0.5 rounded-full transition-colors"
+                                className="inline-flex items-center gap-1 text-xs bg-up/10 text-up hover:bg-up/20 px-2 py-0.5 rounded-full transition-colors"
                               >
                                 <span className="font-medium">Hiring:</span>
                                 <span>{openJob}</span>
-                                <span className="text-emerald-500/70">↗</span>
+                                <span className="text-up/70">↗</span>
                               </a>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full">
+                              <span className="inline-flex items-center gap-1 text-xs bg-up/10 text-up px-2 py-0.5 rounded-full">
                                 <span className="font-medium">Hiring:</span>
                                 <span>{openJob}</span>
                               </span>
@@ -686,7 +686,7 @@ export default function AgentDetailPage() {
                         {Array.isArray(company.techStack) && company.techStack.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {company.techStack.slice(0, 5).map((tech, i) => (
-                              <span key={i} className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded">
+                              <span key={i} className="text-[10px] bg-info/10 text-info px-1.5 py-0.5 rounded">
                                 {tech}
                               </span>
                             ))}
@@ -703,7 +703,7 @@ export default function AgentDetailPage() {
                           <div className="w-full bg-muted rounded-full h-1">
                             <div
                               className={`h-1 rounded-full transition-all ${
-                                completeness >= 50 ? 'bg-green-500' : completeness >= 30 ? 'bg-yellow-500' : 'bg-red-500'
+                                completeness >= 50 ? 'bg-up' : completeness >= 30 ? 'bg-warn' : 'bg-down'
                               }`}
                               style={{ width: `${Math.min(completeness, 100)}%` }}
                             />

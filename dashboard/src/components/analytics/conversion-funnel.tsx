@@ -7,12 +7,12 @@ interface ConversionFunnelProps {
 }
 
 const STAGES = [
-  { key: 'discovered', label: 'Discovered', color: 'bg-blue-500' },
-  { key: 'enriched', label: 'Enriched', color: 'bg-indigo-500' },
-  { key: 'scored', label: 'Scored', color: 'bg-purple-500' },
-  { key: 'contacted', label: 'Contacted', color: 'bg-emerald-500' },
-  { key: 'replied', label: 'Replied', color: 'bg-teal-500' },
-  { key: 'interviewed', label: 'Interviewed', color: 'bg-amber-500' },
+  { key: 'discovered', label: 'Discovered', color: 'bg-info' },
+  { key: 'enriched', label: 'Enriched', color: 'bg-info' },
+  { key: 'scored', label: 'Scored', color: 'bg-a-master' },
+  { key: 'contacted', label: 'Contacted', color: 'bg-up' },
+  { key: 'replied', label: 'Replied', color: 'bg-a-enrichment' },
+  { key: 'interviewed', label: 'Interviewed', color: 'bg-warn' },
 ];
 
 export function ConversionFunnel({ analytics }: ConversionFunnelProps) {

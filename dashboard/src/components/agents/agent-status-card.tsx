@@ -50,7 +50,7 @@ export function AgentStatusCard({ agentType, status, liveAction }: AgentStatusCa
   const isIdle = !status || status.status === 'idle';
 
   return (
-    <Card className={cn('transition-all', isRunning && 'border-blue-500/30 shadow-sm shadow-blue-500/10')}>
+    <Card className={cn('transition-all', isRunning && 'border-info/30 shadow-sm shadow-info/10')}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -73,8 +73,8 @@ export function AgentStatusCard({ agentType, status, liveAction }: AgentStatusCa
         {liveAction && (
           <div className="mt-2 flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-up opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-up" />
             </span>
             <span className="text-xs text-muted-foreground truncate">
               {liveAction.description || liveAction.action}
@@ -85,7 +85,7 @@ export function AgentStatusCard({ agentType, status, liveAction }: AgentStatusCa
         {isRunning && !liveAction && (
           <div className="mt-3">
             <div className="h-1 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 rounded-full animate-pulse w-2/3" />
+              <div className="h-full bg-info rounded-full animate-pulse w-2/3" />
             </div>
           </div>
         )}

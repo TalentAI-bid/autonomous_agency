@@ -62,28 +62,28 @@
     /* ─── Typography ──────────────────────────────────────────────── */
     /* --ff-sans / --ff-mono / --ff-display are set by next/font in layout.tsx */
 
-    /* ─── Shadcn/ui compatibility layer ──────────────────────────── */
-    /* Remap HSL tokens to approximate the OKLCH palette so existing
-       shadcn components don't look dark while being gradually replaced. */
-    --background: 48 20% 98%;
-    --foreground: 60 6% 16%;
-    --card: 0 0% 100%;
-    --card-foreground: 60 6% 16%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 60 6% 16%;
-    --primary: 160 84% 39%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 50 10% 95%;
-    --secondary-foreground: 60 6% 20%;
-    --muted: 50 10% 95%;
-    --muted-foreground: 50 4% 44%;
-    --accent-hsl: 160 84% 39%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 25 75% 52%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 60 5% 88%;
-    --input: 60 5% 88%;
-    --ring: 160 84% 39%;
+    /* ─── Shadcn/ui aliases ───────────────────────────────────────── */
+    /* Not a second palette: every name here points at a token above, so
+       the OKLCH set is the single source of truth. Components written
+       against shadcn names (bg-primary, text-muted-foreground …) follow
+       the brand knobs and neutrals automatically. */
+    --background: var(--bg);
+    --foreground: var(--ink);
+    --card: var(--bg-panel);
+    --card-foreground: var(--ink);
+    --popover: var(--bg-panel);
+    --popover-foreground: var(--ink);
+    --primary: var(--accent);
+    --primary-foreground: oklch(1 0 0);
+    --secondary: var(--bg-soft);
+    --secondary-foreground: var(--ink-2);
+    --muted: var(--bg-soft);
+    --muted-foreground: var(--ink-3);
+    --destructive: var(--down);
+    --destructive-foreground: oklch(1 0 0);
+    --border: var(--line);
+    --input: var(--line);
+    --ring: var(--accent);
     --radius: 3px;
     --sidebar: 48 14% 96%;
     --sidebar-foreground: 60 6% 20%;
@@ -95,7 +95,7 @@
 @layer base {
   * {
     box-sizing: border-box;
-    border-color: hsl(var(--border));
+    border-color: var(--border);
   }
   html, body, #root, #__next { height: 100%; margin: 0; }
   body {

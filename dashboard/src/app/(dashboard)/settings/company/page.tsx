@@ -17,6 +17,7 @@ import {
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import type { CompanyProfile } from '@/types';
 
+import { Select } from '@/components/ui/select';
 const COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];
 
 function splitTags(val: string): string[] {
@@ -135,7 +136,7 @@ export default function CompanyProfilePage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="companySize">Company Size</Label>
-              <select
+              <Select
                 id="companySize"
                 value={form.companySize ?? ''}
                 onChange={e => updateField('companySize', e.target.value)}
@@ -143,7 +144,7 @@ export default function CompanyProfilePage() {
               >
                 <option value="">Select size</option>
                 {COMPANY_SIZES.map(s => <option key={s} value={s}>{s} employees</option>)}
-              </select>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="foundedYear">Founded Year</Label>

@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { apiUpload } from '@/lib/api';
 import type { MasterAgent } from '@/types';
 
+import { Select } from '@/components/ui/select';
 export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
   const { data: accountsRaw = [] } = useEmailAccounts();
   const accounts = accountsRaw.filter((a) => a.isActive);
@@ -107,7 +108,7 @@ export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
         <div className="space-y-2">
           <Label htmlFor="agent-email-account">Outbound email account</Label>
           {accounts.length > 0 ? (
-            <select
+            <Select
               id="agent-email-account"
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
@@ -119,7 +120,7 @@ export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
                   {account.name} ({account.fromEmail})
                 </option>
               ))}
-            </select>
+            </Select>
           ) : (
             <p className="text-xs text-muted-foreground">
               No email accounts configured.{' '}

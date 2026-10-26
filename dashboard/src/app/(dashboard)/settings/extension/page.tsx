@@ -145,7 +145,7 @@ export default function ExtensionSettingsPage() {
             {statusQ.isLoading ? (
               <Skeleton className="h-6 w-24" />
             ) : status?.connected ? (
-              <Badge className="bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 gap-1">
+              <Badge className="bg-up/15 text-up hover:bg-up/25 gap-1">
                 <PlugZap className="w-3 h-3" /> Connected
               </Badge>
             ) : status?.hasKey ? (
@@ -234,9 +234,9 @@ export default function ExtensionSettingsPage() {
                     </span>
                     <span className="tabular-nums">{used} / {cap}</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                  <div className="h-1.5 rounded-full bg-bg-soft overflow-hidden">
                     <div
-                      className={`h-full transition-all ${pct >= 90 ? 'bg-red-500' : pct >= 60 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                      className={`h-full transition-all ${pct >= 90 ? 'bg-down' : pct >= 60 ? 'bg-warn' : 'bg-up'}`}
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -285,8 +285,8 @@ export default function ExtensionSettingsPage() {
           <CardTitle className="text-base">How to install</CardTitle>
         </CardHeader>
         <CardContent className="text-sm space-y-3 text-muted-foreground">
-          <div className="rounded-md border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-300">
-            <strong className="text-emerald-200">New:</strong> You no longer need to generate an
+          <div className="rounded-md border border-up/20 bg-up/10 p-3 text-xs text-up">
+            <strong className="text-up">New:</strong> You no longer need to generate an
             API key manually. After installing the extension, open its popup and sign in with
             your TalentAI email and password — the extension provisions its own connection key
             automatically. The buttons above remain available as an advanced fallback (e.g. for
@@ -310,7 +310,7 @@ export default function ExtensionSettingsPage() {
               <KeyRound className="w-5 h-5" /> Your new API key
             </DialogTitle>
             <DialogDescription>
-              <span className="flex items-center gap-2 text-amber-400 font-medium">
+              <span className="flex items-center gap-2 text-warn-fg font-medium">
                 <AlertTriangle className="w-4 h-4" />
                 Copy this now — you won't be able to see it again.
               </span>
@@ -377,7 +377,7 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
             <span className="font-mono truncate">{task.type}</span>
             {completed && (
               <span
-                className={`tabular-nums text-[10px] ${empty ? 'text-amber-400' : 'text-emerald-400'}`}
+                className={`tabular-nums text-[10px] ${empty ? 'text-warn-fg' : 'text-up'}`}
                 title="Items extracted by the adapter from the result blob"
               >
                 items: {task.itemCount}
@@ -385,10 +385,10 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
             )}
           </div>
           {task.error && (
-            <p className="text-red-400 mt-0.5 truncate" title={task.error}>{task.error}</p>
+            <p className="text-down mt-0.5 truncate" title={task.error}>{task.error}</p>
           )}
           {empty && !task.error && (
-            <p className="text-amber-400 mt-0.5 truncate">
+            <p className="text-warn-fg mt-0.5 truncate">
               Completed but extracted nothing — expand to inspect the page diagnostics.
             </p>
           )}
@@ -422,13 +422,13 @@ function PayloadBlock({ label, value }: { label: string; value: unknown }) {
 
 function StatusBadge({ status }: { status: string }) {
   const style = {
-    completed: 'bg-emerald-500/15 text-emerald-400',
-    dispatched: 'bg-sky-500/15 text-sky-400',
-    in_progress: 'bg-sky-500/15 text-sky-400',
-    pending: 'bg-zinc-500/15 text-zinc-400',
-    failed: 'bg-red-500/15 text-red-400',
-    cancelled: 'bg-zinc-500/15 text-zinc-400',
-  }[status] ?? 'bg-zinc-500/15 text-zinc-400';
+    completed: 'bg-up/15 text-up',
+    dispatched: 'bg-info/15 text-info',
+    in_progress: 'bg-info/15 text-info',
+    pending: 'bg-ink-3/15 text-ink-3',
+    failed: 'bg-down/15 text-down',
+    cancelled: 'bg-ink-3/15 text-ink-3',
+  }[status] ?? 'bg-ink-3/15 text-ink-3';
   return <Badge className={`${style} hover:${style} text-[10px]`}>{status}</Badge>;
 }
 

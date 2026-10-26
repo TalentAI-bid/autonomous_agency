@@ -69,18 +69,18 @@ export default function AnalyticsPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={weeklyData} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="day" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="day" tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} axisLine={false} tickLine={false} />
                 <Tooltip
                   contentStyle={{
-                    background: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
+                    background: 'var(--card)',
+                    border: '1px solid var(--border)',
                     borderRadius: '8px',
                     fontSize: '12px',
                   }}
                 />
-                <Bar dataKey="discovered" name="Discovered" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="discovered" name="Discovered" fill="var(--primary)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="contacted" name="Contacted" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

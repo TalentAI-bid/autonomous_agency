@@ -20,6 +20,8 @@ import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Contact } from '@/types';
 
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 interface NewDealDialogProps {
   /** Optional trigger override; defaults to a "+ New Deal" button. */
   trigger?: React.ReactNode;
@@ -171,7 +173,7 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="deal-currency">Currency</Label>
-              <select
+              <Select
                 id="deal-currency"
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
@@ -180,13 +182,13 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
                 <option value="USD">USD</option>
                 <option value="EUR">EUR</option>
                 <option value="GBP">GBP</option>
-              </select>
+              </Select>
             </div>
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="deal-notes">Notes</Label>
-            <textarea
+            <Textarea
               id="deal-notes"
               rows={3}
               value={notes}

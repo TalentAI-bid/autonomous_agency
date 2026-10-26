@@ -15,6 +15,8 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Rocket, ChevronDown, ChevronUp } from 'lucide-react';
 
+import { Textarea } from '@/components/ui/textarea';
+import { Select } from '@/components/ui/select';
 export function CreateAgentWizard() {
   const router = useRouter();
   const createAgent = useCreateAgent();
@@ -122,7 +124,7 @@ export function CreateAgentWizard() {
 
         <div className="space-y-2">
           <Label htmlFor="mission">Hiring needs</Label>
-          <textarea
+          <Textarea
             id="mission"
             rows={4}
             placeholder="e.g. web3 dev fullstack react and express js with 3+ years experience"
@@ -223,7 +225,7 @@ export function CreateAgentWizard() {
             <div className="space-y-2">
               <Label htmlFor="emailAccount">Sending email account</Label>
               {activeEmailAccounts.length > 0 ? (
-                <select
+                <Select
                   id="emailAccount"
                   value={emailAccountId}
                   onChange={(e) => setEmailAccountId(e.target.value)}
@@ -235,7 +237,7 @@ export function CreateAgentWizard() {
                       {account.name} ({account.fromEmail})
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   No email accounts configured.{' '}
@@ -248,8 +250,8 @@ export function CreateAgentWizard() {
           </div>
         )}
 
-        <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
-          <p className="text-sm text-blue-300">
+        <div className="p-4 rounded-lg bg-info/10 border border-info/20">
+          <p className="text-sm text-info">
             The agent will run the full pipeline: parse requirements, discover candidates, enrich profiles, score fit, and send outreach emails.
           </p>
         </div>

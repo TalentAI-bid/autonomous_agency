@@ -137,9 +137,9 @@ export function ActionPlanPanel({ masterAgentId }: Props) {
             <div key={item.key} className="space-y-1.5">
               <div className="flex items-center gap-2">
                 {filled ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-up shrink-0" />
                 ) : item.required ? (
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <AlertCircle className="w-3.5 h-3.5 text-warn-fg shrink-0" />
                 ) : (
                   <span className="w-3.5 h-3.5 shrink-0" />
                 )}

@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Package, Plus, Pencil, Trash2, Loader2, Sparkles } from 'lucide-react';
 import type { Product } from '@/types';
 
+import { Select } from '@/components/ui/select';
 const PRICING_MODELS = [
   { value: '', label: 'Select pricing model' },
   { value: 'subscription', label: 'Subscription' },
@@ -230,7 +231,7 @@ export default function ProductsPage() {
         </span>
         <Badge variant="outline" className="text-xs capitalize">{plan} plan</Badge>
         {count >= limit && limit !== Infinity && (
-          <span className="text-amber-500 text-xs">
+          <span className="text-warn-fg text-xs">
             Limit reached — upgrade to add more
           </span>
         )}
@@ -411,7 +412,7 @@ export default function ProductsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Pricing Model</Label>
-                <select
+                <Select
                   value={form.pricingModel}
                   onChange={e => setForm(f => ({ ...f, pricingModel: e.target.value }))}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -419,7 +420,7 @@ export default function ProductsPage() {
                   {PRICING_MODELS.map(m => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
-                </select>
+                </Select>
               </div>
             </div>
 

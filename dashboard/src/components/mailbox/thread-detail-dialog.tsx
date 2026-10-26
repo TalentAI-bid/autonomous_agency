@@ -19,16 +19,16 @@ interface ThreadDetailDialogProps {
 }
 
 const priorityColors: Record<string, string> = {
-  high: 'bg-red-900/30 text-red-400',
-  medium: 'bg-yellow-900/30 text-yellow-400',
-  low: 'bg-zinc-800 text-zinc-400',
+  high: 'bg-down/15 text-down',
+  medium: 'bg-warn/15 text-warn-fg',
+  low: 'bg-bg-soft text-ink-3',
 };
 
 const statusColors: Record<string, string> = {
-  active: 'bg-emerald-900/30 text-emerald-400',
-  needs_action: 'bg-red-900/30 text-red-400',
-  waiting: 'bg-blue-900/30 text-blue-400',
-  archived: 'bg-zinc-800 text-zinc-400',
+  active: 'bg-up/15 text-up',
+  needs_action: 'bg-down/15 text-down',
+  waiting: 'bg-info/15 text-info',
+  archived: 'bg-bg-soft text-ink-3',
 };
 
 export function ThreadDetailDialog({ thread, open, onOpenChange }: ThreadDetailDialogProps) {
@@ -74,7 +74,7 @@ export function ThreadDetailDialog({ thread, open, onOpenChange }: ThreadDetailD
               )}
               <Link
                 href={`/crm?dealId=${thread.deal.id}`}
-                className="ml-auto text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                className="ml-auto text-xs text-info hover:text-info flex items-center gap-1"
               >
                 View Deal <ExternalLink className="w-3 h-3" />
               </Link>
@@ -83,14 +83,14 @@ export function ThreadDetailDialog({ thread, open, onOpenChange }: ThreadDetailD
 
           {/* Summary & Next Action */}
           {(detail?.summary || detail?.nextAction) && (
-            <div className="p-3 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+            <div className="p-3 rounded-lg bg-info/5 border border-info/20">
               {detail.summary && (
                 <p className="text-sm text-muted-foreground mb-1">{detail.summary}</p>
               )}
               {detail.nextAction && (
                 <p className="text-sm flex items-center gap-1">
-                  <ArrowRight className="w-3 h-3 text-indigo-400" />
-                  <span className="font-medium text-indigo-300">Next:</span> {detail.nextAction}
+                  <ArrowRight className="w-3 h-3 text-info" />
+                  <span className="font-medium text-info">Next:</span> {detail.nextAction}
                 </p>
               )}
             </div>
@@ -124,7 +124,7 @@ export function ThreadDetailDialog({ thread, open, onOpenChange }: ThreadDetailD
                   key={msg.id}
                   className={`rounded-lg p-4 text-sm ${
                     msg.direction === 'sent'
-                      ? 'bg-blue-500/10 border border-blue-500/20 ml-6'
+                      ? 'bg-info/10 border border-info/20 ml-6'
                       : 'bg-muted/30 border border-border/50 mr-6'
                   }`}
                 >

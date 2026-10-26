@@ -28,7 +28,7 @@ function StatCard({ title, value, sub, icon: Icon, iconColor, bgColor, trend }: 
             <p className="text-2xl font-bold tabular-nums">{value}</p>
             {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
             {trend !== undefined && (
-              <p className={`text-xs font-medium ${trend >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+              <p className={`text-xs font-medium ${trend >= 0 ? 'text-up' : 'text-down'}`}>
                 {trend >= 0 ? '+' : ''}{trend}% vs last week
               </p>
             )}
@@ -49,8 +49,8 @@ export function StatsGrid({ analytics }: StatsGridProps) {
       value: analytics?.contacts.total ?? 0,
       sub: `${analytics?.contacts.contacted ?? 0} contacted`,
       icon: Users,
-      iconColor: 'text-blue-400',
-      bgColor: 'bg-blue-500/10',
+      iconColor: 'text-info',
+      bgColor: 'bg-info/10',
       trend: 12,
     },
     {
@@ -58,8 +58,8 @@ export function StatsGrid({ analytics }: StatsGridProps) {
       value: analytics?.emails.sent ?? 0,
       sub: `${analytics?.emails.openRate ? Math.round(analytics.emails.openRate * 100) : 0}% open rate`,
       icon: Mail,
-      iconColor: 'text-purple-400',
-      bgColor: 'bg-purple-500/10',
+      iconColor: 'text-a-master',
+      bgColor: 'bg-a-master/10',
       trend: 8,
     },
     {
@@ -67,16 +67,16 @@ export function StatsGrid({ analytics }: StatsGridProps) {
       value: analytics?.interviews.scheduled ?? 0,
       sub: `${analytics?.interviews.completed ?? 0} completed`,
       icon: Star,
-      iconColor: 'text-amber-400',
-      bgColor: 'bg-amber-500/10',
+      iconColor: 'text-warn-fg',
+      bgColor: 'bg-warn/10',
     },
     {
       title: 'Reply Rate',
       value: analytics?.emails.replyRate ? `${Math.round(analytics.emails.replyRate * 100)}%` : '—',
       sub: `${analytics?.contacts.replied ?? 0} replies`,
       icon: TrendingUp,
-      iconColor: 'text-emerald-400',
-      bgColor: 'bg-emerald-500/10',
+      iconColor: 'text-up',
+      bgColor: 'bg-up/10',
       trend: 3,
     },
   ];

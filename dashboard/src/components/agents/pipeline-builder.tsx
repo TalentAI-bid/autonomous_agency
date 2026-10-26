@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { PipelineFormData, PipelineProposal } from '@/types/pipeline';
 
+import { Textarea } from '@/components/ui/textarea';
 const AGENT_ICONS: Record<string, React.ElementType> = {
   discovery: Search,
   document: FileText,
@@ -27,13 +28,13 @@ const AGENT_ICONS: Record<string, React.ElementType> = {
 };
 
 const AGENT_COLORS: Record<string, string> = {
-  discovery: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  document: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  enrichment: 'bg-green-500/20 text-green-400 border-green-500/30',
-  scoring: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  outreach: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
-  reply: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
-  action: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  discovery: 'bg-info/20 text-info border-info/30',
+  document: 'bg-a-master/20 text-a-master border-a-master/30',
+  enrichment: 'bg-up/20 text-up border-up/30',
+  scoring: 'bg-warn/20 text-warn-fg border-warn/30',
+  outreach: 'bg-a-reply/20 text-a-reply border-a-reply/30',
+  reply: 'bg-a-enrichment/20 text-a-enrichment border-a-enrichment/30',
+  action: 'bg-warn/20 text-warn-fg border-warn/30',
 };
 
 type ViewState = 'form' | 'analyzing' | 'review';
@@ -219,7 +220,7 @@ export function PipelineBuilder() {
           {/* Shared: Additional Context */}
           <div className="space-y-2">
             <Label htmlFor="additionalContext">Additional context</Label>
-            <textarea
+            <Textarea
               id="additionalContext"
               rows={3}
               placeholder="Any extra details about what you're looking for..."
@@ -337,7 +338,7 @@ export function PipelineBuilder() {
           <div className="space-y-3">
             {proposal.pipeline.map((step, i) => {
               const Icon = AGENT_ICONS[step.agentType] || Zap;
-              const color = AGENT_COLORS[step.agentType] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+              const color = AGENT_COLORS[step.agentType] || 'bg-ink-3/20 text-ink-3 border-line-2';
               return (
                 <div key={i} className="flex items-start gap-3">
                   <div className="flex flex-col items-center">
@@ -361,11 +362,11 @@ export function PipelineBuilder() {
 
           {/* Missing Capabilities Warning */}
           {proposal.missingCapabilities.length > 0 && (
-            <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex gap-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" />
+            <div className="p-4 rounded-lg bg-warn/10 border border-warn/20 flex gap-3">
+              <AlertTriangle className="w-5 h-5 text-warn-fg shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-yellow-300">Missing Capabilities</p>
-                <ul className="text-xs text-yellow-200/80 mt-1 list-disc list-inside space-y-0.5">
+                <p className="text-sm font-medium text-warn-fg">Missing Capabilities</p>
+                <ul className="text-xs text-warn-fg/80 mt-1 list-disc list-inside space-y-0.5">
                   {proposal.missingCapabilities.map((cap, i) => (
                     <li key={i}>{cap}</li>
                   ))}
@@ -376,11 +377,11 @@ export function PipelineBuilder() {
 
           {/* Warnings */}
           {proposal.warnings.length > 0 && (
-            <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/20 flex gap-3">
-              <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
+            <div className="p-4 rounded-lg bg-warn/10 border border-warn/20 flex gap-3">
+              <AlertTriangle className="w-5 h-5 text-warn-fg shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-orange-300">Warnings</p>
-                <ul className="text-xs text-orange-200/80 mt-1 list-disc list-inside space-y-0.5">
+                <p className="text-sm font-medium text-warn-fg">Warnings</p>
+                <ul className="text-xs text-warn-fg/80 mt-1 list-disc list-inside space-y-0.5">
                   {proposal.warnings.map((warn, i) => (
                     <li key={i}>{warn}</li>
                   ))}
@@ -390,10 +391,10 @@ export function PipelineBuilder() {
           )}
 
           {/* Estimated Duration */}
-          <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 flex gap-3">
-            <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+          <div className="p-4 rounded-lg bg-info/10 border border-info/20 flex gap-3">
+            <Info className="w-5 h-5 text-info shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm text-blue-300">
+              <p className="text-sm text-info">
                 Estimated duration: <span className="font-medium">{proposal.estimatedDuration}</span>
               </p>
             </div>

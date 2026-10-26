@@ -18,6 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { ContactPicker } from './contact-picker';
 
+import { Textarea } from '@/components/ui/textarea';
 type ManualActivityType =
   | 'note_added'
   | 'call_logged'
@@ -220,7 +221,7 @@ export function AddActivityDialog({ contactId, dealId, trigger, defaultType }: A
           {/* Description */}
           <div className="space-y-1.5">
             <Label htmlFor="activity-description">Description</Label>
-            <textarea
+            <Textarea
               id="activity-description"
               rows={4}
               placeholder="Optional context, outcome, next steps…"

@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { Users, Mail, Trash2, Copy, X, Loader2 } from 'lucide-react';
 
+import { Select } from '@/components/ui/select';
 const INVITABLE_ROLES: InvitableRole[] = ['admin', 'member', 'viewer'];
 const ALL_ROLES: TeamRole[] = ['owner', 'admin', 'member', 'viewer'];
 
@@ -147,7 +148,7 @@ export default function TeamSettingsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="invite-role">Role</Label>
-                <select
+                <Select
                   id="invite-role"
                   value={role}
                   onChange={(e) => setRole(e.target.value as InvitableRole)}
@@ -156,7 +157,7 @@ export default function TeamSettingsPage() {
                   {INVITABLE_ROLES.map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               <Button type="submit" disabled={invite.isPending || !email.trim()}>
                 {invite.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send invite'}
@@ -195,7 +196,7 @@ export default function TeamSettingsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {canManage ? (
-                        <select
+                        <Select
                           value={m.role}
                           onChange={(e) => handleRoleChange(m.userId, e.target.value as TeamRole)}
                           disabled={updateRole.isPending || isLastOwner}
@@ -204,7 +205,7 @@ export default function TeamSettingsPage() {
                           {ALL_ROLES.map((r) => (
                             <option key={r} value={r}>{r}</option>
                           ))}
-                        </select>
+                        </Select>
                       ) : (
                         <Badge variant={roleBadgeVariant(m.role)}>{m.role}</Badge>
                       )}

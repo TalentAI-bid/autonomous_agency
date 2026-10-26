@@ -15,20 +15,20 @@ interface EmailDetailDialogProps {
 
 function classificationColor(c?: string): string {
   const map: Record<string, string> = {
-    interested: 'bg-emerald-900/30 text-emerald-400',
-    inquiry: 'bg-blue-900/30 text-blue-400',
-    application: 'bg-indigo-900/30 text-indigo-400',
-    partnership: 'bg-purple-900/30 text-purple-400',
-    introduction: 'bg-cyan-900/30 text-cyan-400',
-    objection: 'bg-orange-900/30 text-orange-400',
-    not_now: 'bg-yellow-900/30 text-yellow-400',
-    out_of_office: 'bg-zinc-800 text-zinc-400',
-    unsubscribe: 'bg-red-900/30 text-red-400',
-    bounce: 'bg-red-900/30 text-red-400',
-    spam: 'bg-red-900/30 text-red-300',
-    support_request: 'bg-amber-900/30 text-amber-400',
+    interested: 'bg-up/15 text-up',
+    inquiry: 'bg-info/15 text-info',
+    application: 'bg-info/15 text-info',
+    partnership: 'bg-a-master/15 text-a-master',
+    introduction: 'bg-a-enrichment/15 text-a-enrichment',
+    objection: 'bg-warn/15 text-warn-fg',
+    not_now: 'bg-warn/15 text-warn-fg',
+    out_of_office: 'bg-bg-soft text-ink-3',
+    unsubscribe: 'bg-down/15 text-down',
+    bounce: 'bg-down/15 text-down',
+    spam: 'bg-down/15 text-down',
+    support_request: 'bg-warn/15 text-warn-fg',
   };
-  return map[c ?? ''] ?? 'bg-zinc-800 text-zinc-400';
+  return map[c ?? ''] ?? 'bg-bg-soft text-ink-3';
 }
 
 export function EmailDetailDialog({ email, open, onOpenChange }: EmailDetailDialogProps) {

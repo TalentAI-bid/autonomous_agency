@@ -132,7 +132,7 @@ export function EmailEditor({
       <Mail className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <a
         href={`mailto:${currentEmail}`}
-        className={cn('text-blue-400 hover:underline truncate', compact ? 'text-xs' : 'text-sm')}
+        className={cn('text-info hover:underline truncate', compact ? 'text-xs' : 'text-sm')}
       >
         {currentEmail}
       </a>
@@ -160,17 +160,17 @@ function VerifyChip({ status, pending }: { status: ManualEmailStatus | null; pen
   if (!status) return null;
   switch (status) {
     case 'safe':
-      return <Check className="h-3.5 w-3.5 text-green-400" aria-label="Verified" />;
+      return <Check className="h-3.5 w-3.5 text-up" aria-label="Verified" />;
     case 'catch_all':
     case 'risky':
       return (
-        <span className="inline-flex items-center gap-0.5 text-xs text-amber-400" title={status === 'catch_all' ? 'Catch-all domain' : 'Risky'}>
+        <span className="inline-flex items-center gap-0.5 text-xs text-warn-fg" title={status === 'catch_all' ? 'Catch-all domain' : 'Risky'}>
           <AlertTriangle className="h-3 w-3" />
         </span>
       );
     case 'invalid':
       return (
-        <span className="inline-flex items-center gap-0.5 text-xs text-rose-400" title="Invalid">
+        <span className="inline-flex items-center gap-0.5 text-xs text-down" title="Invalid">
           <AlertCircle className="h-3 w-3" />
         </span>
       );

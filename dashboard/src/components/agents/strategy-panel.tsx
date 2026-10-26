@@ -11,9 +11,9 @@ import Link from 'next/link';
 
 const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
   pending: { icon: Clock, color: 'text-muted-foreground', label: 'Pending' },
-  analyzing: { icon: Loader2, color: 'text-blue-500', label: 'Analyzing' },
-  executing: { icon: Loader2, color: 'text-amber-500', label: 'Executing' },
-  completed: { icon: CheckCircle2, color: 'text-emerald-500', label: 'Completed' },
+  analyzing: { icon: Loader2, color: 'text-info', label: 'Analyzing' },
+  executing: { icon: Loader2, color: 'text-warn-fg', label: 'Executing' },
+  completed: { icon: CheckCircle2, color: 'text-up', label: 'Completed' },
   failed: { icon: AlertCircle, color: 'text-destructive', label: 'Failed' },
 };
 
@@ -47,7 +47,7 @@ export function StrategyPanel({ masterAgentId }: StrategyPanelProps) {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Brain className="w-4 h-4 text-violet-500" />
+              <Brain className="w-4 h-4 text-a-master" />
               Daily Strategy
             </CardTitle>
             <div className="flex items-center gap-2">

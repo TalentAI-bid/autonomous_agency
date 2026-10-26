@@ -47,7 +47,7 @@ export default function StrategyHistoryPage() {
           </Button>
         </Link>
         <h1 className="text-lg font-bold flex items-center gap-2">
-          <Brain className="w-5 h-5 text-violet-500" />
+          <Brain className="w-5 h-5 text-a-master" />
           Strategy History
         </h1>
       </div>
@@ -129,7 +129,7 @@ export default function StrategyHistoryPage() {
                         <ul className="space-y-1">
                           {plan.map((item, i) => (
                             <li key={i} className="text-sm flex items-start gap-2">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                              <CheckCircle2 className="w-3.5 h-3.5 text-up mt-0.5 shrink-0" />
                               {item}
                             </li>
                           ))}

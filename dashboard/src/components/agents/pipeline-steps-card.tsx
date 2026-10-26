@@ -17,12 +17,12 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
 };
 
 const TOOL_COLORS: Record<string, string> = {
-  LINKEDIN_EXTENSION: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  CRAWL4AI: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  LLM_ANALYSIS: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  REACHER: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  EMAIL_PATTERN: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
-  SCORING: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  LINKEDIN_EXTENSION: 'bg-info/20 text-info border-info/30',
+  CRAWL4AI: 'bg-up/20 text-up border-up/30',
+  LLM_ANALYSIS: 'bg-a-master/20 text-a-master border-a-master/30',
+  REACHER: 'bg-warn/20 text-warn-fg border-warn/30',
+  EMAIL_PATTERN: 'bg-a-enrichment/20 text-a-enrichment border-a-enrichment/30',
+  SCORING: 'bg-warn/20 text-warn-fg border-warn/30',
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -66,7 +66,7 @@ export function PipelineStepsCard({ steps, message }: PipelineStepsCardProps) {
         <div className="space-y-0">
           {steps.map((step, i) => {
             const Icon = TOOL_ICONS[step.tool] ?? Workflow;
-            const color = TOOL_COLORS[step.tool] ?? 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+            const color = TOOL_COLORS[step.tool] ?? 'bg-ink-3/20 text-ink-3 border-line-2';
             const label = TOOL_LABELS[step.tool] ?? step.tool;
 
             return (

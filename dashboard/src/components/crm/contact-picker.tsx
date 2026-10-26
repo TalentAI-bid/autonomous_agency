@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import type { Contact } from '@/types';
 
+import { Select } from '@/components/ui/select';
 interface ContactPickerProps {
   /** The currently selected contact id; null when none picked. */
   value: string | null;
@@ -246,7 +247,7 @@ export function CreateContactInline({
       </div>
       <div className="space-y-1">
         <Label className="text-xs">Agent *</Label>
-        <select
+        <Select
           value={agentId}
           onChange={(e) => setAgentId(e.target.value)}
           className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
@@ -254,7 +255,7 @@ export function CreateContactInline({
           {(agents ?? []).map((a) => (
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
-        </select>
+        </Select>
       </div>
       <div className="flex gap-2 justify-end pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onCancel}>Cancel</Button>

@@ -38,12 +38,12 @@ function groupByDate(items: ScheduledAction[]): Map<string, ScheduledAction[]> {
 
 function statusColor(status: string): string {
   const map: Record<string, string> = {
-    queued: 'bg-blue-900/30 text-blue-400',
-    pending: 'bg-yellow-900/30 text-yellow-400',
-    processing: 'bg-purple-900/30 text-purple-400',
-    sending: 'bg-amber-900/30 text-amber-400',
+    queued: 'bg-info/15 text-info',
+    pending: 'bg-warn/15 text-warn-fg',
+    processing: 'bg-a-master/15 text-a-master',
+    sending: 'bg-warn/15 text-warn-fg',
   };
-  return map[status] ?? 'bg-zinc-800 text-zinc-400';
+  return map[status] ?? 'bg-bg-soft text-ink-3';
 }
 
 export function ActionTimeline({ items }: ActionTimelineProps) {
@@ -78,9 +78,9 @@ export function ActionTimeline({ items }: ActionTimelineProps) {
                 </span>
                 <div className="p-1.5 rounded bg-muted">
                   {item.type === 'email' ? (
-                    <Mail className="w-3.5 h-3.5 text-blue-400" />
+                    <Mail className="w-3.5 h-3.5 text-info" />
                   ) : (
-                    <Bot className="w-3.5 h-3.5 text-purple-400" />
+                    <Bot className="w-3.5 h-3.5 text-a-master" />
                   )}
                 </div>
                 <p className="text-sm flex-1 truncate">{item.title}</p>

@@ -34,10 +34,10 @@ export function IcpSegmentationCard({ agentMission, segments }: IcpSegmentationC
   };
 
   return (
-    <Card className="border-amber-500/30 bg-amber-500/5">
+    <Card className="border-warn/30 bg-warn/5">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Layers className="w-4 h-4 text-amber-500" />
+          <Layers className="w-4 h-4 text-warn-fg" />
           Multi-ICP mission detected
         </CardTitle>
       </CardHeader>

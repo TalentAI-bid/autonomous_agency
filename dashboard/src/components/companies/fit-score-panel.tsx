@@ -22,11 +22,11 @@ interface FitScorePanelProps {
 
 function componentBarColor(score: number | null): string {
   if (score == null) return 'bg-muted';
-  if (score >= 80) return 'bg-emerald-500';
-  if (score >= 60) return 'bg-emerald-400';
-  if (score >= 40) return 'bg-amber-500';
-  if (score >= 20) return 'bg-orange-500';
-  return 'bg-zinc-500';
+  if (score >= 80) return 'bg-up';
+  if (score >= 60) return 'bg-up';
+  if (score >= 40) return 'bg-warn';
+  if (score >= 20) return 'bg-warn';
+  return 'bg-ink-4';
 }
 
 const COMPONENT_LABELS: Record<keyof CompanyFitScoreVerdict['component_scores'], string> = {
@@ -147,7 +147,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
         <CardTitle className="text-sm font-medium flex items-center gap-3">
           <FitScoreBadge score={triage.buyer_fit_score} explanation={triage.fit_summary} />
           {triage.data_completeness === 'partial' && (
-            <Badge variant="outline" className="text-xs text-amber-400 border-amber-500/40">
+            <Badge variant="outline" className="text-xs text-warn-fg border-warn/40">
               partial data — score will refine
             </Badge>
           )}
@@ -226,7 +226,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
                   href={triage.key_person.linkedinUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:underline"
+                  className="text-xs text-info hover:underline"
                 >
                   LinkedIn ↗
                 </a>

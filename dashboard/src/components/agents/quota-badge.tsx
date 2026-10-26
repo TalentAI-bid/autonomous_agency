@@ -54,7 +54,7 @@ export function QuotaBadge({ masterAgentId, compact = false }: Props) {
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-1.5 text-muted-foreground">
           {data.exhausted ? (
-            <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+            <AlertTriangle className="w-3.5 h-3.5 text-down" />
           ) : (
             <Clock className="w-3.5 h-3.5" />
           )}
@@ -67,7 +67,7 @@ export function QuotaBadge({ masterAgentId, compact = false }: Props) {
       <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${
-            data.exhausted ? 'bg-red-500' : percent >= 75 ? 'bg-amber-500' : 'bg-primary'
+            data.exhausted ? 'bg-down' : percent >= 75 ? 'bg-warn' : 'bg-primary'
           }`}
           style={{ width: `${percent}%` }}
         />

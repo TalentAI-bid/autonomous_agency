@@ -1,106 +1,70 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/stores/auth.store';
-import { useRealtimeStore } from '@/stores/realtime.store';
-import { useDashboardAnalytics } from '@/hooks/use-analytics';
-import { useAgents } from '@/hooks/use-agents';
+import { usePathname } from 'next/navigation';
 import { Icon } from '@/components/ui/icon';
-import { Dot } from '@/components/ui/dot';
-import { WorkspaceSwitcher } from './workspace-switcher';
-import { apiPost } from '@/lib/api';
-
 import { Button } from '@/components/ui/button';
-function fmtMoney(n?: number | null) {
-  if (n == null) return '—';
-  if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return '$' + (n / 1e3).toFixed(n >= 10000 ? 0 : 1) + 'K';
-  return '$' + n;
+import { WorkspaceSwitcher } from './workspace-switcher';
+import { numberWord, useGetStarted } from '@/hooks/use-get-started';
+
+// Title + one-line subtitle for the top bar, matched on the longest route prefix.
+const TITLES: Array<[string, { title: string; sub: string }]> = [
+  ['/get-started', { title: 'Get started', sub: '' }],
+  ['/dashboard', { title: 'Home', sub: 'What needs you today.' }],
+  ['/queue', { title: 'Daily Queue', sub: 'What your agents drafted for you to approve.' }],
+  ['/mailbox', { title: 'Inbox', sub: 'Replies and conversations.' }],
+  ['/schedule', { title: 'Meetings', sub: 'Booked and upcoming meetings.' }],
+  ['/prospects', { title: 'Leads', sub: 'People your agents have found.' }],
+  ['/companies', { title: 'Companies', sub: 'Accounts your agents are working.' }],
+  ['/crm', { title: 'Pipeline', sub: 'Deals by stage.' }],
+  ['/analytics', { title: 'Analytics', sub: 'How outreach is performing.' }],
+  ['/agents/new', { title: 'New agent', sub: 'Describe who to reach and let it run.' }],
+  ['/agents', { title: 'Agents', sub: 'Your outbound agents.' }],
+  ['/studio', { title: 'Studio', sub: 'Shape messaging and strategy.' }],
+  ['/linkedin-extension', { title: 'LinkedIn Extension', sub: 'Connect Chrome so agents can reach out.' }],
+  ['/documents', { title: 'Documents', sub: 'Files your agents can use.' }],
+  ['/campaigns', { title: 'Campaigns', sub: 'Outreach campaigns.' }],
+  ['/settings', { title: 'Settings', sub: 'Workspace, mailboxes and team.' }],
+];
+
+function titleFor(pathname: string) {
+  const hit = TITLES.filter(([p]) => pathname === p || pathname.startsWith(p + '/')).sort(
+    (a, b) => b[0].length - a[0].length,
+  )[0];
+  return hit?.[1] ?? { title: 'Keenpipe', sub: '' };
 }
 
 export function Header() {
-  const router = useRouter();
-  const { logout } = useAuthStore();
-  const connected = useRealtimeStore((s) => s.connected);
-  const events = useRealtimeStore((s) => s.events);
-  const { data: analytics } = useDashboardAnalytics();
-  const { data: agents } = useAgents();
-
-  const unread = events.filter((e) => Date.now() - new Date(e.timestamp).getTime() < 60000).length;
-  const runningAgents = agents?.filter((a) => a.status === 'running').length ?? 0;
-  const totalAgents = agents?.length ?? 0;
-  const leadsToday = analytics?.contacts.total ?? 0;
-  const sent = analytics?.emails.sent ?? 0;
-  const replied = analytics?.emails.replied ?? 0;
-  const replyRate = sent > 0 ? ((replied / sent) * 100).toFixed(1) + '%' : '—';
-
-  const handleLogout = async () => {
-    try {
-      await apiPost('/auth/logout');
-    } catch {
-      /* ignore */
-    }
-    logout();
-    router.push('/login');
-  };
+  const pathname = usePathname();
+  const gs = useGetStarted();
+  const found = titleFor(pathname);
+  const title = found.title;
+  const sub =
+    pathname.startsWith('/get-started') && !gs.isLoading
+      ? `${numberWord(gs.doneCount).replace(/^./, (c) => c.toUpperCase())} of ${numberWord(gs.total)} done · this page disappears when all ${numberWord(gs.total)} are`
+      : found.sub;
 
   return (
-    <div className="topbar">
-      <div className="topbar-cell">
-        <Dot state={connected ? 'live' : 'paused'} />
-        <span className="label">System</span>
-        <span className="val">{connected ? 'LIVE' : 'PAUSED'}</span>
-      </div>
-      <div className="topbar-cell">
-        <span className="label">Agents</span>
-        <span className="val">
-          {runningAgents}/{totalAgents}
-        </span>
-        <span className="delta text-up">
-          active
-        </span>
-      </div>
-      <div className="topbar-cell">
-        <span className="label">Leads</span>
-        <span className="val">{leadsToday.toLocaleString()}</span>
-      </div>
-      <div className="topbar-cell">
-        <span className="label">Reply rate</span>
-        <span className="val">{replyRate}</span>
-      </div>
-      <div className="topbar-cell">
-        <span className="label">Interviews</span>
-        <span className="val">{analytics?.interviews.scheduled ?? 0}</span>
+    <header className="flex h-[54px] shrink-0 items-center gap-4 border-b border-line bg-bg-panel px-5">
+      <div className="min-w-0">
+        <div className="truncate text-title font-semibold leading-tight text-ink">{title}</div>
+        {sub && <div className="truncate text-xs text-ink-3">{sub}</div>}
       </div>
 
-      <div className="searchbar" role="search">
-        <Icon name="search" size={13} />
-        <span>Jump to agent, lead, company… or type a command</span>
-        <span className="ml-auto">
-          <kbd>⌘K</kbd>
-        </span>
-      </div>
-
-      <div className="topbar-right">
+      <div className="ml-auto flex items-center gap-2.5">
         <WorkspaceSwitcher />
-        <Button asChild variant="ink" size="xs"><Link href="/agents/new" className="gap-1.5">
-          <Icon name="plus" size={12} /> New agent
-        </Link></Button>
-        <button className="topbar-cell" type="button" aria-label="Notifications">
-          <Icon name="bell" size={13} />
-          {unread > 0 && <span className="text-xs">{Math.min(unread, 9)}</span>}
-        </button>
-        <button
-          className="topbar-cell text-ink-2"
-          type="button"
-          onClick={handleLogout}
-          title="Logout"
-          aria-label="Logout"
+        <div
+          role="search"
+          className="flex h-8 w-[190px] items-center gap-2 rounded-lg border border-line bg-bg-panel px-2.5 text-body text-ink-3"
         >
-          <Icon name="cog" size={13} />
-        </button>
+          <Icon name="search" size={13} />
+          <span>Search</span>
+          <kbd className="ml-auto rounded-tag border border-line bg-bg-soft px-1.5 font-mono text-2xs text-ink-3">⌘K</kbd>
+        </div>
+        <Button asChild variant="brand" size="dense" className="h-8 rounded-lg px-3.5 text-body font-semibold">
+          <Link href="/queue">Open approvals</Link>
+        </Button>
       </div>
-    </div>
+    </header>
   );
 }

@@ -38,24 +38,24 @@ export function formatPercent(n: number, decimals = 1): string {
 
 export function getStatusColor(status: ContactStatus | string): string {
   const map: Record<string, string> = {
-    discovered: 'text-zinc-400 bg-zinc-800',
-    enriched: 'text-blue-400 bg-blue-900/30',
-    scored: 'text-purple-400 bg-purple-900/30',
-    contacted: 'text-yellow-400 bg-yellow-900/30',
-    replied: 'text-emerald-400 bg-emerald-900/30',
-    qualified: 'text-green-400 bg-green-900/30',
-    interview_scheduled: 'text-green-300 bg-green-900/40',
-    rejected: 'text-red-400 bg-red-900/30',
-    archived: 'text-zinc-500 bg-zinc-900',
-    idle: 'text-zinc-400 bg-zinc-800',
-    running: 'text-emerald-400 bg-emerald-900/30',
-    paused: 'text-yellow-400 bg-yellow-900/30',
-    error: 'text-red-400 bg-red-900/30',
-    active: 'text-emerald-400 bg-emerald-900/30',
-    completed: 'text-blue-400 bg-blue-900/30',
-    failed: 'text-red-400 bg-red-900/30',
+    discovered: 'text-ink-3 bg-bg-soft',
+    enriched: 'text-info bg-info/10',
+    scored: 'text-a-master bg-a-master/10',
+    contacted: 'text-warn-fg bg-warn/10',
+    replied: 'text-up bg-up/10',
+    qualified: 'text-up bg-up/10',
+    interview_scheduled: 'text-up bg-up/15',
+    rejected: 'text-down bg-down/10',
+    archived: 'text-ink-3 bg-bg-soft',
+    idle: 'text-ink-3 bg-bg-soft',
+    running: 'text-up bg-up/10',
+    paused: 'text-warn-fg bg-warn/10',
+    error: 'text-down bg-down/10',
+    active: 'text-up bg-up/10',
+    completed: 'text-info bg-info/10',
+    failed: 'text-down bg-down/10',
   };
-  return map[status] ?? 'text-zinc-400 bg-zinc-800';
+  return map[status] ?? 'text-ink-3 bg-bg-soft';
 }
 
 export function getAgentIcon(agentType: AgentType): string {
@@ -121,8 +121,8 @@ export function truncate(str: string, maxLen: number): string {
 }
 
 export function getScoreColor(score: number): string {
-  if (score >= 80) return 'text-emerald-400';
-  if (score >= 60) return 'text-yellow-400';
-  if (score >= 40) return 'text-orange-400';
-  return 'text-red-400';
+  if (score >= 80) return 'text-up';
+  if (score >= 60) return 'text-warn-fg';
+  if (score >= 40) return 'text-warn-fg';
+  return 'text-down';
 }

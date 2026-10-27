@@ -9,11 +9,11 @@
 @layer base {
   :root {
     /* ─── Tweakable knobs ─────────────────────────────────────────── */
-    /* Emerald-teal brand (#10b981). Hue 162 ≈ emerald; lightness kept
-       dark enough (0.62) that solid buttons hold readable white text. */
-    --accent-h: 162;
-    --accent-c: 0.14;
-    --accent-l: 0.62;
+    /* Violet brand (~#5B4CD8). Hue 285; lightness kept
+       dark enough (0.52) that solid buttons hold readable white text. */
+    --accent-h: 285;
+    --accent-c: 0.19;
+    --accent-l: 0.52;
     --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
     --accent-weak: oklch(0.97 0.03 var(--accent-h));
     --accent-mid: oklch(0.90 0.08 var(--accent-h));
@@ -27,7 +27,7 @@
     --cell-h: calc(32px * var(--density));
 
     /* ─── Neutrals (warm, subtle) ─────────────────────────────────── */
-    --bg:       oklch(0.992 0.003 90);
+    --bg:       oklch(0.975 0.004 100);
     --bg-sub:   oklch(0.975 0.004 90);
     --bg-panel: oklch(1 0 0);
     --bg-soft:  oklch(0.965 0.005 90);
@@ -188,73 +188,12 @@
 /* ─── App shell ─────────────────────────────────────────────────── */
 .app-shell {
   display: grid;
-  grid-template-columns: 224px 1fr;
+  grid-template-columns: 232px 1fr;
   grid-template-rows: 100vh;
   height: 100vh;
   background: var(--bg);
 }
 
-.sidebar {
-  background: var(--bg-sub);
-  border-right: 1px solid var(--line);
-  display: flex; flex-direction: column;
-  min-width: 0;
-}
-
-.sidebar-brand {
-  height: 52px;
-  padding: 0 14px;
-  display: flex; align-items: center; gap: 8px;
-  border-bottom: 1px solid var(--line);
-}
-.brand-mark {
-  width: 22px; height: 22px;
-  background: var(--accent);
-  color: #fff;
-  display: grid; place-items: center;
-  font-family: var(--ff-display);
-  font-size: 14px;
-  border-radius: 1px;
-}
-.brand-name {
-  font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
-}
-.brand-sub {
-  font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3);
-  margin-left: auto; letter-spacing: 0.04em;
-}
-
-.nav {
-  flex: 1;
-  padding: 8px 0;
-  overflow-y: auto;
-}
-.nav-section { padding: 10px 14px 4px; font-size: 10px; color: var(--ink-3); letter-spacing: 0.09em; text-transform: uppercase; }
-.nav-item {
-  display: flex; align-items: center; gap: 8px;
-  height: 28px;
-  padding: 0 14px;
-  font-size: 12.5px;
-  color: var(--ink-2);
-  cursor: pointer;
-  border-left: 2px solid transparent;
-  user-select: none;
-}
-.nav-item:hover { background: var(--hover); color: var(--ink); }
-.nav-item.is-active {
-  background: color-mix(in oklch, var(--accent) 8%, transparent);
-  color: var(--accent-fg);
-  border-left-color: var(--accent);
-  font-weight: 500;
-}
-.nav-item .count { margin-left: auto; font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3); }
-.nav-item.is-active .count { color: var(--accent-fg); }
-
-.sidebar-foot {
-  border-top: 1px solid var(--line);
-  padding: 10px 14px;
-  display: flex; align-items: center; gap: 8px;
-}
 .avatar {
   width: 24px; height: 24px;
   background: var(--ink);
@@ -267,44 +206,6 @@
 
 /* ─── Main area ─────────────────────────────────────────────────── */
 .main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-
-.topbar {
-  height: 40px;
-  border-bottom: 1px solid var(--line);
-  display: flex; align-items: stretch;
-  background: var(--bg-panel);
-  flex-shrink: 0;
-}
-.topbar-cell {
-  display: flex; align-items: center; gap: 8px;
-  padding: 0 14px;
-  border-right: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-.topbar-cell .label { font-size: 10px; color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
-.topbar-cell .val   { font-family: var(--ff-mono); font-size: 12px; color: var(--ink); }
-.topbar-cell .delta { font-family: var(--ff-mono); font-size: 10.5px; }
-.topbar-right { margin-left: auto; display: flex; align-items: stretch; }
-.topbar-right .topbar-cell { border-left: 1px solid var(--line); border-right: none; }
-
-.searchbar {
-  flex: 1;
-  display: flex; align-items: center; gap: 8px;
-  padding: 0 14px;
-  color: var(--ink-3);
-  font-family: var(--ff-mono);
-  font-size: 11.5px;
-  background: var(--bg-panel);
-  min-width: 0;
-}
-.searchbar kbd {
-  font-family: var(--ff-mono); font-size: 10px;
-  background: var(--bg-soft); border: 1px solid var(--line);
-  padding: 1px 5px; border-radius: 2px;
-  color: var(--ink-3);
-}
 
 .page {
   flex: 1;
@@ -386,6 +287,15 @@
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 20px; border: 2px solid var(--bg); }
 *::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+
+/* Thin scrollbar that only shows while the container is hovered (sidebar nav).
+   The standard properties drive Chrome/Firefox; the webkit rules cover Safari. */
+.scroll-thin { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.scroll-thin:hover { scrollbar-color: var(--line-strong) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: transparent; border: 0; border-radius: 999px; }
+.scroll-thin:hover::-webkit-scrollbar-thumb { background: var(--line-2); }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
 
 /* ─── Sparkline ─────────────────────────────────────────────────── */
 .spark { display: inline-block; vertical-align: middle; }

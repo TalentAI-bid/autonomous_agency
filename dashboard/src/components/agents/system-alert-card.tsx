@@ -12,10 +12,10 @@ import {
 
 import { Input } from '@/components/ui/input';
 const SEVERITY_STYLES: Record<string, { border: string; icon: React.ElementType; iconColor: string }> = {
-  info:    { border: 'border-l-blue-500',    icon: Info,          iconColor: 'text-info' },
-  warning: { border: 'border-l-amber-500',   icon: AlertTriangle, iconColor: 'text-warn-fg' },
-  error:   { border: 'border-l-red-500',     icon: XCircle,       iconColor: 'text-down' },
-  success: { border: 'border-l-emerald-500', icon: CheckCircle2,  iconColor: 'text-up' },
+  info:    { border: 'border-l-info',    icon: Info,          iconColor: 'text-info' },
+  warning: { border: 'border-l-warn',   icon: AlertTriangle, iconColor: 'text-warn-fg' },
+  error:   { border: 'border-l-down',     icon: XCircle,       iconColor: 'text-down' },
+  success: { border: 'border-l-up', icon: CheckCircle2,  iconColor: 'text-up' },
 };
 
 interface SystemAlertCardProps {

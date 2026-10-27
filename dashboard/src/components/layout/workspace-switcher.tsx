@@ -88,20 +88,20 @@ export function WorkspaceSwitcher() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors text-sm"
+        className="flex h-8 items-center gap-2 rounded-lg border border-line bg-bg-panel px-2 text-body transition-colors hover:bg-bg-soft"
       >
-        <div className="w-6 h-6 rounded bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">
+        <div className="grid size-5 place-items-center rounded-md bg-accent text-2xs font-semibold text-white">
           {initial}
         </div>
-        <span className="hidden sm:block max-w-[120px] truncate font-medium">
+        <span className="hidden max-w-[120px] truncate font-medium text-ink sm:block">
           {tenant?.name ?? 'Workspace'}
         </span>
-        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+        <ChevronDown className="size-3.5 text-ink-3" />
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-background border border-border rounded-lg shadow-lg z-50 py-1">
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <div className="absolute left-0 top-full z-50 mt-1.5 w-64 rounded-lg border border-line bg-bg-panel p-1 shadow-lg">
+          <div className="px-2.5 pb-1.5 pt-2 text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">
             Workspaces
           </div>
 
@@ -112,21 +112,21 @@ export function WorkspaceSwitcher() {
             return (
               <div
                 key={ws.id}
-                className="group flex items-center hover:bg-muted/50 transition-colors"
+                className="group flex items-center rounded-md transition-colors hover:bg-bg-soft"
               >
                 <button
                   onClick={() => handleSwitch(ws.id)}
                   disabled={switchWorkspace.isPending}
-                  className="min-w-0 flex-1 flex items-center gap-2 px-3 py-2 text-sm text-left"
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left text-body"
                 >
-                  <div className="w-6 h-6 rounded bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+                  <div className="grid size-6 shrink-0 place-items-center rounded-md bg-accent-weak text-2xs font-semibold text-accent-fg">
                     {ws.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{ws.name}</div>
-                    <div className="text-xs text-muted-foreground">{ws.role}</div>
+                    <div className="truncate font-medium text-ink">{ws.name}</div>
+                    <div className="text-xs text-ink-3">{ws.role}</div>
                   </div>
-                  {isActive && <Check className="w-4 h-4 text-primary shrink-0" />}
+                  {isActive && <Check className="size-4 shrink-0 text-accent" />}
                 </button>
                 {canDelete && (
                   <button
@@ -134,7 +134,7 @@ export function WorkspaceSwitcher() {
                     disabled={deleteWorkspace.isPending}
                     title="Delete workspace"
                     aria-label={`Delete workspace ${ws.name}`}
-                    className="px-2 py-2 text-muted-foreground hover:text-destructive shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="shrink-0 px-2 py-2 text-ink-3 opacity-0 transition-opacity hover:text-down group-hover:opacity-100"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -143,14 +143,14 @@ export function WorkspaceSwitcher() {
             );
           })}
 
-          <div className="border-t border-border mt-1 pt-1">
+          <div className="mt-1 border-t border-line pt-1">
             {creating ? (
-              <form onSubmit={handleCreate} className="px-3 py-2 flex gap-2">
+              <form onSubmit={handleCreate} className="flex gap-2 px-2.5 py-2">
                 <Input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Workspace name"
-                  className="h-8 text-sm"
+                  className="h-8 text-body"
                   autoFocus
                 />
                 <Button type="submit" size="sm" className="h-8 px-2" disabled={createWorkspace.isPending || !newName.trim()}>
@@ -160,7 +160,7 @@ export function WorkspaceSwitcher() {
             ) : (
               <button
                 onClick={() => setCreating(true)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left text-muted-foreground"
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-body text-ink-3 transition-colors hover:bg-bg-soft hover:text-ink"
               >
                 <Plus className="w-4 h-4" />
                 Create workspace

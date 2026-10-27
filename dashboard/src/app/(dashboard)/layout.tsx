@@ -16,15 +16,15 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
   useWebSocket();
   const pathname = usePathname();
   const { showOnboarding } = useSetupStatus();
-  // On the first-run /dashboard onboarding page, drop the dense chrome so the
-  // clean onboarding view renders full-bleed (it carries its own top strip).
+  // On the first-run /dashboard onboarding page, drop the banner and status bar
+  // so the clean onboarding view renders full-bleed. The top bar stays on every page.
   const onboardingFull = pathname === '/dashboard' && showOnboarding;
 
   return (
     <div className="app-shell">
       <Sidebar />
       <div className="main">
-        {!onboardingFull && <Header />}
+        <Header />
         {!onboardingFull && <OnboardingBanner />}
         <main className="flex-1 overflow-auto min-h-0">{children}</main>
         {!onboardingFull && <StatusBar />}

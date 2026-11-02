@@ -6,22 +6,17 @@ import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useMasterAgent, useStartAgent, useStopAgent, useAgentStats, useAgentEmails, useAgentDocuments, useGmapsEnrichAgent } from '@/hooks/use-agents';
 import { useContacts } from '@/hooks/use-contacts';
 import { useRealtimeStore } from '@/stores/realtime.store';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDate } from '@/lib/utils';
-import { Play, Square, Activity, Users, Bot, Mail, BarChart3, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store } from 'lucide-react';
+import { Activity, Users, Bot, Mail, BarChart3, Building2, FileText, Brain, Zap, MessageSquare, Settings as SettingsIcon, ListChecks, Store } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ActivityFeed } from '@/components/agents/activity-feed';
-import { ExportButton } from '@/components/shared/export-button';
-import { QuotaBadge } from '@/components/agents/quota-badge';
 import { IssuesBanner } from '@/components/agents/issues-banner';
 import OpportunitiesPage from './opportunities/page';
 import { AgentRoom } from '@/components/agents/agent-room';
 import { AgentSettingsTab } from '@/components/agents/agent-settings-tab';
 import { AgentQueueTab } from '@/components/agents/agent-queue-tab';
-import { AgentTabNav, agentTabFromQuery, type AgentTab, type AgentTabItem } from '@/components/agents/detail/agent-tab-nav';
+import { AgentHeader } from '@/components/agents/detail/agent-header';
+import { AgentTabNav, agentTabFromQuery, type AgentTab, type AgentTabGroup } from '@/components/agents/detail/agent-tab-nav';
 import { useCompaniesTab } from '@/components/agents/detail/use-companies-tab';
 import { OverviewTab } from '@/components/agents/detail/overview-tab';
 import { ContactsTab } from '@/components/agents/detail/contacts-tab';
@@ -49,7 +44,7 @@ export default function AgentDetailPage() {
   function selectTab(t: AgentTab) {
     setActiveTab(t);
     const q = new URLSearchParams(searchParams.toString());
-    if (t === 'queue') q.delete('tab'); else q.set('tab', t);
+    if (t === 'approvals') q.delete('tab'); else q.set('tab', t);
     const qs = q.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
@@ -111,41 +106,56 @@ export default function AgentDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-32" />
-        <Skeleton className="h-64" />
+      <div className="mx-auto max-w-[1180px] space-y-5 p-6">
+        <Skeleton className="h-56 rounded-2xl" />
+        <Skeleton className="h-64 rounded-2xl" />
       </div>
     );
   }
 
   if (!agent) {
     return (
-      <div className="text-center py-16">
-        <Bot className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-        <p className="text-muted-foreground">Agent not found</p>
+      <div className="mx-auto max-w-[1180px] p-6 py-16 text-center">
+        <Bot className="mx-auto mb-3 size-10 text-ink-4" />
+        <p className="m-0 text-body text-ink-3">Agent not found</p>
       </div>
     );
   }
 
-  const tabs: AgentTabItem[] = [
-    { key: 'queue', label: 'Queue', icon: ListChecks },
-    { key: 'overview', label: 'Overview', icon: BarChart3 },
-    { key: 'contacts', label: 'Contacts', icon: Users, count: totalContacts },
-    ...(gmapsBusinesses.length > 0
-      ? [{ key: 'businesses' as AgentTab, label: 'Businesses', icon: Store, count: gmapsBusinesses.length }]
-      : []),
-    { key: 'opportunities', label: 'Opportunities', icon: Zap },
-    { key: 'companies', label: 'Companies', icon: Building2, count: companiesTab.companies.length },
-    { key: 'documents', label: 'Documents', icon: FileText, count: agentDocuments.length },
-    { key: 'emails', label: 'Emails', icon: Mail, count: emails?.length ?? 0 },
-    { key: 'activity', label: 'Activity', icon: Activity },
-    { key: 'strategy', label: 'Strategy', icon: Brain },
-    { key: 'room', label: 'Agent Room', icon: MessageSquare },
-    { key: 'settings', label: 'Settings', icon: SettingsIcon },
+  const groups: AgentTabGroup[] = [
+    {
+      label: 'Workflow',
+      tabs: [
+        { key: 'approvals', label: 'Approvals', icon: ListChecks },
+        { key: 'contacts', label: 'Contacts', icon: Users, count: totalContacts },
+        ...(gmapsBusinesses.length > 0
+          ? [{ key: 'businesses' as AgentTab, label: 'Businesses', icon: Store, count: gmapsBusinesses.length }]
+          : []),
+        { key: 'companies', label: 'Companies', icon: Building2, count: companiesTab.companies.length },
+        { key: 'opportunities', label: 'Opportunities', icon: Zap },
+      ],
+    },
+    {
+      label: 'Insights',
+      tabs: [
+        { key: 'overview', label: 'Overview', icon: BarChart3 },
+        { key: 'activity', label: 'Activity', icon: Activity },
+        { key: 'strategy', label: 'Strategy', icon: Brain },
+        { key: 'room', label: 'Agent Room', icon: MessageSquare },
+      ],
+    },
+    {
+      label: 'Content',
+      tabs: [
+        { key: 'documents', label: 'Documents', icon: FileText, count: agentDocuments.length },
+        { key: 'emails', label: 'Emails', icon: Mail, count: emails?.length ?? 0 },
+      ],
+    },
+    { label: 'Setup', tabs: [{ key: 'settings', label: 'Settings', icon: SettingsIcon }] },
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-[1180px] space-y-5 p-6">
       {/* Breadcrumb */}
       <Breadcrumb
         showBack
@@ -156,66 +166,25 @@ export default function AgentDetailPage() {
         ]}
       />
 
-      {/* Agent Header */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-lg bg-info/10">
-              <Bot className="w-6 h-6 text-info" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-xl font-bold">{agent.name}</h1>
-                {agent.status === 'paused' &&
-                (agent.config?.pauseReason as string | undefined) === 'extension_required' ? (
-                  <Badge variant="warning" title="Connect the LinkedIn extension to run this agent — it resumes automatically.">
-                    Paused · connect extension
-                  </Badge>
-                ) : (
-                  <Badge variant={agent.status === 'running' ? 'success' : 'secondary'}>
-                    {agent.status}
-                  </Badge>
-                )}
-                <QuotaBadge masterAgentId={id} compact />
-              </div>
-              <p className="text-sm text-muted-foreground mt-1">{agent.useCase}</p>
-              {agent.mission && (
-                <p className="text-sm mt-2 text-foreground/80">{agent.mission}</p>
-              )}
-              <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5" />
-                  {totalContacts} contacts
-                </span>
-                <span>Created {formatDate(agent.createdAt)}</span>
-                <span>Updated {formatDate(agent.updatedAt)}</span>
-              </div>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <ExportButton masterAgentId={id} showFullBatch />
-              {agent.status === 'running' ? (
-                <Button variant="outline" size="sm" onClick={handleStop} disabled={stopAgent.isPending}>
-                  <Square className="w-3.5 h-3.5 mr-1.5" />
-                  Stop
-                </Button>
-              ) : (
-                <Button size="sm" onClick={handleStart} disabled={startAgent.isPending}>
-                  <Play className="w-3.5 h-3.5 mr-1.5" />
-                  Run
-                </Button>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <AgentHeader
+        agent={agent}
+        stats={stats}
+        totalContacts={totalContacts}
+        starting={startAgent.isPending}
+        stopping={stopAgent.isPending}
+        onStart={handleStart}
+        onStop={handleStop}
+      />
 
       {/* Pipeline issues banner (visible regardless of active tab) */}
       <IssuesBanner masterAgentId={id} />
 
-      <AgentTabNav tabs={tabs} active={activeTab} onSelect={selectTab} />
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[212px_minmax(0,1fr)]">
+      <AgentTabNav groups={groups} active={activeTab} onSelect={selectTab} />
 
       {/* Tab Content */}
-      {activeTab === 'queue' && <AgentQueueTab agentId={id} agentName={agent.name} />}
+      <div className="min-w-0">
+      {activeTab === 'approvals' && <AgentQueueTab agentId={id} agentName={agent.name} />}
       {activeTab === 'overview' && (
         <OverviewTab agentId={id} agent={agent} stats={stats} totalContacts={totalContacts} events={events} />
       )}
@@ -238,6 +207,8 @@ export default function AgentDetailPage() {
       {activeTab === 'strategy' && <StrategyTab agentId={id} agent={agent} />}
       {activeTab === 'room' && <AgentRoom masterAgentId={id} />}
       {activeTab === 'settings' && <AgentSettingsTab agent={agent} />}
+      </div>
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { useDashboardAnalytics } from '@/hooks/use-analytics';
 import { useEmailAccounts, useEmailListeners } from '@/hooks/use-email-settings';
 import { useMailboxDigest, useMailboxThreads } from '@/hooks/use-mailbox';
 import { useQueue } from '@/hooks/use-queue';
+import { useMessagingConfig } from '@/hooks/use-studio';
 import type { MasterAgent, QuotaStatus } from '@/types';
 
 /* ─── Not-yet-available inputs ─────────────────────────────────────────
@@ -74,7 +75,7 @@ export interface AgentRowInfo {
   replies: number | null;
 }
 
-function agentStatus(a: MasterAgent): Pick<AgentRowInfo, 'tone' | 'statusLabel'> {
+export function agentStatus(a: MasterAgent): Pick<AgentRowInfo, 'tone' | 'statusLabel'> {
   const status = a.status as string;
   const reason = (a.config as Record<string, unknown> | undefined)?.pauseReason;
   if (status === 'running') return { tone: 'up', statusLabel: 'Running' };
@@ -92,6 +93,7 @@ export function useHomeData() {
   const threads = useMailboxThreads({ status: 'needs_action', limit: 3 });
   const accounts = useEmailAccounts();
   const listeners = useEmailListeners();
+  const messaging = useMessagingConfig();
   const analytics = useDashboardAnalytics();
   const agents = useAgents();
   const ext = useQuery({
@@ -133,7 +135,8 @@ export function useHomeData() {
     const placeholderInDrafts = actions
       .map((a) => (a.draftBody ?? '').match(PLACEHOLDER_TOKEN)?.[0])
       .find(Boolean);
-    const senderNamed = accountList.some((a) => (a.fromName ?? '').trim().length > 0);
+    const senderNamed =
+      (messaging.data?.sender_name ?? '').trim().length > 0 || accountList.some((a) => (a.fromName ?? '').trim().length > 0);
     const placeholderToken = placeholderInDrafts ?? (accountList.length > 0 && !senderNamed ? '[YOUR FIRST NAME]' : null);
 
     const needs: NeedItem[] = [];
@@ -143,7 +146,7 @@ export function useHomeData() {
         key: 'approvals',
         title: `${n} message${n === 1 ? '' : 's'} waiting for your approval`,
         subtitle: `About ${q!.etaMinutes} minutes${earliest ? ` · drafted at ${utcClock(new Date(earliest).toISOString())}` : ''}`,
-        href: '/queue',
+        href: '/approvals',
         actionLabel: 'Review',
         tone: 'accent',
         at: latestDraft,
@@ -174,7 +177,7 @@ export function useHomeData() {
         key: 'placeholder',
         title: 'Sender name is still a placeholder',
         subtitle: `Every draft carries ${placeholderToken} until you change it. Nothing sends before that.`,
-        href: '/settings/email',
+        href: '/settings/messaging',
         actionLabel: 'Fix it',
         tone: 'warn',
         at: null,
@@ -226,7 +229,7 @@ export function useHomeData() {
           ? 'Chrome may have turned it off. Connection requests will not send until it is back.'
           : 'Install the Chrome extension so agents can send connection requests.',
       actionLabel: 'Open extension page',
-      href: '/linkedin-extension',
+      href: '/settings/linkedin-extension',
     };
 
     // ── Stats ──────────────────────────────────────────────────────────
@@ -275,5 +278,5 @@ export function useHomeData() {
       agents: agentRows,
       agentCount: agentList.length,
     };
-  }, [queue.data, queue.isLoading, digest.data, digest.isLoading, threads.data, accountList, quotas, listeners.data, ext.data, analytics.data, analytics.isLoading, agentList, agentStats, agents.isLoading]);
+  }, [queue.data, queue.isLoading, digest.data, digest.isLoading, threads.data, accountList, messaging.data, quotas, listeners.data, ext.data, analytics.data, analytics.isLoading, agentList, agentStats, agents.isLoading]);
 }

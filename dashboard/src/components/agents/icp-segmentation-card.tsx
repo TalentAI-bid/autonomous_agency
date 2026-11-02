@@ -1,9 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Layers, Sparkles } from 'lucide-react';
 
 interface IcpSegment {
@@ -34,45 +32,34 @@ export function IcpSegmentationCard({ agentMission, segments }: IcpSegmentationC
   };
 
   return (
-    <Card className="border-warn/30 bg-warn/5">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Layers className="w-4 h-4 text-warn-fg" />
-          Multi-ICP mission detected
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <p className="text-muted-foreground">
-          Your mission contains multiple ICPs. Running them all in one agent reduces signal
-          quality. For best results, split into separate agents:
-        </p>
-        <ul className="space-y-2">
-          {recommended.map((segment) => (
-            <li
-              key={segment.name}
-              className="flex items-start justify-between gap-3 rounded-md border bg-background p-3"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="text-xs">
-                    <Sparkles className="w-3 h-3 mr-1" />
-                    {segment.name}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">{segment.rationale}</p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => launchSegment(segment)}
-                className="h-7 text-xs shrink-0"
-              >
-                Create agent
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </CardContent>
-    </Card>
+    <section className="overflow-hidden rounded-2xl border border-warn/30 bg-bg-panel shadow-sm">
+      <header className="flex items-center gap-2.5 border-b border-warn/20 bg-warn/5 px-5 py-3">
+        <span className="grid size-7 place-items-center rounded-row bg-warn/15 text-warn-fg">
+          <Layers size={14} />
+        </span>
+        <div className="min-w-0">
+          <h2 className="m-0 text-body font-semibold text-ink">Multi-ICP mission detected</h2>
+          <p className="mb-0 mt-0.5 text-xs text-ink-3">
+            Running several ICPs in one agent reduces signal quality. Splitting them gives better results.
+          </p>
+        </div>
+      </header>
+      <ul className="m-0 list-none divide-y divide-line p-0">
+        {recommended.map((segment) => (
+          <li key={segment.name} className="flex items-start justify-between gap-4 px-5 py-3.5">
+            <div className="min-w-0">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-accent-weak px-2 py-0.5 text-xs font-medium text-accent-fg">
+                <Sparkles size={11} />
+                {segment.name}
+              </span>
+              <p className="mb-0 mt-1.5 text-xs leading-relaxed text-ink-3">{segment.rationale}</p>
+            </div>
+            <Button type="button" variant="panel" size="dense" onClick={() => launchSegment(segment)} className="h-8 shrink-0 rounded-lg">
+              Create agent
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

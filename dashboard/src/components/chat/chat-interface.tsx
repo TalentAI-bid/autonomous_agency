@@ -7,7 +7,14 @@ import { useToast } from '@/hooks/use-toast';
 import { MessageList } from './message-list';
 import { ChatInput } from './chat-input';
 import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import type { ChatMessage } from '@/types/chat';
+
+const STARTERS = [
+  'Manufacturers in France who need a distributor',
+  'Design and marketing agencies in Tunisia',
+  'Hire senior React engineers in Berlin',
+];
 
 interface ChatInterfaceProps {
   onAgentCreated?: (id: string) => void;
@@ -19,28 +26,42 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
-  const initialized = useRef(false);
+  const startRef = useRef<ReturnType<typeof createConversation.mutateAsync> | null>(null);
+  const [startFailed, setStartFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const createConversation = useCreateConversation();
   const conversationQuery = useConversation(conversationId);
   const { sendStream, streamingText, isStreaming } = useSendMessageStream(conversationId);
   const approveProposal = useApproveProposal(conversationId);
 
-  // Initialize conversation on mount
+  // Start the conversation once. The request is kept in a ref so React Strict
+  // Mode's dev-only remount re-attaches to the same request instead of
+  // skipping it (which left the page loading forever) or creating a second one.
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
-    createConversation.mutate(undefined, {
-      onSuccess: (data) => {
+    let active = true;
+    if (!startRef.current) startRef.current = createConversation.mutateAsync();
+    startRef.current
+      .then((data) => {
+        if (!active) return;
         setConversationId(data.conversation.id);
         setMessages(data.messages);
-      },
-      onError: () => {
+      })
+      .catch(() => {
+        if (!active) return;
+        setStartFailed(true);
         toast({ title: 'Failed to start conversation', variant: 'destructive' });
-      },
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function retryStart() {
+    startRef.current = null;
+    setStartFailed(false);
+    setAttempt((n) => n + 1);
+  }
 
   // Sync messages when conversation query updates
   useEffect(() => {
@@ -106,15 +127,33 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
   // Loading state while creating the initial conversation
   if (!conversationId) {
     return (
-      <div className="h-[calc(100vh-8rem)] flex flex-col items-center justify-center gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Starting conversation...</p>
+      <div className="flex h-[calc(100vh-10rem)] min-h-[420px] flex-col items-center justify-center gap-3 rounded-2xl border border-line bg-bg-panel px-6 text-center shadow-sm">
+        {startFailed ? (
+          <>
+            <p className="m-0 text-body font-medium text-ink">The assistant could not start.</p>
+            <p className="m-0 max-w-[380px] text-xs text-ink-3">
+              The conversation request failed. Check that the backend is running and an AI provider key is configured, then try again.
+            </p>
+            <Button type="button" variant="brand" size="dense" onClick={retryStart} className="mt-1 h-9 rounded-lg px-4 text-body font-semibold">
+              Try again
+            </Button>
+          </>
+        ) : (
+          <>
+            <Loader2 size={22} className="animate-spin text-accent" />
+            <p className="m-0 text-body text-ink-3">Starting the conversation…</p>
+            <p className="m-0 text-xs text-ink-4">The assistant writes its first message, which can take a few seconds.</p>
+          </>
+        )}
       </div>
     );
   }
 
+  // Offer starting points until the user has said something.
+  const showStarters = !messages.some((m) => m.role === 'user') && !isSending && !isStreaming;
+
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col rounded-lg border bg-background">
+    <div className="flex h-[calc(100vh-10rem)] min-h-[420px] flex-col overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
       <MessageList
         messages={messages}
         isLoading={isSending && !isStreaming}
@@ -124,6 +163,23 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
         isApproving={approveProposal.isPending}
         onQuickReply={(replyText) => { void handleSend(replyText); }}
       />
+      {showStarters && (
+        <div className="px-4 pb-3">
+          <div className="mb-2 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Try one of these</div>
+          <div className="flex flex-wrap gap-2">
+            {STARTERS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => void handleSend(s)}
+                className="rounded-full border border-line bg-bg-panel px-3.5 py-1.5 text-left text-xs text-ink-2 transition-colors hover:border-accent-line hover:bg-accent-tint hover:text-accent-fg"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <ChatInput
         onSend={handleSend}
         disabled={isSending || isStreaming || approveProposal.isPending}

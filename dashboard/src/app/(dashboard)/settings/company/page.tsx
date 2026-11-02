@@ -84,8 +84,8 @@ export default function CompanyProfilePage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Company Profile</h1>
-          <p className="text-muted-foreground text-sm mt-1">
+          <h1 className="m-0 font-display text-title font-medium text-ink">Company Profile</h1>
+          <p className="mb-0 mt-1 text-body text-ink-3">
             Set up your company identity and sales positioning. Agents use this to personalize outreach.
           </p>
         </div>
@@ -99,13 +99,13 @@ export default function CompanyProfilePage() {
 
       {/* Card 1: Company Identity */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="flex items-center gap-2">
             <Building2 className="w-4 h-4" /> Company Identity
           </CardTitle>
           <CardDescription>Basic information about your company</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="companyName">Company Name *</Label>
@@ -140,7 +140,7 @@ export default function CompanyProfilePage() {
                 id="companySize"
                 value={form.companySize ?? ''}
                 onChange={e => updateField('companySize', e.target.value)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full"
               >
                 <option value="">Select size</option>
                 {COMPANY_SIZES.map(s => <option key={s} value={s}>{s} employees</option>)}
@@ -171,13 +171,13 @@ export default function CompanyProfilePage() {
 
       {/* Card 2: Sales Positioning */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="flex items-center gap-2">
             <TrendingUp className="w-4 h-4" /> Sales Positioning
           </CardTitle>
           <CardDescription>How you present your company to prospects</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="pt-5 space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="valueProposition">Value Proposition *</Label>
             <Input
@@ -187,7 +187,7 @@ export default function CompanyProfilePage() {
               placeholder="One-line description of the value you deliver"
               maxLength={500}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-ink-3">
               {(form.valueProposition ?? '').length}/500
             </p>
           </div>
@@ -232,13 +232,13 @@ export default function CompanyProfilePage() {
 
       {/* Card 3: ICP */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="flex items-center gap-2">
             <Target className="w-4 h-4" /> Ideal Customer Profile (ICP)
           </CardTitle>
           <CardDescription>Define who your best customers are — agents use this to find the right prospects</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="pt-5 space-y-4">
           <div className="space-y-1.5">
             <Label>Target Industries</Label>
             <Input
@@ -310,13 +310,13 @@ export default function CompanyProfilePage() {
 
       {/* Card 4: Social Proof */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="flex items-center gap-2">
             <Award className="w-4 h-4" /> Social Proof
           </CardTitle>
           <CardDescription>Case studies, notable clients, and credibility signals</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           <div className="space-y-1.5">
             <Label htmlFor="socialProof">Notable Clients & Case Studies</Label>
             <Textarea
@@ -332,13 +332,13 @@ export default function CompanyProfilePage() {
 
       {/* Card 5: Outreach Defaults */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="flex items-center gap-2">
             <Send className="w-4 h-4" /> Outreach Defaults
           </CardTitle>
           <CardDescription>Default sender identity and call-to-action for emails</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="senderName">Default Sender Name</Label>

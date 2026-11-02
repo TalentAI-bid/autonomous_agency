@@ -31,7 +31,7 @@ export function MessageList({
   }, [messages.length, isLoading, streamingText]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6">
+    <div className="scroll-thin flex-1 overflow-y-auto px-5 py-6">
       {messages.map((msg) => (
         <ChatBubble
           key={msg.id}

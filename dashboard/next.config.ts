@@ -10,6 +10,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Pages that moved; keep old bookmarks working.
+  async redirects() {
+    return [
+      { source: '/queue', destination: '/approvals', permanent: true },
+      { source: '/linkedin-extension', destination: '/settings/linkedin-extension', permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

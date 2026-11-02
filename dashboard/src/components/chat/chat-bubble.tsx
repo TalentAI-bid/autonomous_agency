@@ -2,11 +2,18 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { FileText } from 'lucide-react';
+import { Check, FileText, Sparkles } from 'lucide-react';
 import { PipelineProposalCard } from './pipeline-proposal-card';
 import type { ChatMessage, PipelineProposalData, QuickReply } from '@/types/chat';
+
+export function AiAvatar() {
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-weak text-accent">
+      <Sparkles size={14} />
+    </span>
+  );
+}
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -42,23 +49,18 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
   };
 
   return (
-    <div className={cn('flex items-start gap-3 mb-4', isUser && 'flex-row-reverse')}>
-      {/* Avatar */}
-      {!isUser && (
-        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium shrink-0">
-          AI
-        </div>
-      )}
+    <div className={cn('mb-5 flex items-start gap-3', isUser && 'flex-row-reverse')}>
+      {!isUser && <AiAvatar />}
 
-      <div className={cn('max-w-[80%] space-y-2', isUser && 'items-end')}>
-        {/* File badges */}
+      <div className={cn('min-w-0 max-w-[84%] space-y-2', isUser && 'flex flex-col items-end')}>
+        {/* Attached files */}
         {files && files.length > 0 && (
           <div className={cn('flex flex-wrap gap-1.5', isUser && 'justify-end')}>
             {files.map((f, i) => (
-              <Badge key={i} variant="secondary" className="gap-1 text-2xs">
-                <FileText className="w-3 h-3" />
+              <span key={i} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg-panel px-2 py-1 text-xs text-ink-2">
+                <FileText size={12} className="text-ink-3" />
                 {f.fileName}
-              </Badge>
+              </span>
             ))}
           </div>
         )}
@@ -67,16 +69,12 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
         {(displayContent || isStreaming) && (
           <div
             className={cn(
-              'rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap',
-              isUser
-                ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                : 'bg-muted rounded-tl-sm',
+              'whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-body leading-relaxed',
+              isUser ? 'rounded-tr-sm bg-accent text-white' : 'rounded-tl-sm bg-bg-soft text-ink',
             )}
           >
             {displayContent}
-            {isStreaming && (
-              <span className="inline-block w-1.5 h-4 ml-0.5 bg-foreground/70 animate-pulse align-text-bottom" />
-            )}
+            {isStreaming && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-ink-3 align-text-bottom" />}
           </div>
         )}
 
@@ -90,15 +88,11 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
                 <Button
                   key={chip.id}
                   type="button"
-                  size="sm"
-                  variant={chip.variant === 'primary' ? 'default' : 'secondary'}
+                  size="dense"
+                  variant={chip.variant === 'primary' ? 'brand' : 'panel'}
                   disabled={anyClicked}
                   onClick={() => handleChipClick(chip)}
-                  className={cn(
-                    'h-7 px-3 text-xs transition-opacity',
-                    anyClicked && !isClicked && 'opacity-50',
-                    isClicked && 'ring-1 ring-primary',
-                  )}
+                  className={cn('h-8 rounded-full px-3.5 text-xs font-medium', anyClicked && !isClicked && 'opacity-50')}
                 >
                   {chip.label}
                 </Button>
@@ -117,11 +111,10 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
           />
         )}
 
-        {/* Pipeline approved badge */}
         {message.type === 'pipeline_approved' && (
-          <Badge variant="success" className="gap-1">
-            Pipeline launched successfully
-          </Badge>
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-up/10 px-2.5 py-1 text-xs font-medium text-up">
+            <Check size={12} strokeWidth={2.5} /> Pipeline launched successfully
+          </span>
         )}
       </div>
     </div>

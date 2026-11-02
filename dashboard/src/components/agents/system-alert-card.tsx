@@ -53,7 +53,7 @@ export function SystemAlertCard({ content, masterAgentId }: SystemAlertCardProps
   const SeverityIcon = style.icon;
 
   return (
-    <div className={cn('border-l-2 rounded-r-md bg-muted/30 p-3', style.border)}>
+    <div className={cn('rounded-card border border-l-2 border-line bg-bg-sub p-3', style.border)}>
       <div className="flex items-start gap-2">
         <SeverityIcon className={cn('w-4 h-4 mt-0.5 shrink-0', style.iconColor)} />
         <div className="flex-1 min-w-0 space-y-1.5">
@@ -132,10 +132,10 @@ function SearchQualityLowAlert({
         Search quality {outcome === 'empty' ? '— 0 results' : `— only ${totalFound} companies`}
       </p>
       {content.message && (
-        <p className="text-xs text-muted-foreground">{String(content.message)}</p>
+        <p className="text-xs text-ink-3">{String(content.message)}</p>
       )}
       {jobTitle && (
-        <p className="text-2xs text-muted-foreground/80">
+        <p className="text-2xs text-ink-4">
           Searched: <code className="text-2xs">{jobTitle}</code>
         </p>
       )}
@@ -144,7 +144,7 @@ function SearchQualityLowAlert({
           {perLocation.map((p) => (
             <div
               key={p.location}
-              className="flex items-center justify-between text-2xs font-mono text-muted-foreground"
+              className="flex items-center justify-between text-2xs font-mono text-ink-3"
             >
               <span className="truncate">{p.location}</span>
               <span
@@ -186,7 +186,7 @@ function SearchQualityLowAlert({
         disabled={disabled}
         className="mt-1.5 h-7 px-2 text-xs"
       />
-      <p className="text-2xs text-muted-foreground/70 italic">
+      <p className="text-2xs text-ink-4 italic">
         Or type your own broader term in the chat below.
       </p>
     </>
@@ -203,7 +203,7 @@ function BroadenAppliedAlert({ content }: { content: Record<string, unknown> }) 
         <Search className="w-3 h-3" />
         {originalTerm ? 'Auto-broadened search' : 'Broader search applied'}
       </p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-ink-3">
         {originalTerm ? (
           <>
             <code className="text-xs">{originalTerm}</code> →{' '}
@@ -222,7 +222,7 @@ function BroadenAutoFailedAlert({ content }: { content: Record<string, unknown> 
   return (
     <>
       <p className="text-xs font-medium">Couldn't auto-broaden</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-ink-3">
         {content.message ? String(content.message) : 'No suggestion was generated — type a broader term in the chat.'}
       </p>
     </>
@@ -234,7 +234,7 @@ function SearchChoiceContinueAlert({ content }: { content: Record<string, unknow
     <>
       <p className="text-xs font-medium">Continuing with current results</p>
       {content.message && (
-        <p className="text-xs text-muted-foreground">{String(content.message)}</p>
+        <p className="text-xs text-ink-3">{String(content.message)}</p>
       )}
     </>
   );
@@ -271,7 +271,7 @@ function DataSourcesAlert({ content }: { content: Record<string, unknown> }) {
           Quality: {quality}
         </Badge>
       )}
-      {userNotes && <p className="text-xs text-muted-foreground">{userNotes}</p>}
+      {userNotes && <p className="text-xs text-ink-3">{userNotes}</p>}
     </>
   );
 }
@@ -287,7 +287,7 @@ function ExtensionTasksAlert({ content }: { content: Record<string, unknown> }) 
         Extension Tasks Enqueued
       </p>
       {count != null && (
-        <p className="text-xs text-muted-foreground">{count} tasks queued for processing</p>
+        <p className="text-xs text-ink-3">{count} tasks queued for processing</p>
       )}
       {companies?.length && (
         <div className="flex flex-wrap gap-1">
@@ -299,7 +299,7 @@ function ExtensionTasksAlert({ content }: { content: Record<string, unknown> }) 
           )}
         </div>
       )}
-      {content.message && <p className="text-xs text-muted-foreground">{String(content.message)}</p>}
+      {content.message && <p className="text-xs text-ink-3">{String(content.message)}</p>}
     </>
   );
 }
@@ -311,11 +311,11 @@ function CrawlerSkippedAlert({ content }: { content: Record<string, unknown> }) 
         <SkipForward className="w-3 h-3" />
         Crawler Discovery Skipped
       </p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-ink-3">
         {content.message ? String(content.message) : 'Web crawling was skipped for this region. Falling back to alternative discovery method.'}
       </p>
       {content.reason && (
-        <p className="text-2xs text-muted-foreground/70 italic">{String(content.reason)}</p>
+        <p className="text-2xs text-ink-4 italic">{String(content.reason)}</p>
       )}
     </>
   );
@@ -325,7 +325,7 @@ function ServiceUnavailableAlert({ content }: { content: Record<string, unknown>
   return (
     <>
       <p className="text-xs font-medium">Service Unavailable</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-ink-3">
         {content.message ? String(content.message) : 'A required service is temporarily unavailable.'}
       </p>
       {content.service && (
@@ -342,9 +342,9 @@ function GenericAlert({ content }: { content: Record<string, unknown> }) {
   return (
     <>
       {action && <p className="text-xs font-medium capitalize">{action}</p>}
-      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+      {msg && <p className="text-xs text-ink-3">{msg}</p>}
       {!msg && !action && (
-        <pre className="text-2xs text-muted-foreground overflow-x-auto whitespace-pre-wrap">
+        <pre className="text-2xs text-ink-3 overflow-x-auto whitespace-pre-wrap">
           {JSON.stringify(content, null, 2)}
         </pre>
       )}

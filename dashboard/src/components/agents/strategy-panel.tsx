@@ -1,21 +1,21 @@
 'use client';
 
-import { useLatestStrategy, useTriggerStrategy } from '@/hooks/use-strategy';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { formatDate } from '@/lib/utils';
-import { Brain, Play, AlertCircle, CheckCircle2, Clock, Loader2 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+import { useLatestStrategy, useTriggerStrategy } from '@/hooks/use-strategy';
+import { Button } from '@/components/ui/button';
+import { cn, formatDate } from '@/lib/utils';
+import { Brain, Play, AlertCircle, CheckCircle2, Clock, Loader2, History } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
-const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
-  pending: { icon: Clock, color: 'text-muted-foreground', label: 'Pending' },
-  analyzing: { icon: Loader2, color: 'text-info', label: 'Analyzing' },
-  executing: { icon: Loader2, color: 'text-warn-fg', label: 'Executing' },
-  completed: { icon: CheckCircle2, color: 'text-up', label: 'Completed' },
-  failed: { icon: AlertCircle, color: 'text-destructive', label: 'Failed' },
+const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; tone: string; spin?: boolean; label: string }> = {
+  pending: { icon: Clock, tone: 'bg-bg-sub text-ink-3', label: 'Pending' },
+  analyzing: { icon: Loader2, tone: 'bg-info/10 text-info', spin: true, label: 'Analyzing' },
+  executing: { icon: Loader2, tone: 'bg-warn/15 text-warn-fg', spin: true, label: 'Executing' },
+  completed: { icon: CheckCircle2, tone: 'bg-up/10 text-up', label: 'Completed' },
+  failed: { icon: AlertCircle, tone: 'bg-down/10 text-down', label: 'Failed' },
 };
+
+const label = 'mb-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4';
 
 interface StrategyPanelProps {
   masterAgentId: string;
@@ -42,103 +42,91 @@ export function StrategyPanel({ masterAgentId }: StrategyPanelProps) {
   const plan = (strategy?.actionPlan as any)?.plan as string[] | undefined;
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Brain className="w-4 h-4 text-a-master" />
-              Daily Strategy
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <Link
-                href={`/agents/${masterAgentId}/strategy`}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                View History
-              </Link>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleTrigger}
-                disabled={triggerStrategy.isPending}
-                className="h-7 text-xs"
-              >
-                <Play className="w-3 h-3 mr-1" />
-                Run Now
-              </Button>
-            </div>
+    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+        <span className="grid size-7 place-items-center rounded-row bg-accent-weak text-accent-fg">
+          <Brain size={14} />
+        </span>
+        <div className="mr-auto min-w-0">
+          <h2 className="m-0 text-body font-semibold text-ink">Daily strategy</h2>
+          <p className="mb-0 mt-0.5 text-xs text-ink-3">Reviews results every day at 6 AM UTC and adjusts the plan.</p>
+        </div>
+        <Link href={`/agents/${masterAgentId}/strategy`} className="inline-flex items-center gap-1 text-xs font-medium text-accent-fg hover:underline">
+          <History size={12} /> View history
+        </Link>
+        <Button type="button" variant="panel" size="dense" onClick={handleTrigger} disabled={triggerStrategy.isPending} className="h-8 rounded-lg">
+          {triggerStrategy.isPending ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+          Run now
+        </Button>
+      </header>
+
+      <div className="p-5">
+        {isLoading ? (
+          <p className="m-0 py-6 text-center text-body text-ink-3">Loading…</p>
+        ) : !strategy ? (
+          <div className="py-8 text-center">
+            <p className="m-0 text-body font-medium text-ink">No strategy runs yet</p>
+            <p className="mb-0 mt-1 text-xs text-ink-3">It runs daily at 6 AM UTC, or you can trigger it manually.</p>
           </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground text-center py-6">Loading...</p>
-          ) : !strategy ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              No strategy runs yet. The strategy agent runs daily at 6 AM UTC, or trigger manually.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                {statusInfo && (
-                  <Badge variant="outline" className="text-xs flex items-center gap-1">
-                    <statusInfo.icon className={`w-3 h-3 ${statusInfo.color}`} />
-                    {statusInfo.label}
-                  </Badge>
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {strategy.strategyDate} {strategy.executedAt && `- Executed ${formatDate(strategy.executedAt)}`}
+        ) : (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-3">
+              {statusInfo && (
+                <span className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium', statusInfo.tone)}>
+                  <statusInfo.icon size={12} className={statusInfo.spin ? 'animate-spin' : undefined} />
+                  {statusInfo.label}
                 </span>
-              </div>
-
-              {decisions?.overall_assessment && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Assessment</p>
-                  <p className="text-sm">{decisions.overall_assessment}</p>
-                </div>
               )}
-
-              {(decisions?.search_query_changes?.add?.length ?? 0) > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">New Search Queries</p>
-                  <div className="flex flex-wrap gap-1">
-                    {decisions!.search_query_changes.add.map((q: string, i: number) => (
-                      <Badge key={i} variant="secondary" className="text-xs">{q}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {decisions?.email_strategy?.angle_change && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Email Strategy</p>
-                  <p className="text-sm">{decisions.email_strategy.angle_change}</p>
-                </div>
-              )}
-
-              {plan && plan.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">Today&apos;s Plan</p>
-                  <ul className="space-y-1">
-                    {plan.map((item, i) => (
-                      <li key={i} className="text-sm flex items-start gap-2">
-                        <span className="text-muted-foreground shrink-0">{i + 1}.</span>
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {strategy.error && (
-                <div className="text-sm text-destructive bg-destructive/10 p-2 rounded">
-                  {strategy.error}
-                </div>
-              )}
+              <span className="text-xs text-ink-3">
+                {strategy.strategyDate} {strategy.executedAt && `· executed ${formatDate(strategy.executedAt)}`}
+              </span>
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+
+            {decisions?.overall_assessment && (
+              <div>
+                <div className={label}>Assessment</div>
+                <p className="m-0 text-body leading-relaxed text-ink-2">{decisions.overall_assessment}</p>
+              </div>
+            )}
+
+            {(decisions?.search_query_changes?.add?.length ?? 0) > 0 && (
+              <div>
+                <div className={label}>New search queries</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {decisions!.search_query_changes.add.map((q: string, i: number) => (
+                    <span key={i} className="rounded-tag bg-accent-weak px-2 py-1 text-xs text-accent-fg">
+                      {q}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {decisions?.email_strategy?.angle_change && (
+              <div>
+                <div className={label}>Email strategy</div>
+                <p className="m-0 text-body leading-relaxed text-ink-2">{decisions.email_strategy.angle_change}</p>
+              </div>
+            )}
+
+            {plan && plan.length > 0 && (
+              <div>
+                <div className={label}>Today&apos;s plan</div>
+                <ol className="m-0 list-none space-y-2 p-0">
+                  {plan.map((item, i) => (
+                    <li key={i} className="flex items-start gap-2.5 text-body text-ink-2">
+                      <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-bg-sub font-mono text-2xs text-ink-3">{i + 1}</span>
+                      {item}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {strategy.error && <div className="rounded-card border border-down/30 bg-down/5 px-3 py-2 text-body text-down">{strategy.error}</div>}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

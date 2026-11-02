@@ -31,7 +31,7 @@ function NavLink({ href, label, icon, count, meta, active }: NavItem & { active:
     <Link
       href={href}
       className={cn(
-        'flex h-8 items-center gap-2.5 rounded-lg border px-2.5 text-body transition-colors',
+        'flex h-8 items-center gap-2.5 rounded-card border px-2.5 text-body transition-colors',
         active
           ? 'border-accent-mid bg-accent-weak font-medium text-accent-fg'
           : 'border-transparent text-ink-2 hover:bg-bg-soft hover:text-ink',
@@ -107,13 +107,13 @@ export function Sidebar() {
 
   const groups: NavGroup[] = [
     ...(!getStarted.isLoading && !getStarted.allDone
-      ? [{ title: 'Start', items: [{ href: '/get-started', label: 'Get started', icon: 'check' as IconName, meta: `${getStarted.doneCount} of ${getStarted.total}` }] }]
+      ? [{ title: 'Start', items: [{ href: '/get-started', label: 'Get started', icon: 'circleCheck' as IconName, meta: `${getStarted.doneCount} of ${getStarted.total}` }] }]
       : []),
     {
       title: 'Work',
       items: [
-        { href: '/dashboard', label: 'Home', icon: 'dash' },
-        { href: '/queue', label: 'Daily Queue', icon: 'target' },
+        { href: '/dashboard', label: 'Home', icon: 'home' },
+        { href: '/approvals', label: 'Approvals', icon: 'squareCheck' },
         { href: '/mailbox', label: 'Inbox', icon: 'mail' },
         { href: '/schedule', label: 'Meetings', icon: 'calendar' },
       ],
@@ -137,11 +137,6 @@ export function Sidebar() {
     {
       title: 'Account',
       items: [
-        { href: '/settings/company', label: 'Company Profile', icon: 'flag' },
-        { href: '/settings/products', label: 'Products', icon: 'zap' },
-        { href: '/settings/email', label: 'Email Accounts', icon: 'mail' },
-        { href: '/settings/messaging', label: 'Messaging', icon: 'msg' },
-        { href: '/linkedin-extension', label: 'LinkedIn Extension', icon: 'globe' },
         { href: '/settings', label: 'Settings', icon: 'cog' },
       ],
     },

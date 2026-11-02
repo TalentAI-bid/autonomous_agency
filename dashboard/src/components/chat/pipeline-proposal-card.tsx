@@ -1,9 +1,7 @@
 'use client';
 
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { CheckCircle, Clock } from 'lucide-react';
+import { Check, Clock } from 'lucide-react';
 import { PipelineStepsCard } from '@/components/agents/pipeline-steps-card';
 import type { PipelineProposalData } from '@/types/chat';
 
@@ -14,76 +12,64 @@ interface PipelineProposalCardProps {
   isApproving: boolean;
 }
 
-export function PipelineProposalCard({
-  proposal,
-  onApprove,
-  onRequestChanges,
-  isApproving,
-}: PipelineProposalCardProps) {
+const Chip = ({ children }: { children: React.ReactNode }) => (
+  <span className="rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2">{children}</span>
+);
+
+export function PipelineProposalCard({ proposal, onApprove, onRequestChanges, isApproving }: PipelineProposalCardProps) {
   const config = proposal.config as Record<string, unknown>;
 
   return (
-    <Card className="mt-3 border-primary/20">
-      <CardContent className="p-4 space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold">{proposal.name}</h3>
-          <p className="text-xs text-muted-foreground mt-1">{proposal.summary}</p>
-        </div>
+    <section className="mt-3 w-full rounded-2xl border border-accent-line bg-bg-panel p-5 shadow-sm">
+      <div className="text-3xs font-medium uppercase tracking-[0.09em] text-accent">Proposed agent</div>
+      <h3 className="mb-0 mt-1.5 font-display text-[22px] font-normal leading-tight tracking-[-0.01em] text-ink">{proposal.name}</h3>
+      <p className="mb-0 mt-2 text-body leading-relaxed text-ink-3">{proposal.summary}</p>
 
-        {/* Dynamic Pipeline Steps */}
-        {proposal.pipelineSteps && proposal.pipelineSteps.length > 0 && (
+      {proposal.pipelineSteps && proposal.pipelineSteps.length > 0 && (
+        <div className="mt-4">
           <PipelineStepsCard steps={proposal.pipelineSteps} />
-        )}
-
-        {/* Config Details */}
-        <div className="flex flex-wrap gap-1.5">
-          {!!config.targetRole && (
-            <Badge variant="secondary" className="text-2xs">{'Role: ' + String(config.targetRole)}</Badge>
-          )}
-          {Array.isArray(config.skills) && config.skills.length > 0 && (
-            <Badge variant="secondary" className="text-2xs">{'Skills: ' + (config.skills as string[]).join(', ')}</Badge>
-          )}
-          {Array.isArray(config.locations) && config.locations.length > 0 && (
-            <Badge variant="secondary" className="text-2xs">{'Locations: ' + (config.locations as string[]).join(', ')}</Badge>
-          )}
-          {config.scoringThreshold !== undefined && (
-            <Badge variant="secondary" className="text-2xs">{'Threshold: ' + String(config.scoringThreshold)}</Badge>
-          )}
-          {!!config.emailAccountId && (
-            <Badge variant="secondary" className="text-2xs">Sending account selected</Badge>
-          )}
         </div>
+      )}
 
-        {/* Email Rules */}
-        {Array.isArray(config.emailRules) && (config.emailRules as string[]).length > 0 && (
-          <div className="space-y-1">
-            <p className="text-2xs font-medium text-muted-foreground uppercase tracking-wide">Email Rules</p>
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        {!!config.targetRole && <Chip>{'Role: ' + String(config.targetRole)}</Chip>}
+        {Array.isArray(config.skills) && config.skills.length > 0 && <Chip>{'Skills: ' + (config.skills as string[]).join(', ')}</Chip>}
+        {Array.isArray(config.locations) && config.locations.length > 0 && (
+          <Chip>{'Locations: ' + (config.locations as string[]).join(', ')}</Chip>
+        )}
+        {config.scoringThreshold !== undefined && <Chip>{'Score bar: ' + String(config.scoringThreshold)}</Chip>}
+        {!!config.emailAccountId && <Chip>Sending mailbox selected</Chip>}
+      </div>
+
+      {Array.isArray(config.emailRules) && (config.emailRules as string[]).length > 0 && (
+        <div className="mt-4">
+          <div className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Email rules</div>
+          <ul className="m-0 mt-1.5 list-none space-y-1 p-0">
             {(config.emailRules as string[]).map((rule, i) => (
-              <div key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <span className="text-primary shrink-0">*</span>
+              <li key={i} className="flex items-start gap-2 text-xs leading-relaxed text-ink-3">
+                <span className="mt-1.5 size-1 shrink-0 rounded-full bg-accent" />
                 <span>{rule}</span>
-              </div>
+              </li>
             ))}
-          </div>
-        )}
-
-        {/* Duration */}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock className="w-3.5 h-3.5" />
-          <span>Estimated: {proposal.estimatedDuration}</span>
+          </ul>
         </div>
+      )}
 
-        {/* Actions */}
-        <div className="flex gap-2 pt-1">
-          <Button size="sm" onClick={onApprove} disabled={isApproving} className="flex-1">
-            <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
-            {isApproving ? 'Launching...' : 'Approve & Launch'}
-          </Button>
-          <Button size="sm" variant="outline" onClick={onRequestChanges} className="flex-1">
-            Request Changes
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      <div className="mt-4 flex items-center gap-1.5 text-xs text-ink-3">
+        <Clock size={13} />
+        <span>Estimated: {proposal.estimatedDuration}</span>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+        <Button type="button" variant="brand" size="dense" onClick={onApprove} disabled={isApproving} className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold">
+          <Check size={14} strokeWidth={2.5} />
+          {isApproving ? 'Launching…' : 'Approve & launch'}
+        </Button>
+        <Button type="button" variant="panel" size="dense" onClick={onRequestChanges} className="h-9 rounded-lg px-4 text-body font-medium">
+          Request changes
+        </Button>
+        <span className="text-xs text-ink-3">Nothing sends until you approve drafts in Approvals.</span>
+      </div>
+    </section>
   );
 }

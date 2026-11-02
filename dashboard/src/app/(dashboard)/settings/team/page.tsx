@@ -113,19 +113,19 @@ export default function TeamSettingsPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h1 className="m-0 font-display text-title font-medium text-ink flex items-center gap-2">
           <Users className="w-5 h-5" />
           Team
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">
+        <p className="mb-0 mt-1 text-body text-ink-3">
           Manage who has access to <span className="font-medium">{tenant?.name ?? 'this workspace'}</span>
         </p>
       </div>
 
       {canManage && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+          <CardHeader className="border-b border-line px-5 py-3.5">
+            <CardTitle className="text-body flex items-center gap-2">
               <Mail className="w-4 h-4" />
               Invite an employee
             </CardTitle>
@@ -133,7 +133,7 @@ export default function TeamSettingsPage() {
               Send an email invitation. The invite link is also copied to your clipboard.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-5">
             <form onSubmit={handleInvite} className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
               <div className="flex-1 w-full space-y-1.5">
                 <Label htmlFor="invite-email">Email</Label>
@@ -168,17 +168,17 @@ export default function TeamSettingsPage() {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Members</CardTitle>
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="text-body">Members</CardTitle>
           <CardDescription>
             People who can sign in to this workspace.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           {membersQuery.isLoading ? (
             <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
           ) : members.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No members yet.</p>
+            <p className="text-sm text-ink-3">No members yet.</p>
           ) : (
             <div className="divide-y divide-border">
               {members.map((m) => {
@@ -191,8 +191,8 @@ export default function TeamSettingsPage() {
                         {m.name || m.email}
                         {isMe && <Badge variant="outline" className="text-xs">you</Badge>}
                       </div>
-                      <div className="text-xs text-muted-foreground truncate">{m.email}</div>
-                      <div className="text-xs text-muted-foreground">Joined {formatDate(m.joinedAt)}</div>
+                      <div className="text-xs text-ink-3 truncate">{m.email}</div>
+                      <div className="text-xs text-ink-3">Joined {formatDate(m.joinedAt)}</div>
                     </div>
                     <div className="flex items-center gap-2">
                       {canManage ? (
@@ -231,24 +231,24 @@ export default function TeamSettingsPage() {
 
       {canManage && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pending invitations</CardTitle>
+          <CardHeader className="border-b border-line px-5 py-3.5">
+            <CardTitle className="text-body">Pending invitations</CardTitle>
             <CardDescription>
               Invites that haven&apos;t been accepted yet.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-5">
             {invitesQuery.isLoading ? (
               <Skeleton className="h-10" />
             ) : invitations.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending invitations.</p>
+              <p className="text-sm text-ink-3">No pending invitations.</p>
             ) : (
               <div className="divide-y divide-border">
                 {invitations.map((inv) => (
                   <div key={inv.id} className="flex items-center justify-between py-3 gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium truncate">{inv.email}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-ink-3">
                         <Badge variant={roleBadgeVariant(inv.role)} className="mr-2">{inv.role}</Badge>
                         Sent {formatDate(inv.createdAt)} · expires {formatDate(inv.expiresAt)}
                       </div>

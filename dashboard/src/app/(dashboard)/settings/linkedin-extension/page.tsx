@@ -169,18 +169,18 @@ export default function LinkedInExtensionPage() {
           <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight leading-[1.05]">
             Your agents, on every profile.
           </h1>
-          <p className="text-base text-muted-foreground max-w-xl">
+          <p className="text-base text-ink-3 max-w-xl">
             Capture, score, enrich and draft without leaving the network tab.
             The extension streams profile context into your agents and lays their
             findings back on the page.
           </p>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-xs text-ink-3">
             <span className="inline-flex items-center gap-1.5">
               <Chrome className="w-3.5 h-3.5" /> Chrome
             </span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-ink-4">·</span>
             <span>Edge</span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-ink-4">·</span>
             <span>Firefox</span>
           </div>
 
@@ -227,7 +227,7 @@ export default function LinkedInExtensionPage() {
             </Button>
           </div>
 
-          <div className="flex items-center gap-3 pt-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 pt-1 text-xs text-ink-3">
             {statusQ.data?.connected && (
               <span className="inline-flex items-center gap-1.5 text-up">
                 <PlugZap className="w-3.5 h-3.5" /> Extension connected
@@ -245,13 +245,13 @@ export default function LinkedInExtensionPage() {
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>
                 No release has been cut yet. Run{' '}
-                <code className="font-mono bg-muted px-1 rounded">extension/scripts/release.sh</code>{' '}
+                <code className="font-mono bg-bg-soft px-1 rounded">extension/scripts/release.sh</code>{' '}
                 on the server to publish one.
               </span>
             </div>
           )}
 
-          <div className="flex items-center gap-4 pt-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 pt-2 text-xs text-ink-3">
             <span className="inline-flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5" /> Signed · SHA256 verified
             </span>
@@ -273,14 +273,14 @@ export default function LinkedInExtensionPage() {
       <section>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {FEATURES.map(({ icon: Icon, title, body }) => (
-            <Card key={title} className="border-border/60">
+            <Card key={title} className="border-line">
               <CardHeader className="pb-2">
                 <div className="w-8 h-8 rounded-md bg-primary/10 text-primary flex items-center justify-center mb-2">
                   <Icon className="w-4 h-4" />
                 </div>
                 <CardTitle className="text-sm font-medium">{title}</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-5">
                 <CardDescription className="text-xs leading-relaxed">
                   {body}
                 </CardDescription>
@@ -292,7 +292,7 @@ export default function LinkedInExtensionPage() {
 
       {/* Install / Shortcuts / What's new tabs */}
       <section>
-        <div className="flex items-center gap-1 border-b border-border mb-6">
+        <div className="flex items-center gap-1 border-b border-line mb-6">
           <TabButton active={tab === 'install'} onClick={() => setTab('install')} icon={Download} label="Install" />
           <TabButton active={tab === 'shortcuts'} onClick={() => setTab('shortcuts')} icon={Keyboard} label="Shortcuts" />
           <TabButton active={tab === 'whatsnew'} onClick={() => setTab('whatsnew')} icon={History} label="What's new" />
@@ -323,8 +323,8 @@ function TabButton({
       onClick={onClick}
       className={`relative flex items-center gap-1.5 px-3 py-2.5 text-sm -mb-px border-b-2 transition-colors ${
         active
-          ? 'border-primary text-foreground font-medium'
-          : 'border-transparent text-muted-foreground hover:text-foreground'
+          ? 'border-primary text-ink font-medium'
+          : 'border-transparent text-ink-3 hover:text-ink'
       }`}
     >
       <Icon className="w-3.5 h-3.5" />
@@ -339,22 +339,22 @@ function InstallPanel() {
       {INSTALL_STEPS.map((step, i) => (
         <div
           key={step.title}
-          className="flex gap-3 rounded-lg border border-border p-4 bg-card/40"
+          className="flex gap-3 rounded-lg border border-line p-4 bg-card/40"
         >
           <div className="w-7 h-7 shrink-0 rounded-md bg-primary/10 text-primary flex items-center justify-center text-xs font-mono">
             {i + 1}
           </div>
           <div className="min-w-0">
             <div className="text-sm font-medium">{step.title}</div>
-            <div className="text-xs text-muted-foreground mt-1 font-mono">
+            <div className="text-xs text-ink-3 mt-1 font-mono">
               {step.detail}
             </div>
           </div>
         </div>
       ))}
-      <div className="md:col-span-2 rounded-lg border border-border bg-muted/30 p-4 flex items-start gap-3">
+      <div className="md:col-span-2 rounded-lg border border-line bg-bg-sub p-4 flex items-start gap-3">
         <ShieldCheck className="w-4 h-4 mt-0.5 text-up shrink-0" />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-ink-3">
           The package is signed and the SHA256 is published next to the download link.
           Your browser sessions stay local — the extension only ever forwards results to your workspace.
         </p>
@@ -365,7 +365,7 @@ function InstallPanel() {
 
 function ShortcutsPanel() {
   return (
-    <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+    <div className="divide-y divide-border rounded-lg border border-line overflow-hidden">
       {SHORTCUTS.map(({ combo, action }) => (
         <div
           key={action}
@@ -376,7 +376,7 @@ function ShortcutsPanel() {
             {combo.map((k) => (
               <kbd
                 key={k}
-                className="px-2 py-0.5 rounded-md border border-border bg-muted/40 text-xs font-mono tabular-nums"
+                className="px-2 py-0.5 rounded-md border border-line bg-bg-sub text-xs font-mono tabular-nums"
               >
                 {k}
               </kbd>
@@ -384,7 +384,7 @@ function ShortcutsPanel() {
           </div>
         </div>
       ))}
-      <div className="px-4 py-2.5 text-xs text-muted-foreground bg-muted/20">
+      <div className="px-4 py-2.5 text-xs text-ink-3 bg-bg-sub">
         On Windows/Linux, ⌥ maps to <kbd className="px-1 font-mono">Alt</kbd>.
       </div>
     </div>
@@ -397,7 +397,7 @@ function WhatsNewPanel() {
       {CHANGELOG.map((entry) => (
         <div
           key={entry.version}
-          className="grid grid-cols-[auto_1fr] gap-4 rounded-lg border border-border p-4"
+          className="grid grid-cols-[auto_1fr] gap-4 rounded-lg border border-line p-4"
         >
           <div className="flex flex-col items-start gap-1.5 min-w-[90px]">
             <div className="text-sm font-mono">{entry.version}</div>
@@ -407,9 +407,9 @@ function WhatsNewPanel() {
             >
               {entry.kind}
             </Badge>
-            <div className="text-xs text-muted-foreground">{entry.date}</div>
+            <div className="text-xs text-ink-3">{entry.date}</div>
           </div>
-          <ul className="space-y-1.5 text-sm text-muted-foreground">
+          <ul className="space-y-1.5 text-sm text-ink-3">
             {entry.notes.map((n) => (
               <li key={n} className="flex gap-2">
                 <Check className="w-3.5 h-3.5 text-up mt-1 shrink-0" />
@@ -421,7 +421,7 @@ function WhatsNewPanel() {
       ))}
       <button
         type="button"
-        className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+        className="text-xs text-ink-3 hover:text-ink inline-flex items-center gap-1 transition-colors"
       >
         Full changelog
         <ArrowRight className="w-3 h-3" />
@@ -432,19 +432,19 @@ function WhatsNewPanel() {
 
 function ProfilePreview() {
   return (
-    <div className="relative rounded-xl border border-border bg-card/50 overflow-hidden">
+    <div className="relative rounded-xl border border-line bg-card/50 overflow-hidden">
       {/* Profile header */}
-      <div className="p-5 border-b border-border">
+      <div className="p-5 border-b border-line">
         <div className="flex items-start gap-3">
           <div className="w-14 h-14 rounded-full bg-gradient-to-br from-a-master to-info flex items-center justify-center text-white font-semibold text-lg shrink-0">
             MO
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold">Maya Okafor</div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-ink-3">
               VP of Revenue Operations · Atlas BioOps
             </div>
-            <div className="text-xs text-muted-foreground mt-1">
+            <div className="text-xs text-ink-3 mt-1">
               San Francisco Bay Area · 1st
             </div>
           </div>
@@ -452,15 +452,15 @@ function ProfilePreview() {
       </div>
 
       {/* Extension overlay */}
-      <div className="p-5 space-y-4 bg-muted/10">
+      <div className="p-5 space-y-4 bg-bg-sub">
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-2xs uppercase tracking-wider text-muted-foreground">
+            <div className="text-2xs uppercase tracking-wider text-ink-3">
               TalentAI · live read
             </div>
             <div className="flex items-baseline gap-2 mt-1">
               <div className="text-3xl font-semibold tabular-nums">87</div>
-              <div className="text-xs text-muted-foreground">ICP fit</div>
+              <div className="text-xs text-ink-3">ICP fit</div>
             </div>
           </div>
           <Badge className="bg-up/15 text-up hover:bg-up/20">
@@ -474,8 +474,8 @@ function ProfilePreview() {
           <SignalRow label="Budget signals" value="Series C · Dec 2025" tone="good" />
         </div>
 
-        <div className="rounded-md border border-border bg-background/60 p-3">
-          <div className="text-2xs uppercase tracking-wider text-muted-foreground mb-1">
+        <div className="rounded-md border border-line bg-background/60 p-3">
+          <div className="text-2xs uppercase tracking-wider text-ink-3 mb-1">
             Why now
           </div>
           <p className="text-xs leading-relaxed">
@@ -511,7 +511,7 @@ function SignalRow({
 }) {
   return (
     <div className="flex items-center justify-between text-xs">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-ink-3">{label}</span>
       <span
         className={`tabular-nums ${tone === 'good' ? 'text-up' : 'text-warn-fg'}`}
       >

@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Check } from 'lucide-react';
+import { Check, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import { cn } from '@/lib/utils';
 import { numberWord, useGetStarted, type GetStartedStep } from '@/hooks/use-get-started';
 
@@ -42,6 +43,7 @@ function Marker({ index, done, current }: { index: number; done: boolean; curren
 export default function GetStartedPage() {
   const router = useRouter();
   const gs = useGetStarted();
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   // The page disappears once every step is done.
   useEffect(() => {
@@ -98,7 +100,24 @@ export default function GetStartedPage() {
                   <div className={cn('mt-1 text-body', current ? 'text-ink-2' : 'text-ink-3')}>
                     {s.done ? s.doneText : <PendingText step={s} />}
                   </div>
-                  {current && (
+                  {current && s.key === 'profile' && (
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="brand"
+                        size="dense"
+                        onClick={() => setCopilotOpen(true)}
+                        className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold"
+                      >
+                        <Sparkles size={14} /> Set up with AI
+                      </Button>
+                      <Button asChild variant="panel" size="dense" className="h-9 rounded-lg px-4 text-body font-medium">
+                        <Link href={s.href}>Configure manually</Link>
+                      </Button>
+                      <span className="text-xs text-ink-3">Describe your company and the assistant fills in your profile and products.</span>
+                    </div>
+                  )}
+                  {current && s.key !== 'profile' && (
                     <Button asChild variant="brand" size="dense" className="mt-4 h-9 rounded-lg px-4 text-body font-semibold">
                       <Link href={s.href}>{s.cta}</Link>
                     </Button>
@@ -118,6 +137,8 @@ export default function GetStartedPage() {
           </Link>
         </div>
       </section>
+
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
 }

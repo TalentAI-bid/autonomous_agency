@@ -1,40 +1,21 @@
 'use client';
 
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import {
+  Bot, Brain, FileText, FlaskConical, MessageCircle, Search, Send, Star, Target, Zap, type LucideIcon,
+} from 'lucide-react';
 import { cn, formatDate } from '@/lib/utils';
 import type { AgentStatus } from '@/types';
 
-const AGENT_COLORS: Record<string, string> = {
-  discovery: 'blue',
-  document: 'indigo',
-  enrichment: 'purple',
-  scoring: 'amber',
-  outreach: 'emerald',
-  reply: 'cyan',
-  action: 'rose',
-  strategy: 'violet',
-  strategist: 'sky',
-  'email-listen': 'teal',
-  'email-send': 'green',
-  mailbox: 'orange',
-  'reddit-monitor': 'red',
-};
-
-const AGENT_ICONS: Record<string, string> = {
-  discovery: '🔍',
-  document: '📄',
-  enrichment: '🔬',
-  scoring: '⭐',
-  outreach: '📧',
-  reply: '💬',
-  action: '⚡',
-  strategy: '🧠',
-  strategist: '🎯',
-  'email-listen': '📥',
-  'email-send': '📤',
-  mailbox: '📬',
-  'reddit-monitor': '📡',
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  discovery: Search,
+  document: FileText,
+  enrichment: FlaskConical,
+  scoring: Star,
+  outreach: Send,
+  reply: MessageCircle,
+  action: Zap,
+  strategy: Brain,
+  strategist: Target,
 };
 
 interface AgentStatusCardProps {
@@ -44,61 +25,38 @@ interface AgentStatusCardProps {
 }
 
 export function AgentStatusCard({ agentType, status, liveAction }: AgentStatusCardProps) {
-  const color = AGENT_COLORS[agentType] || 'slate';
-  const icon = AGENT_ICONS[agentType] || '🤖';
+  const Icon = AGENT_ICONS[agentType] ?? Bot;
   const isRunning = status?.status === 'running';
-  const isIdle = !status || status.status === 'idle';
+  const failed = status?.jobsFailed ?? 0;
 
   return (
-    <Card className={cn('transition-all', isRunning && 'border-info/30 shadow-sm shadow-info/10')}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{icon}</span>
-            <div>
-              <p className="text-sm font-medium capitalize">{agentType}</p>
-              <p className="text-xs text-muted-foreground">
-                {status?.lastActivity ? formatDate(status.lastActivity) : 'Not started'}
-              </p>
-            </div>
-          </div>
-          <Badge
-            variant={isRunning ? 'success' : isIdle ? 'secondary' : 'outline'}
-            className="text-xs shrink-0"
-          >
-            {status?.status ?? 'idle'}
-          </Badge>
+    <div
+      className={cn(
+        'flex flex-col rounded-card border p-3 transition-colors',
+        isRunning ? 'border-accent-mid bg-accent-weak' : 'border-line bg-bg-panel',
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span className={cn('grid size-7 shrink-0 place-items-center rounded-row', isRunning ? 'bg-bg-panel text-accent' : 'bg-bg-soft text-ink-3')}>
+          <Icon size={14} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-body font-medium capitalize text-ink">{agentType}</div>
         </div>
+        <span
+          className={cn('size-2 shrink-0 rounded-full', isRunning ? 'animate-pulse bg-up' : 'bg-line-strong')}
+          title={status?.status ?? 'idle'}
+        />
+      </div>
 
-        {liveAction && (
-          <div className="mt-2 flex items-center gap-1.5">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-up opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-up" />
-            </span>
-            <span className="text-xs text-muted-foreground truncate">
-              {liveAction.description || liveAction.action}
-            </span>
-          </div>
-        )}
+      <div className="mt-2 min-h-[16px] truncate text-2xs text-ink-3">
+        {liveAction ? liveAction.description || liveAction.action : status?.lastActivity ? formatDate(status.lastActivity) : 'Not started'}
+      </div>
 
-        {isRunning && !liveAction && (
-          <div className="mt-3">
-            <div className="h-1 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-info rounded-full animate-pulse w-2/3" />
-            </div>
-          </div>
-        )}
-
-        {status && (
-          <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{status.jobsCompleted} done</span>
-            {status.jobsFailed > 0 && (
-              <span className="text-destructive">{status.jobsFailed} failed</span>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      <div className="mt-2 flex items-center gap-2 font-mono text-2xs">
+        <span className="text-ink-2">{status?.jobsCompleted ?? 0} done</span>
+        {failed > 0 && <span className="text-down">{failed} failed</span>}
+      </div>
+    </div>
   );
 }

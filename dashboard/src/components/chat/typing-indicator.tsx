@@ -1,16 +1,16 @@
 'use client';
 
+import { AiAvatar } from './chat-bubble';
+
 export function TypingIndicator() {
   return (
-    <div className="flex items-start gap-3 mb-4">
-      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium shrink-0">
-        AI
-      </div>
-      <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-3">
+    <div className="mb-5 flex items-start gap-3" role="status" aria-label="The assistant is typing">
+      <AiAvatar />
+      <div className="rounded-2xl rounded-tl-sm bg-bg-soft px-4 py-3.5">
         <div className="flex gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
-          <span className="w-2 h-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
-          <span className="w-2 h-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-ink-4 [animation-delay:0ms]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-ink-4 [animation-delay:150ms]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-ink-4 [animation-delay:300ms]" />
         </div>
       </div>
     </div>

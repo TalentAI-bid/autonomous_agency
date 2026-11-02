@@ -7,7 +7,6 @@ import { setAuthInterceptors } from '@/lib/api';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { StatusBar } from '@/components/layout/status-bar';
-import { OnboardingBanner } from '@/components/layout/onboarding-banner';
 import { ActivityFab } from '@/components/copilot/activity-fab';
 import { useWebSocket } from '@/hooks/use-websocket';
 import { useSetupStatus } from '@/hooks/use-setup-status';
@@ -25,7 +24,6 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="main">
         <Header />
-        {!onboardingFull && <OnboardingBanner />}
         <main className="flex-1 overflow-auto min-h-0">{children}</main>
         {!onboardingFull && <StatusBar />}
       </div>

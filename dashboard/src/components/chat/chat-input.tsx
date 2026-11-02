@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, type KeyboardEvent, type DragEvent } from 'react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { Paperclip, ArrowUp, X, FileText } from 'lucide-react';
 
 interface ChatInputProps {
@@ -77,82 +76,78 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const canSend = !disabled && (content.trim().length > 0 || files.length > 0);
 
   return (
-    <div
-      className="border-t bg-background px-4 py-3"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {/* Drag overlay */}
+    <div className="border-t border-line px-4 pb-3 pt-3" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
       {isDragging && (
-        <div className="mb-3 rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 p-4 text-center text-sm text-primary">
+        <div className="mb-3 rounded-lg border-2 border-dashed border-accent-mid bg-accent-tint p-4 text-center text-body text-accent-fg">
           Drop a document (PDF/DOCX) or a company list (CSV/XLSX) here
         </div>
       )}
 
-      {/* File preview bar */}
-      {files.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {files.map((file, i) => (
-            <Badge key={i} variant="secondary" className="gap-1 pr-1">
-              <FileText className="w-3 h-3" />
-              <span className="max-w-32 truncate text-2xs">{file.name}</span>
-              <button
-                onClick={() => removeFile(i)}
-                className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </Badge>
-          ))}
+      <div
+        className={cn(
+          'rounded-xl border bg-bg-panel transition-colors focus-within:border-accent-mid focus-within:ring-2 focus-within:ring-accent-weak',
+          disabled ? 'border-line opacity-70' : 'border-line-strong',
+        )}
+      >
+        {files.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+            {files.map((file, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 rounded-md bg-bg-soft py-1 pl-2 pr-1 text-xs text-ink-2">
+                <FileText size={12} className="text-ink-3" />
+                <span className="max-w-40 truncate">{file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  aria-label={`Remove ${file.name}`}
+                  className="rounded p-0.5 text-ink-3 hover:bg-hover hover:text-ink"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-end gap-1.5 p-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            aria-label="Attach a file"
+            title="Attach a document or company list"
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-bg-soft hover:text-ink disabled:opacity-50"
+          >
+            <Paperclip size={16} />
+          </button>
+          <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} multiple className="hidden" onChange={(e) => handleFileSelect(e.target.files)} />
+
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => {
+              setContent(e.target.value);
+              adjustHeight();
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="Describe who you want to reach…"
+            rows={1}
+            disabled={disabled}
+            className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-1.5 py-2 text-body text-ink outline-none placeholder:text-ink-4 disabled:opacity-50"
+          />
+
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend}
+            aria-label="Send"
+            className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowUp size={16} />
+          </button>
         </div>
-      )}
-
-      {/* Input row */}
-      <div className="flex items-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="shrink-0 h-9 w-9"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
-        >
-          <Paperclip className="w-4 h-4" />
-        </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ACCEPTED_TYPES}
-          multiple
-          className="hidden"
-          onChange={(e) => handleFileSelect(e.target.files)}
-        />
-
-        <textarea
-          ref={textareaRef}
-          value={content}
-          onChange={(e) => {
-            setContent(e.target.value);
-            adjustHeight();
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder="Describe what kind of agent you need..."
-          rows={1}
-          disabled={disabled}
-          className="flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
-        />
-
-        <Button
-          type="button"
-          size="icon"
-          className="shrink-0 h-9 w-9"
-          onClick={handleSend}
-          disabled={!canSend}
-        >
-          <ArrowUp className="w-4 h-4" />
-        </Button>
       </div>
+
+      <p className="mb-0 mt-2 px-1 text-xs text-ink-4">Enter to send · Shift+Enter for a new line · attach a PDF, DOCX, CSV or XLSX</p>
     </div>
   );
 }

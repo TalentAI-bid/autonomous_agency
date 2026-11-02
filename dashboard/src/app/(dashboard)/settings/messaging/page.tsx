@@ -8,7 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { Save, Mail, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { Save, Sparkles } from 'lucide-react';
 import { useMessagingConfig, useSaveMessagingConfig, type MessagingConfig } from '@/hooks/use-studio';
 
 const EMPTY: MessagingConfig = {
@@ -53,15 +54,15 @@ export default function MessagingSettingsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Mail className="w-6 h-6 text-muted-foreground" />
-          Messaging Configuration
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Configure the sender identity + value proposition used by every message generated in the{' '}
-          <a href="/studio" className="text-info hover:underline">Studio</a>.
+        <h2 className="m-0 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">Messaging configuration</h2>
+        <p className="mb-0 mt-2 max-w-[560px] text-body leading-relaxed text-ink-3">
+          The sender identity and value proposition used by every message generated in the{' '}
+          <Link href="/studio" className="text-accent hover:underline">
+            Studio
+          </Link>
+          .
         </p>
       </div>
 
@@ -73,11 +74,11 @@ export default function MessagingSettingsPage() {
       ) : (
         <>
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Sender Identity</CardTitle>
+            <CardHeader className="border-b border-line px-5 py-3.5">
+              <CardTitle className="text-body">Sender Identity</CardTitle>
               <CardDescription>Who the message comes from. Used as the sender block in every channel prompt.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="pt-5 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs">Sender Name *</Label>
@@ -100,11 +101,11 @@ export default function MessagingSettingsPage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Messaging Context</CardTitle>
+            <CardHeader className="border-b border-line px-5 py-3.5">
+              <CardTitle className="text-body">Messaging Context</CardTitle>
               <CardDescription>What the AI uses to write relevant messages.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="pt-5 space-y-4">
               <div>
                 <Label className="text-xs">Value Proposition *</Label>
                 <Textarea
@@ -113,7 +114,7 @@ export default function MessagingSettingsPage() {
                   placeholder="We're an AI-native recruitment agency placing senior engineers via a 5% success-fee model."
                   rows={3}
                 />
-                <p className="text-xs text-muted-foreground mt-1">Used in every generated message. Required.</p>
+                <p className="text-xs text-ink-3 mt-1">Used in every generated message. Required.</p>
               </div>
               <div>
                 <Label className="text-xs">Target ICP</Label>
@@ -123,7 +124,7 @@ export default function MessagingSettingsPage() {
                   placeholder="EU fintech, AI, and Web3 companies hiring senior engineers, typically Series A-C."
                   rows={2}
                 />
-                <p className="text-xs text-muted-foreground mt-1">Helps the AI write relevant pitches.</p>
+                <p className="text-xs text-ink-3 mt-1">Helps the AI write relevant pitches.</p>
               </div>
               <div>
                 <Label className="text-xs">Differentiator</Label>
@@ -133,7 +134,7 @@ export default function MessagingSettingsPage() {
                   placeholder="5% success-fee (vs 20-25% traditional agencies), no upfront cost, AI-powered candidate matching."
                   rows={2}
                 />
-                <p className="text-xs text-muted-foreground mt-1">What makes you different from competitors.</p>
+                <p className="text-xs text-ink-3 mt-1">What makes you different from competitors.</p>
               </div>
               <div>
                 <Label className="text-xs">Pricing Summary</Label>
@@ -156,16 +157,16 @@ export default function MessagingSettingsPage() {
           </Card>
 
           {savedPreview && (
-            <div className="rounded-lg border border-up/50 bg-up/15 p-3 text-sm text-up flex items-start gap-2">
-              <Sparkles className="w-4 h-4 mt-0.5 shrink-0" />
+            <div className="flex items-start gap-2 rounded-row border border-up/30 bg-up/10 px-3.5 py-2.5 text-body text-up">
+              <Sparkles className="mt-0.5 size-4 shrink-0" />
               <span>{savedPreview}</span>
             </div>
           )}
 
           <div className="flex justify-end gap-2">
-            <Button onClick={handleSave} disabled={save.isPending}>
-              {save.isPending ? <Skeleton className="h-4 w-4 mr-2 rounded-full" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Configuration
+            <Button type="button" variant="brand" size="dense" onClick={handleSave} disabled={save.isPending} className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold">
+              <Save size={14} />
+              {save.isPending ? 'Saving…' : 'Save configuration'}
             </Button>
           </div>
         </>

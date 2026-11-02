@@ -158,7 +158,7 @@ export default function CrmSettingsPage() {
         <CardContent>
           <p className="text-sm text-muted-foreground mb-3">
             How long to wait between follow-up touches for leads sitting in a
-            follow-up-eligible stage. Due follow-ups show up in your Daily Queue
+            follow-up-eligible stage. Due follow-ups show up in your Approvals
             with a drafted message — nothing is sent automatically.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -328,7 +328,7 @@ export default function CrmSettingsPage() {
                           stage.isWon || stage.isLost
                             ? 'Terminal stage — never follow up'
                             : stage.followUpEligible
-                              ? 'Leads in this stage get follow-up reminders in the Daily Queue. Click to disable.'
+                              ? 'Leads in this stage get follow-up reminders in Approvals. Click to disable.'
                               : 'No follow-up reminders for this stage. Click to enable.'
                         }
                         className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs shrink-0 transition-colors ${

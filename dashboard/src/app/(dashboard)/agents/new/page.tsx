@@ -7,14 +7,7 @@ export default function NewAgentPage() {
   const router = useRouter();
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold">Create Agent</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Chat with AI to design and launch your agent pipeline
-        </p>
-      </div>
-
+    <div className="mx-auto max-w-[820px] p-6">
       <ChatInterface onAgentCreated={(id) => router.push(`/agents/${id}`)} />
     </div>
   );

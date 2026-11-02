@@ -6,18 +6,16 @@ import {
   useCreateEmailAccount,
   useUpdateEmailAccount,
   useDeleteEmailAccount,
-  useTestEmailAccount,
   useEmailListeners,
   useCreateEmailListener,
   useDeleteEmailListener,
   useTestListenerConnection,
   usePollNow,
 } from '@/hooks/use-email-settings';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
@@ -25,71 +23,98 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog';
+import { AccountPanel, ListenerPanel, UnlocksNote, useSendingHealth } from '@/components/settings/email-panels';
 import { useToast } from '@/hooks/use-toast';
-import { Mail, Plus, Trash2, Send, Plug, RefreshCw } from 'lucide-react';
-import { formatRelative } from '@/lib/utils';
+import { Pause } from 'lucide-react';
+import { cn, formatRelative } from '@/lib/utils';
 
-import { Select } from '@/components/ui/select';
-type Tab = 'accounts' | 'listeners';
+/* ─── Shared pieces ─────────────────────────────────────────────────────────── */
 
-export default function EmailSettingsPage() {
-  const [tab, setTab] = React.useState<Tab>('accounts');
+type PillTone = 'up' | 'warn';
 
+function StatusPill({ tone, children }: { tone: PillTone; children: React.ReactNode }) {
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Mail className="w-6 h-6" /> Email Settings
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Manage sending accounts and inbox listeners
-        </p>
-      </div>
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium',
+        tone === 'up' ? 'bg-up/10 text-up' : 'bg-warn/10 text-warn-fg',
+      )}
+    >
+      <span className="size-1.5 rounded-full bg-current" />
+      {children}
+    </span>
+  );
+}
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-border pb-px">
-        <button
-          onClick={() => setTab('accounts')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'accounts'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Sending Accounts
-        </button>
-        <button
-          onClick={() => setTab('listeners')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'listeners'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Inbox Listeners
-        </button>
-      </div>
+function SectionCard({
+  title,
+  pill,
+  loading,
+  children,
+}: {
+  title: string;
+  pill: { tone: PillTone; text: string };
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
+        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
+        {!loading && <StatusPill tone={pill.tone}>{pill.text}</StatusPill>}
+      </header>
+      <div className="p-6">{loading ? <Skeleton className="h-40 w-full" /> : children}</div>
+    </section>
+  );
+}
 
-      {tab === 'accounts' ? <AccountsTab /> : <ListenersTab />}
+function EmptyBlock({ title, body, children, note }: { title: string; body: string; children: React.ReactNode; note: React.ReactNode }) {
+  return (
+    <div className="p-1">
+      <span className="grid size-9 place-items-center rounded-full bg-warn/10 text-warn-fg">
+        <Pause size={14} />
+      </span>
+      <h3 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">{title}</h3>
+      <p className="mb-5 mt-2 max-w-[500px] text-body leading-relaxed text-ink-3">{body}</p>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+      <p className="mb-0 mt-4 text-xs text-ink-3">{note}</p>
     </div>
   );
 }
 
-/* ─── Sending Accounts ──────────────────────────────────────────────────────── */
+/* ─── Page ──────────────────────────────────────────────────────────────────── */
 
-function AccountsTab() {
+type Preset = 'google' | 'microsoft' | 'smtp';
+
+export default function EmailSettingsPage() {
+  return (
+    <div className="space-y-5">
+      <SendingCard />
+      <ReplyDetectionCard />
+    </div>
+  );
+}
+
+/* ─── Sending ───────────────────────────────────────────────────────────────── */
+
+function SendingCard() {
   const { data: accounts, isLoading } = useEmailAccounts();
   const updateAccount = useUpdateEmailAccount();
   const deleteAccount = useDeleteEmailAccount();
-  const testSend = useTestEmailAccount();
   const { toast } = useToast();
 
-  const [testTo, setTestTo] = React.useState('');
-  const [testingId, setTestingId] = React.useState<string | null>(null);
+  const [preset, setPreset] = React.useState<Preset | null>(null);
+
+  const list = accounts ?? [];
+  const { quota, hasActive } = useSendingHealth(list);
+
+  const pill: { tone: PillTone; text: string } = !hasActive
+    ? { tone: 'warn', text: 'Not connected' }
+    : quota && !quota.available
+      ? { tone: 'warn', text: `At its limit — ${quota.dailyUsed} of ${quota.dailyLimit} sent today` }
+      : { tone: 'up', text: quota ? `Healthy — ${quota.dailyUsed} of ${quota.dailyLimit} sent today` : 'Connected' };
 
   async function handleToggle(id: string, isActive: boolean) {
     try {
@@ -99,130 +124,82 @@ function AccountsTab() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDisconnect(id: string, email: string) {
+    if (!confirm(`Disconnect ${email}? Agents will stop sending from it.`)) return;
     try {
       await deleteAccount.mutateAsync(id);
-      toast({ title: 'Account deleted' });
+      toast({ title: 'Mailbox disconnected' });
     } catch {
-      toast({ title: 'Failed to delete account', variant: 'destructive' });
+      toast({ title: 'Failed to disconnect mailbox', variant: 'destructive' });
     }
   }
 
-  async function handleTestSend(id: string) {
-    if (!testTo.trim()) return;
-    setTestingId(id);
-    try {
-      await testSend.mutateAsync({ id, to: testTo.trim() });
-      toast({ title: 'Test email sent' });
-      setTestTo('');
-      setTestingId(null);
-    } catch {
-      toast({ title: 'Test send failed', variant: 'destructive' });
-      setTestingId(null);
-    }
-  }
+  const connectButtons = (
+    <>
+      <Button type="button" variant="brand" size="dense" onClick={() => setPreset('google')} className="h-9 rounded-lg px-4 text-body font-semibold">
+        Connect Google
+      </Button>
+      <Button type="button" variant="panel" size="dense" onClick={() => setPreset('microsoft')} className="h-9 rounded-lg px-4 text-body font-medium">
+        Connect Microsoft
+      </Button>
+      <Button type="button" variant="ghost" size="dense" onClick={() => setPreset('smtp')} className="h-9 rounded-lg px-3 text-body font-medium">
+        Other (SMTP)
+      </Button>
+    </>
+  );
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <AddAccountDialog />
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
-        </div>
-      ) : (accounts ?? []).length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            No email accounts configured yet.
-          </CardContent>
-        </Card>
+    <SectionCard title="Sending" pill={pill} loading={isLoading}>
+      {list.length === 0 ? (
+        <EmptyBlock
+          title="Nothing can be sent yet"
+          body="Agents can find leads, score them and draft messages, but no cold email leaves until an address you own is connected. Keenpipe sends as you, from your own mailbox, and you can disconnect any time."
+          note="Takes about a minute. New mailboxes warm up gradually before they reach full volume."
+        >
+          {connectButtons}
+        </EmptyBlock>
       ) : (
-        (accounts ?? []).map((acct) => (
-          <Card key={acct.id}>
-            <CardContent className="py-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">{acct.name}</span>
-                    <Badge variant="outline" className="text-xs">{acct.provider}</Badge>
-                    <Badge variant={acct.isActive ? 'secondary' : 'destructive'} className="text-xs">
-                      {acct.isActive ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{acct.fromEmail}</p>
-                  {acct.smtpHost && (
-                    <p className="text-xs text-muted-foreground">
-                      {acct.smtpHost}:{acct.smtpPort}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Test send */}
-                  <div className="flex items-center gap-1">
-                    <Input
-                      placeholder="test@email.com"
-                      className="h-8 w-40 text-xs"
-                      value={testingId === acct.id ? testTo : ''}
-                      onFocus={() => setTestingId(acct.id)}
-                      onChange={(e) => { setTestingId(acct.id); setTestTo(e.target.value); }}
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8"
-                      onClick={() => handleTestSend(acct.id)}
-                      disabled={testSend.isPending && testingId === acct.id}
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-
-                  {/* Toggle active */}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleToggle(acct.id, acct.isActive)}
-                    disabled={updateAccount.isPending}
-                  >
-                    {acct.isActive ? 'Disable' : 'Enable'}
-                  </Button>
-
-                  {/* Delete */}
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => handleDelete(acct.id)}
-                    disabled={deleteAccount.isPending}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))
+        <div className="space-y-6">
+          {list.map((acct, i) => (
+            <div key={acct.id} className={cn(i > 0 && 'border-t border-line pt-6')}>
+              <AccountPanel
+                account={acct}
+                busy={updateAccount.isPending || deleteAccount.isPending}
+                onToggle={() => handleToggle(acct.id, acct.isActive)}
+                onDisconnect={() => handleDisconnect(acct.id, acct.fromEmail)}
+              />
+            </div>
+          ))}
+          <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
+            <span className="mr-1 text-xs text-ink-3">Add another mailbox</span>
+            {connectButtons}
+          </div>
+        </div>
       )}
-    </div>
+      <AccountDialog preset={preset} onClose={() => setPreset(null)} />
+    </SectionCard>
   );
 }
 
-function AddAccountDialog() {
-  const [open, setOpen] = React.useState(false);
+const PRESETS: Record<Preset, { name: string; smtpHost: string; smtpPort: number; fromHint: string }> = {
+  google: { name: 'Google', smtpHost: 'smtp.gmail.com', smtpPort: 587, fromHint: 'you@gmail.com' },
+  microsoft: { name: 'Microsoft', smtpHost: 'smtp.office365.com', smtpPort: 587, fromHint: 'you@company.com' },
+  smtp: { name: '', smtpHost: '', smtpPort: 587, fromHint: 'noreply@example.com' },
+};
+
+const EMPTY_ACCOUNT = { name: '', provider: 'smtp', smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '', fromEmail: '' };
+
+function AccountDialog({ preset, onClose }: { preset: Preset | null; onClose: () => void }) {
   const createAccount = useCreateEmailAccount();
   const { toast } = useToast();
+  const [form, setForm] = React.useState(EMPTY_ACCOUNT);
 
-  const [form, setForm] = React.useState({
-    name: '',
-    provider: 'smtp',
-    smtpHost: '',
-    smtpPort: 587,
-    smtpUser: '',
-    smtpPass: '',
-    fromEmail: '',
-  });
+  // Load the provider preset each time the dialog opens.
+  React.useEffect(() => {
+    if (!preset) return;
+    const p = PRESETS[preset];
+    setForm({ ...EMPTY_ACCOUNT, name: p.name, smtpHost: p.smtpHost, smtpPort: p.smtpPort });
+  }, [preset]);
 
   function updateField(field: string, value: string | number | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -242,22 +219,25 @@ function AddAccountDialog() {
         isWarmup: true,
       });
       toast({ title: 'Account created' });
-      setOpen(false);
-      setForm({ name: '', provider: 'smtp', smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '', fromEmail: '' });
+      onClose();
     } catch {
       toast({ title: 'Failed to create account', variant: 'destructive' });
     }
   }
 
+  const p = preset ? PRESETS[preset] : PRESETS.smtp;
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm"><Plus className="w-4 h-4 mr-2" /> Add Account</Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+    <Dialog open={preset !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add Email Account</DialogTitle>
+          <DialogTitle>{preset === 'google' || preset === 'microsoft' ? `Connect ${p.name}` : 'Add email account'}</DialogTitle>
         </DialogHeader>
+        {(preset === 'google' || preset === 'microsoft') && (
+          <p className="m-0 text-xs text-ink-3">
+            Uses {p.name}&apos;s SMTP server. Use an app password, not your normal sign-in password.
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -266,11 +246,7 @@ function AddAccountDialog() {
             </div>
             <div className="space-y-1.5">
               <Label>Provider</Label>
-              <Select
-                value={form.provider}
-                onChange={(e) => updateField('provider', e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-              >
+              <Select value={form.provider} onChange={(e) => updateField('provider', e.target.value)} className="w-full">
                 <option value="smtp">SMTP</option>
                 <option value="ses">AWS SES</option>
                 <option value="sendgrid">SendGrid</option>
@@ -278,32 +254,32 @@ function AddAccountDialog() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>SMTP Host</Label>
+              <Label>SMTP host</Label>
               <Input value={form.smtpHost} onChange={(e) => updateField('smtpHost', e.target.value)} placeholder="smtp.example.com" />
             </div>
             <div className="space-y-1.5">
-              <Label>SMTP Port</Label>
+              <Label>SMTP port</Label>
               <Input type="number" value={form.smtpPort} onChange={(e) => updateField('smtpPort', Number(e.target.value))} />
             </div>
             <div className="space-y-1.5">
-              <Label>SMTP User</Label>
+              <Label>SMTP user</Label>
               <Input value={form.smtpUser} onChange={(e) => updateField('smtpUser', e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>SMTP Password</Label>
+              <Label>SMTP password</Label>
               <Input type="password" value={form.smtpPass} onChange={(e) => updateField('smtpPass', e.target.value)} />
             </div>
             <div className="col-span-2 space-y-1.5">
-              <Label>From Email *</Label>
-              <Input type="email" value={form.fromEmail} onChange={(e) => updateField('fromEmail', e.target.value)} required placeholder="noreply@example.com" />
+              <Label>From email *</Label>
+              <Input type="email" value={form.fromEmail} onChange={(e) => updateField('fromEmail', e.target.value)} required placeholder={p.fromHint} />
             </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" size="sm">Cancel</Button>
             </DialogClose>
-            <Button type="submit" size="sm" disabled={createAccount.isPending}>
-              {createAccount.isPending ? 'Creating…' : 'Create Account'}
+            <Button type="submit" variant="brand" size="sm" disabled={createAccount.isPending}>
+              {createAccount.isPending ? 'Creating…' : 'Create account'}
             </Button>
           </DialogFooter>
         </form>
@@ -312,32 +288,47 @@ function AddAccountDialog() {
   );
 }
 
-/* ─── Inbox Listeners ───────────────────────────────────────────────────────── */
+/* ─── Reply detection ───────────────────────────────────────────────────────── */
 
-function ListenersTab() {
+function ReplyDetectionCard() {
   const { data: listeners, isLoading } = useEmailListeners();
   const deleteListener = useDeleteEmailListener();
   const testConnection = useTestListenerConnection();
   const pollNow = usePollNow();
   const { toast } = useToast();
 
-  async function handleDelete(id: string) {
+  const [adding, setAdding] = React.useState(false);
+  const [explain, setExplain] = React.useState(false);
+
+  const list = listeners ?? [];
+  const on = list.some((l) => l.isActive);
+  const lastCheck = list
+    .map((l) => l.lastPolledAt)
+    .filter((d): d is string => !!d)
+    .sort()
+    .pop();
+
+  const pill: { tone: PillTone; text: string } = !on
+    ? { tone: 'warn', text: 'Not connected' }
+    : { tone: 'up', text: lastCheck ? `Connected — last check ${formatRelative(lastCheck).replace(/^about /, '')}` : 'Connected' };
+
+  const busy = deleteListener.isPending || testConnection.isPending || pollNow.isPending;
+
+  async function handleDisconnect(id: string, name: string) {
+    if (!confirm(`Disconnect reply detection for ${name}? Replies will stop reaching your Inbox.`)) return;
     try {
       await deleteListener.mutateAsync(id);
-      toast({ title: 'Listener deleted' });
+      toast({ title: 'Reply detection disconnected' });
     } catch {
-      toast({ title: 'Failed to delete listener', variant: 'destructive' });
+      toast({ title: 'Failed to disconnect', variant: 'destructive' });
     }
   }
 
   async function handleTest(id: string) {
     try {
       const result = await testConnection.mutateAsync(id);
-      if (result.success) {
-        toast({ title: 'Connection successful' });
-      } else {
-        toast({ title: 'Connection failed', description: result.error, variant: 'destructive' });
-      }
+      if (result.success) toast({ title: 'Connection successful' });
+      else toast({ title: 'Connection failed', description: result.error, variant: 'destructive' });
     } catch {
       toast({ title: 'Connection test failed', variant: 'destructive' });
     }
@@ -346,101 +337,99 @@ function ListenersTab() {
   async function handlePoll(id: string) {
     try {
       await pollNow.mutateAsync(id);
-      toast({ title: 'Poll job queued' });
+      toast({ title: 'Checking for replies…' });
     } catch {
-      toast({ title: 'Failed to trigger poll', variant: 'destructive' });
+      toast({ title: 'Failed to trigger a check', variant: 'destructive' });
     }
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <AddListenerDialog />
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
-        </div>
-      ) : (listeners ?? []).length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            No inbox listeners configured yet.
-          </CardContent>
-        </Card>
+    <SectionCard title="Reply detection" pill={pill} loading={isLoading}>
+      {list.length === 0 ? (
+        <EmptyBlock
+          title="Keenpipe cannot see replies yet"
+          body="Reply detection watches the inbox you send from and matches each answer to the message that caused it. Until it is connected: your reply rate reads —, the Inbox stays empty, Reports stay at zero, and no deal ever moves on its own."
+          note="Read-only. It reads replies to messages Keenpipe sent, nothing else."
+        >
+          <Button type="button" variant="brand" size="dense" onClick={() => setAdding(true)} className="h-9 rounded-lg px-4 text-body font-semibold">
+            Connect reply detection
+          </Button>
+          <Button type="button" variant="ghost" size="dense" onClick={() => setExplain((v) => !v)} aria-expanded={explain} className="h-9 rounded-lg px-3 text-body font-medium">
+            What it reads
+          </Button>
+        </EmptyBlock>
       ) : (
-        (listeners ?? []).map((listener) => (
-          <Card key={listener.id}>
-            <CardContent className="py-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">
-                      {listener.host}:{listener.port}
-                    </span>
-                    <Badge variant="outline" className="text-xs uppercase">{listener.protocol}</Badge>
-                    <Badge variant={listener.isActive ? 'secondary' : 'destructive'} className="text-xs">
-                      {listener.isActive ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {listener.username} | Mailbox: {listener.mailbox}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Polling every {Math.round(listener.pollingIntervalMs / 1000)}s
-                    {listener.lastPolledAt && ` | Last polled ${formatRelative(listener.lastPolledAt)}`}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleTest(listener.id)}
-                    disabled={testConnection.isPending}
-                  >
-                    <Plug className="w-3.5 h-3.5 mr-1" /> Test
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePoll(listener.id)}
-                    disabled={pollNow.isPending}
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 mr-1" /> Poll Now
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => handleDelete(listener.id)}
-                    disabled={deleteListener.isPending}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))
+        <div className="space-y-6">
+          {list.map((listener, i) => (
+            <div key={listener.id} className={cn(i > 0 && 'border-t border-line pt-6')}>
+              <ListenerPanel
+                listener={listener}
+                busy={busy}
+                onTest={() => handleTest(listener.id)}
+                onPoll={() => handlePoll(listener.id)}
+                onDisconnect={() => handleDisconnect(listener.id, listener.username)}
+              />
+            </div>
+          ))}
+          <UnlocksNote />
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="panel" size="dense" onClick={() => setAdding(true)} className="h-8 rounded-lg px-3 text-xs font-medium">
+              Add another inbox
+            </Button>
+          </div>
+        </div>
       )}
-    </div>
+
+      {explain && (
+        <p className="mb-0 mt-5 max-w-[520px] rounded-row bg-bg-soft px-3.5 py-3 text-xs leading-relaxed text-ink-3">
+          It checks the inbox you send from on a schedule and matches each new message to one Keenpipe sent. Messages that are not replies to
+          something Keenpipe sent are ignored. It only reads — it never sends, moves or deletes mail.
+        </p>
+      )}
+
+      <ListenerDialog open={adding} onClose={() => setAdding(false)} />
+    </SectionCard>
   );
 }
 
-function AddListenerDialog() {
-  const [open, setOpen] = React.useState(false);
+const EMPTY_LISTENER = { protocol: 'imap', host: '', port: 993, username: '', password: '', mailbox: 'INBOX', pollingIntervalMs: 60000 };
+
+function ListenerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const createListener = useCreateEmailListener();
   const { toast } = useToast();
+  const { data: accounts } = useEmailAccounts();
+  const { data: listeners } = useEmailListeners();
+  const [form, setForm] = React.useState(EMPTY_LISTENER);
+  const [accountId, setAccountId] = React.useState('');
 
-  const [form, setForm] = React.useState({
-    protocol: 'imap',
-    host: '',
-    port: 993,
-    username: '',
-    password: '',
-    mailbox: 'INBOX',
-    pollingIntervalMs: 60000,
-  });
+  // The listener must be linked to the mailbox it watches, otherwise the app
+  // keeps reporting that mailbox as "not watched".
+  function pickAccount(id: string) {
+    setAccountId(id);
+    const a = (accounts ?? []).find((x) => x.id === id);
+    if (!a) return;
+    setForm((prev) => ({
+      ...prev,
+      username: a.smtpUser || a.fromEmail,
+      host: a.smtpHost ? a.smtpHost.replace(/^smtp\./, 'imap.') : prev.host,
+    }));
+  }
+
+  React.useEffect(() => {
+    if (!open) return;
+    setForm(EMPTY_LISTENER);
+    const watched = new Set((listeners ?? []).map((l) => l.emailAccountId));
+    const target = (accounts ?? []).find((a) => !watched.has(a.id)) ?? (accounts ?? [])[0];
+    setAccountId(target?.id ?? '');
+    if (target) {
+      setForm({
+        ...EMPTY_LISTENER,
+        username: target.smtpUser || target.fromEmail,
+        host: target.smtpHost ? target.smtpHost.replace(/^smtp\./, 'imap.') : '',
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function updateField(field: string, value: string | number | boolean) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -450,6 +439,7 @@ function AddListenerDialog() {
     e.preventDefault();
     try {
       await createListener.mutateAsync({
+        emailAccountId: accountId || undefined,
         protocol: form.protocol,
         host: form.host,
         port: form.port,
@@ -459,25 +449,33 @@ function AddListenerDialog() {
         mailbox: form.mailbox,
         pollingIntervalMs: form.pollingIntervalMs,
       });
-      toast({ title: 'Listener created' });
-      setOpen(false);
-      setForm({ protocol: 'imap', host: '', port: 993, username: '', password: '', mailbox: 'INBOX', pollingIntervalMs: 60000 });
+      toast({ title: 'Reply detection connected' });
+      onClose();
     } catch {
       toast({ title: 'Failed to create listener', variant: 'destructive' });
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm"><Plus className="w-4 h-4 mr-2" /> Add Listener</Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add Inbox Listener</DialogTitle>
+          <DialogTitle>Connect reply detection</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
+            {(accounts ?? []).length > 0 && (
+              <div className="col-span-2 space-y-1.5">
+                <Label>Mailbox to watch</Label>
+                <Select value={accountId} onChange={(e) => pickAccount(e.target.value)} className="w-full">
+                  {(accounts ?? []).map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.fromEmail}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Protocol</Label>
               <Select
@@ -486,7 +484,7 @@ function AddListenerDialog() {
                   updateField('protocol', e.target.value);
                   updateField('port', e.target.value === 'imap' ? 993 : 995);
                 }}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                className="w-full"
               >
                 <option value="imap">IMAP</option>
                 <option value="pop3">POP3</option>
@@ -513,7 +511,7 @@ function AddListenerDialog() {
               <Input value={form.mailbox} onChange={(e) => updateField('mailbox', e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>Poll Interval (ms)</Label>
+              <Label>Check interval (ms)</Label>
               <Input type="number" min={5000} value={form.pollingIntervalMs} onChange={(e) => updateField('pollingIntervalMs', Number(e.target.value))} />
             </div>
           </div>
@@ -521,8 +519,8 @@ function AddListenerDialog() {
             <DialogClose asChild>
               <Button type="button" variant="outline" size="sm">Cancel</Button>
             </DialogClose>
-            <Button type="submit" size="sm" disabled={createListener.isPending}>
-              {createListener.isPending ? 'Creating…' : 'Create Listener'}
+            <Button type="submit" variant="brand" size="sm" disabled={createListener.isPending}>
+              {createListener.isPending ? 'Connecting…' : 'Connect'}
             </Button>
           </DialogFooter>
         </form>

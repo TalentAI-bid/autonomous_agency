@@ -6,12 +6,17 @@ import { Icon } from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { numberWord, useGetStarted } from '@/hooks/use-get-started';
+import { useAgents } from '@/hooks/use-agents';
+import { useQueue } from '@/hooks/use-queue';
+import { AgentsSubtitle } from '@/components/agents/agents-subtitle';
+import { MailboxSubtitle } from '@/components/mailbox/inbox-empty';
+import { settingsSectionFor } from '@/components/settings/settings-nav';
 
 // Title + one-line subtitle for the top bar, matched on the longest route prefix.
 const TITLES: Array<[string, { title: string; sub: string }]> = [
   ['/get-started', { title: 'Get started', sub: '' }],
   ['/dashboard', { title: 'Home', sub: 'What needs you today.' }],
-  ['/queue', { title: 'Daily Queue', sub: 'What your agents drafted for you to approve.' }],
+  ['/approvals', { title: 'Approvals', sub: 'What your agents drafted for you to approve.' }],
   ['/mailbox', { title: 'Inbox', sub: 'Replies and conversations.' }],
   ['/schedule', { title: 'Meetings', sub: 'Booked and upcoming meetings.' }],
   ['/prospects', { title: 'Leads', sub: 'People your agents have found.' }],
@@ -21,7 +26,6 @@ const TITLES: Array<[string, { title: string; sub: string }]> = [
   ['/agents/new', { title: 'New agent', sub: 'Describe who to reach and let it run.' }],
   ['/agents', { title: 'Agents', sub: 'Your outbound agents.' }],
   ['/studio', { title: 'Studio', sub: 'Shape messaging and strategy.' }],
-  ['/linkedin-extension', { title: 'LinkedIn Extension', sub: 'Connect Chrome so agents can reach out.' }],
   ['/documents', { title: 'Documents', sub: 'Files your agents can use.' }],
   ['/campaigns', { title: 'Campaigns', sub: 'Outreach campaigns.' }],
   ['/settings', { title: 'Settings', sub: 'Workspace, mailboxes and team.' }],
@@ -37,12 +41,27 @@ function titleFor(pathname: string) {
 export function Header() {
   const pathname = usePathname();
   const gs = useGetStarted();
+  // Approvals only exist once an agent has run, so hide the shortcut until then.
+  const { data: agents } = useAgents();
+  const hasAgent = (agents?.length ?? 0) > 0;
+  const queue = useQueue();
   const found = titleFor(pathname);
   const title = found.title;
-  const sub =
-    pathname.startsWith('/get-started') && !gs.isLoading
+  const handled = queue.data?.handledToday;
+  const onAgentsList = pathname === '/agents';
+  const sub: React.ReactNode = onAgentsList
+    ? <AgentsSubtitle />
+    : pathname.startsWith('/mailbox')
+    ? <MailboxSubtitle />
+    : pathname.startsWith('/settings')
+    ? settingsSectionFor(pathname) || found.sub
+    : pathname.startsWith('/get-started') && !gs.isLoading
       ? `${numberWord(gs.doneCount).replace(/^./, (c) => c.toUpperCase())} of ${numberWord(gs.total)} done · this page disappears when all ${numberWord(gs.total)} are`
-      : found.sub;
+      : pathname.startsWith('/approvals') && agents && !hasAgent
+        ? 'Nothing to approve yet'
+        : pathname.startsWith('/approvals') && queue.data
+        ?`${queue.data.count} waiting${handled ? ` · ${handled.approved} approved, ${handled.skipped} skipped today` : ''}`
+        : found.sub;
 
   return (
     <header className="flex h-[54px] shrink-0 items-center gap-4 border-b border-line bg-bg-panel px-5">
@@ -61,9 +80,15 @@ export function Header() {
           <span>Search</span>
           <kbd className="ml-auto rounded-tag border border-line bg-bg-soft px-1.5 font-mono text-2xs text-ink-3">⌘K</kbd>
         </div>
-        <Button asChild variant="brand" size="dense" className="h-8 rounded-lg px-3.5 text-body font-semibold">
-          <Link href="/queue">Open approvals</Link>
-        </Button>
+        {onAgentsList ? (
+          <Button asChild variant="brand" size="dense" className="h-8 rounded-lg px-3.5 text-body font-semibold">
+            <Link href="/agents/new">New agent</Link>
+          </Button>
+        ) : hasAgent && (
+          <Button asChild variant="brand" size="dense" className="h-8 rounded-lg px-3.5 text-body font-semibold">
+            <Link href="/approvals">Open approvals</Link>
+          </Button>
+        )}
       </div>
     </header>
   );

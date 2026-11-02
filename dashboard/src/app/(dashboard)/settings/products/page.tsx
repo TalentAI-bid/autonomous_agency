@@ -210,10 +210,10 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h1 className="m-0 font-display text-title font-medium text-ink flex items-center gap-2">
             <Package className="w-6 h-6" /> Products & Services
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">
+          <p className="mb-0 mt-1 text-body text-ink-3">
             Manage what you sell. Agents use this to personalize outreach.
           </p>
         </div>
@@ -223,10 +223,10 @@ export default function ProductsPage() {
       </div>
 
       {/* Plan limit indicator */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 text-sm text-ink-3">
         <span>
-          Using <strong className="text-foreground">{count}</strong> of{' '}
-          <strong className="text-foreground">{limit === Infinity ? 'unlimited' : limit}</strong>{' '}
+          Using <strong className="text-ink">{count}</strong> of{' '}
+          <strong className="text-ink">{limit === Infinity ? 'unlimited' : limit}</strong>{' '}
           products
         </span>
         <Badge variant="outline" className="text-xs capitalize">{plan} plan</Badge>
@@ -240,10 +240,10 @@ export default function ProductsPage() {
       {/* Product list */}
       {count === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center">
-            <Package className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+          <CardContent className="pt-5 py-16 text-center">
+            <Package className="w-10 h-10 mx-auto text-ink-3 mb-3" />
             <p className="text-sm font-medium">No products yet</p>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">
+            <p className="text-xs text-ink-3 mt-1 mb-4">
               Add your first product to help agents personalize outreach
             </p>
             <Button size="sm" onClick={openCreate}>
@@ -255,7 +255,7 @@ export default function ProductsPage() {
         <div className="space-y-3">
           {(products ?? []).map(product => (
             <Card key={product.id} className={!product.isActive ? 'opacity-60' : ''}>
-              <CardContent className="py-4">
+              <CardContent className="pt-5 py-4">
                 <div className="flex items-start justify-between gap-4">
                   {/* Left: product info */}
                   <div className="space-y-2 min-w-0 flex-1">
@@ -280,23 +280,23 @@ export default function ProductsPage() {
 
                     {/* Description */}
                     {product.description && (
-                      <p className="text-sm text-muted-foreground line-clamp-2">
+                      <p className="text-sm text-ink-3 line-clamp-2">
                         {product.description}
                       </p>
                     )}
 
                     {/* Target audience */}
                     {product.targetAudience && (
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Target:</span>{' '}
+                      <p className="text-xs text-ink-3">
+                        <span className="font-medium text-ink">Target:</span>{' '}
                         {product.targetAudience}
                       </p>
                     )}
 
                     {/* Pricing */}
                     {product.pricingDetails && (
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Pricing:</span>{' '}
+                      <p className="text-xs text-ink-3">
+                        <span className="font-medium text-ink">Pricing:</span>{' '}
                         {product.pricingDetails}
                       </p>
                     )}
@@ -314,7 +314,7 @@ export default function ProductsPage() {
                         </Badge>
                       ))}
                       {((product.keyFeatures?.length ?? 0) + (product.painPointsSolved?.length ?? 0)) > 7 && (
-                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                        <Badge variant="outline" className="text-xs text-ink-3">
                           +{(product.keyFeatures?.length ?? 0) + (product.painPointsSolved?.length ?? 0) - 7} more
                         </Badge>
                       )}
@@ -344,7 +344,7 @@ export default function ProductsPage() {
                       onClick={() => handleDelete(product.id)}
                       disabled={deleteProduct.isPending}
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                      <Trash2 className="w-3.5 h-3.5 text-down" />
                     </Button>
                   </div>
                 </div>
@@ -415,7 +415,7 @@ export default function ProductsPage() {
                 <Select
                   value={form.pricingModel}
                   onChange={e => setForm(f => ({ ...f, pricingModel: e.target.value }))}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full"
                 >
                   {PRICING_MODELS.map(m => (
                     <option key={m.value} value={m.value}>{m.label}</option>

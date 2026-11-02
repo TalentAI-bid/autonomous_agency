@@ -129,17 +129,17 @@ export default function ExtensionSettingsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h1 className="m-0 font-display text-title font-medium text-ink flex items-center gap-2">
           <Chrome className="w-6 h-6" /> Browser Extension
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">
+        <p className="mb-0 mt-1 text-body text-ink-3">
           Scrape LinkedIn, Google Maps, and Crunchbase using your authenticated browser sessions.
         </p>
       </div>
 
       {/* Status + Key */}
       <Card>
-        <CardHeader>
+        <CardHeader className="border-b border-line px-5 py-3.5">
           <CardTitle className="flex items-center justify-between text-base">
             <span>Status</span>
             {statusQ.isLoading ? (
@@ -157,11 +157,11 @@ export default function ExtensionSettingsPage() {
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="pt-5 space-y-3">
           {statusQ.isLoading ? (
             <Skeleton className="h-16 w-full" />
           ) : (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-ink-3">
               {status?.hasKey
                 ? status.connected
                   ? `Extension connected. Last seen: ${fmtDate(status.lastSeenAt)}.`
@@ -206,7 +206,7 @@ export default function ExtensionSettingsPage() {
 
       {/* Usage */}
       <Card>
-        <CardHeader>
+        <CardHeader className="border-b border-line px-5 py-3.5">
           <CardTitle className="flex items-center justify-between text-base">
             <span>Today's usage</span>
             <Button
@@ -220,7 +220,7 @@ export default function ExtensionSettingsPage() {
             </Button>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           <div className="grid sm:grid-cols-2 gap-3">
             {Object.entries(CAPS).map(([key, cap]) => {
               const used = counts[key] ?? 0;
@@ -229,8 +229,8 @@ export default function ExtensionSettingsPage() {
               return (
                 <div key={key} className="space-y-1.5">
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">
-                      <span className="font-medium text-foreground">{site}</span> / {type}
+                    <span className="text-ink-3">
+                      <span className="font-medium text-ink">{site}</span> / {type}
                     </span>
                     <span className="tabular-nums">{used} / {cap}</span>
                   </div>
@@ -245,7 +245,7 @@ export default function ExtensionSettingsPage() {
             })}
           </div>
           {status?.dailyResetAt && (
-            <p className="mt-4 text-xs text-muted-foreground">
+            <p className="mt-4 text-xs text-ink-3">
               Counters reset 24 hours after {fmtDate(status.dailyResetAt)}.
             </p>
           )}
@@ -254,14 +254,14 @@ export default function ExtensionSettingsPage() {
 
       {/* Recent tasks */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent tasks</CardTitle>
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="text-body">Recent tasks</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-5">
           {recentQ.isLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : (recentQ.data?.tasks ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No extension tasks yet.</p>
+            <p className="text-sm text-ink-3">No extension tasks yet.</p>
           ) : (
             <div className="divide-y divide-border">
               {(recentQ.data?.tasks ?? []).map((t) => (
@@ -269,7 +269,7 @@ export default function ExtensionSettingsPage() {
               ))}
             </div>
           )}
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-3 text-xs text-ink-3">
             Click a row to see the full request params and the raw response from the
             extension. If a task shows "completed" with <span className="font-mono">items: 0</span>,
             the page loaded but the adapter didn't recognise it — inspect{' '}
@@ -281,10 +281,10 @@ export default function ExtensionSettingsPage() {
 
       {/* Install instructions */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">How to install</CardTitle>
+        <CardHeader className="border-b border-line px-5 py-3.5">
+          <CardTitle className="text-body">How to install</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm space-y-3 text-muted-foreground">
+        <CardContent className="pt-5 text-sm space-y-3 text-ink-3">
           <div className="rounded-md border border-up/20 bg-up/10 p-3 text-xs text-up">
             <strong className="text-up">New:</strong> You no longer need to generate an
             API key manually. After installing the extension, open its popup and sign in with
@@ -293,9 +293,9 @@ export default function ExtensionSettingsPage() {
             SSO-only tenants or scripted provisioning).
           </div>
           <ol className="list-decimal ml-5 space-y-1">
-            <li>Open <code className="bg-muted px-1 rounded">chrome://extensions</code> in Chrome.</li>
+            <li>Open <code className="bg-bg-soft px-1 rounded">chrome://extensions</code> in Chrome.</li>
             <li>Enable <strong>Developer mode</strong> (top-right toggle).</li>
-            <li>Click <strong>Load unpacked</strong> and select the <code className="bg-muted px-1 rounded">extension/</code> folder from the TalentAI repo.</li>
+            <li>Click <strong>Load unpacked</strong> and select the <code className="bg-bg-soft px-1 rounded">extension/</code> folder from the TalentAI repo.</li>
             <li>Click the TalentAI icon in your toolbar, enter your TalentAI email &amp; password and the server URL, then click <strong>Sign in</strong>.</li>
             <li>Stay signed into LinkedIn / Google Maps / Crunchbase in your regular Chrome window — the extension uses your existing sessions.</li>
           </ol>
@@ -316,7 +316,7 @@ export default function ExtensionSettingsPage() {
               </span>
             </DialogDescription>
           </DialogHeader>
-          <div className="bg-muted px-3 py-2 rounded font-mono text-xs break-all select-all">
+          <div className="bg-bg-soft px-3 py-2 rounded font-mono text-xs break-all select-all">
             {shownKey}
           </div>
           <DialogFooter className="sm:justify-between gap-2">
@@ -369,7 +369,7 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 text-left hover:bg-muted/30 -mx-2 px-2 py-1 rounded"
+        className="w-full flex items-center justify-between gap-3 text-left hover:bg-bg-sub -mx-2 px-2 py-1 rounded"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -395,8 +395,8 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <StatusBadge status={task.status} />
-          <span className="text-muted-foreground tabular-nums">{fmtDate(task.createdAt)}</span>
-          <span className="text-muted-foreground">{open ? '▾' : '▸'}</span>
+          <span className="text-ink-3 tabular-nums">{fmtDate(task.createdAt)}</span>
+          <span className="text-ink-3">{open ? '▾' : '▸'}</span>
         </div>
       </button>
       {open && (
@@ -411,8 +411,8 @@ function RecentTaskRow({ task }: { task: RecentTask }) {
 
 function PayloadBlock({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="rounded border border-border bg-muted/30 p-2">
-      <div className="text-2xs uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
+    <div className="rounded border border-line bg-bg-sub p-2">
+      <div className="text-2xs uppercase tracking-wider text-ink-3 mb-1">{label}</div>
       <pre className="text-2xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">
         {value ? JSON.stringify(value, null, 2) : '—'}
       </pre>

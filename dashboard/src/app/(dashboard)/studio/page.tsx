@@ -1,55 +1,64 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useState, useMemo, type ReactNode } from 'react';
+import Link from 'next/link';
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  Globe,
+  Handshake,
+  Lightbulb,
+  Linkedin,
+  Loader2,
+  Mail,
+  MessageCircle,
+  RefreshCw,
+  Send,
+  Sparkles,
+  TrendingUp,
+  UserPlus,
+  type LucideIcon,
+} from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useToast } from '@/hooks/use-toast';
-import { Sparkles, Copy, RefreshCw, ExternalLink, Mail, MessageSquare, Handshake, Send, Smartphone } from 'lucide-react';
-import Link from 'next/link';
-import { useGenerateStudioMessage, type StudioChannel, type StudioTrack, type MessageType, type StudioComposition } from '@/hooks/use-studio';
-
 import { Select } from '@/components/ui/select';
-const CHANNELS: Array<{ id: StudioChannel; label: string; icon: string }> = [
-  { id: 'email_cold', label: 'Cold Email', icon: '📧' },
-  { id: 'linkedin_dm', label: 'LinkedIn DM', icon: '💼' },
-  { id: 'linkedin_connection_request', label: 'LinkedIn Connection Request', icon: '🤝' },
-  { id: 'twitter_dm', label: 'Twitter / X DM', icon: '🐦' },
-  { id: 'whatsapp', label: 'WhatsApp', icon: '💬' },
-  { id: 'telegram', label: 'Telegram', icon: '🚀' },
+import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+import {
+  useGenerateStudioMessage,
+  type StudioChannel,
+  type StudioTrack,
+  type MessageType,
+  type StudioComposition,
+} from '@/hooks/use-studio';
+
+const CHANNELS: Array<{ id: StudioChannel; label: string; short: string; icon: LucideIcon }> = [
+  { id: 'email_cold', label: 'Cold email', short: 'Email', icon: Mail },
+  { id: 'linkedin_dm', label: 'LinkedIn DM', short: 'LinkedIn DM', icon: Linkedin },
+  { id: 'linkedin_connection_request', label: 'LinkedIn connection request', short: 'Connection', icon: UserPlus },
+  { id: 'twitter_dm', label: 'X / Twitter DM', short: 'X DM', icon: Send },
+  { id: 'whatsapp', label: 'WhatsApp', short: 'WhatsApp', icon: MessageCircle },
+  { id: 'telegram', label: 'Telegram', short: 'Telegram', icon: Send },
 ];
 
-const TRACKS: Array<{ id: StudioTrack; label: string; description: string; icon: string }> = [
-  { id: 'sales', label: 'Sales', description: 'Pitch our service to a potential buyer.', icon: '💰' },
-  { id: 'partnership', label: 'Partnership', description: 'Propose collaboration with a peer / competitor.', icon: '🤝' },
-  { id: 'collaboration', label: 'Collaboration', description: 'Build a mutual-value relationship with an adjacent partner.', icon: '🌐' },
+const TRACKS: Array<{ id: StudioTrack; label: string; description: string; icon: LucideIcon }> = [
+  { id: 'sales', label: 'Sales', description: 'Pitch your service to a potential buyer.', icon: TrendingUp },
+  { id: 'partnership', label: 'Partnership', description: 'Propose a collaboration with a peer.', icon: Handshake },
+  { id: 'collaboration', label: 'Collaboration', description: 'Build mutual value with an adjacent partner.', icon: Globe },
 ];
 
 const MESSAGE_TYPES: Array<{ id: MessageType; label: string }> = [
-  { id: 'first_message', label: '📩 First Message' },
-  { id: 'first_followup', label: '🔄 First Follow-up' },
-  { id: 'second_followup', label: '🔁 Second Follow-up' },
-  { id: 'breakup', label: '👋 Breakup / Final' },
-  { id: 'reactivation', label: '♻️ Reactivation' },
-  { id: 'post_meeting', label: '🤝 Post-Meeting' },
-  { id: 'post_no_show', label: '📅 Post-No-Show' },
+  { id: 'first_message', label: 'First message' },
+  { id: 'first_followup', label: 'First follow-up' },
+  { id: 'second_followup', label: 'Second follow-up' },
+  { id: 'breakup', label: 'Breakup / final' },
+  { id: 'reactivation', label: 'Reactivation' },
+  { id: 'post_meeting', label: 'Post-meeting' },
+  { id: 'post_no_show', label: 'Post-no-show' },
 ];
-
-function channelIconLucide(channel: StudioChannel) {
-  switch (channel) {
-    case 'email_cold': return <Mail className="w-4 h-4" />;
-    case 'linkedin_dm': return <MessageSquare className="w-4 h-4" />;
-    case 'linkedin_connection_request': return <Handshake className="w-4 h-4" />;
-    case 'twitter_dm': return <Send className="w-4 h-4" />;
-    case 'whatsapp':
-    case 'telegram':
-      return <Smartphone className="w-4 h-4" />;
-  }
-}
 
 function externalLinkFor(channel: StudioChannel, linkedinUrl?: string): { href: string; label: string } | null {
   switch (channel) {
@@ -67,6 +76,34 @@ function externalLinkFor(channel: StudioChannel, linkedinUrl?: string): { href: 
   }
 }
 
+const labelCls = 'text-3xs font-medium uppercase tracking-[0.09em] text-ink-4';
+const inputCls = 'h-9 rounded-lg border-line bg-bg-panel text-body focus-visible:ring-accent-weak';
+const selectCls = 'w-full h-9 rounded-lg border-line bg-bg-panel px-3 text-body';
+
+function Section({ step, title, children }: { step: number; title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-5 items-center justify-center rounded-full bg-accent-weak text-3xs font-semibold text-accent-fg">{step}</span>
+        <h3 className="m-0 text-body font-semibold text-ink">{title}</h3>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Field({ label, optional, children }: { label: string; optional?: boolean; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className={labelCls}>
+        {label}
+        {optional && <span className="ml-1 normal-case tracking-normal text-ink-4">(optional)</span>}
+      </Label>
+      {children}
+    </div>
+  );
+}
+
 export default function StudioPage() {
   const { toast } = useToast();
   const [channel, setChannel] = useState<StudioChannel>('email_cold');
@@ -80,6 +117,7 @@ export default function StudioPage() {
   const [recipientLinkedinUrl, setRecipientLinkedinUrl] = useState('');
   const [customContext, setCustomContext] = useState('');
   const [result, setResult] = useState<StudioComposition | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const generate = useGenerateStudioMessage();
 
@@ -127,262 +165,275 @@ export default function StudioPage() {
   function handleCopy(text: string, label: string) {
     navigator.clipboard.writeText(text);
     toast({ title: `${label} copied` });
+    setCopied(label);
+    setTimeout(() => setCopied((c) => (c === label ? null : c)), 1800);
   }
 
-  const wordCount = useMemo(() => result ? result.body.trim().split(/\s+/).filter(Boolean).length : 0, [result]);
-  const channelMeta = CHANNELS.find(c => c.id === channel);
+  const wordCount = useMemo(() => (result ? result.body.trim().split(/\s+/).filter(Boolean).length : 0), [result]);
+  const channelMeta = CHANNELS.find((c) => c.id === channel)!;
+  const ChannelIcon = channelMeta.icon;
+  const ext = externalLinkFor(channel, recipientLinkedinUrl);
+  const needsRecap = messageType === 'post_meeting' && !customContext.trim();
+
+  function CopyBtn({ text, label, children }: { text: string; label: string; children: ReactNode }) {
+    return (
+      <Button type="button" size="dense" variant="panel" onClick={() => handleCopy(text, label)} className="h-8 rounded-lg">
+        {copied === label ? <Check size={13} className="text-up" /> : <Copy size={13} />}
+        {children}
+      </Button>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="mx-auto max-w-[1180px] p-6">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-warn-fg" />
-            Message Studio
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Generate a one-shot outreach message for any prospect on any channel. Uses your{' '}
-            <Link href="/settings/messaging" className="text-info hover:underline">configured messaging</Link>.
+          <h1 className="m-0 font-display text-title font-medium text-ink">Message Studio</h1>
+          <p className="mb-0 mt-1 text-body text-ink-3">
+            Write a one-off outreach message for any prospect, on any channel. It follows your{' '}
+            <Link href="/settings/messaging" className="font-medium text-accent-fg hover:underline">
+              messaging settings
+            </Link>
+            .
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LEFT: Form */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Compose</CardTitle>
-            <CardDescription>Pick a channel + track, fill in the recipient, generate.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label className="text-sm font-medium mb-1.5 block">Channel *</Label>
-              <Select
-                value={channel}
-                onChange={(e) => setChannel(e.target.value as StudioChannel)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {CHANNELS.map(c => (
-                  <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
-                ))}
-              </Select>
-            </div>
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {/* LEFT: compose */}
+        <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+          <header className="border-b border-line px-5 py-3.5">
+            <h2 className="m-0 text-body font-semibold text-ink">Compose</h2>
+            <p className="mb-0 mt-0.5 text-xs text-ink-3">Choose where it goes, who it is for, then generate.</p>
+          </header>
 
-            <div>
-              <Label className="text-sm font-medium mb-1.5 block">Message Type *</Label>
-              <Select
-                value={messageType}
-                onChange={(e) => setMessageType(e.target.value as MessageType)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {MESSAGE_TYPES.map(t => (
-                  <option key={t.id} value={t.id}>{t.label}</option>
-                ))}
-              </Select>
-              {messageType === 'reactivation' && (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  💡 Mention something specific that changed (their company news, market shift, your new offering).
-                </p>
+          <div className="space-y-6 p-5">
+            <Section step={1} title="Channel & type">
+              <div className="grid grid-cols-3 gap-2">
+                {CHANNELS.map((c) => {
+                  const Icon = c.icon;
+                  const active = channel === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setChannel(c.id)}
+                      aria-pressed={active}
+                      className={cn(
+                        'flex h-14 flex-col items-center justify-center gap-1 rounded-card border text-2xs transition-colors',
+                        active
+                          ? 'border-accent-mid bg-accent-weak font-medium text-accent-fg'
+                          : 'border-line bg-bg-panel text-ink-2 hover:bg-hover',
+                      )}
+                    >
+                      <Icon size={15} />
+                      {c.short}
+                    </button>
+                  );
+                })}
+              </div>
+              <Field label="Message type">
+                <Select value={messageType} onChange={(e) => setMessageType(e.target.value as MessageType)} className={selectCls}>
+                  {MESSAGE_TYPES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+                {messageType === 'reactivation' && (
+                  <p className="m-0 flex items-start gap-1.5 text-xs text-ink-3">
+                    <Lightbulb size={13} className="mt-px shrink-0 text-warn-fg" />
+                    Mention something specific that changed: their company news, a market shift, your new offering.
+                  </p>
+                )}
+              </Field>
+              {messageType === 'post_no_show' && (
+                <Field label="Original meeting time" optional>
+                  <Input
+                    value={missedMeetingTime}
+                    onChange={(e) => setMissedMeetingTime(e.target.value)}
+                    placeholder="e.g. Tuesday 3pm UTC"
+                    className={inputCls}
+                  />
+                </Field>
               )}
-            </div>
+            </Section>
 
-            {messageType === 'post_no_show' && (
-              <div>
-                <Label className="text-xs">Original Meeting Time (optional)</Label>
+            <Section step={2} title="Track">
+              <div className="grid gap-2 sm:grid-cols-3">
+                {TRACKS.map((t) => {
+                  const Icon = t.icon;
+                  const active = track === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setTrack(t.id)}
+                      aria-pressed={active}
+                      className={cn(
+                        'flex flex-col items-start gap-1 rounded-card border p-3 text-left transition-colors',
+                        active ? 'border-accent-mid bg-accent-weak' : 'border-line bg-bg-panel hover:bg-hover',
+                      )}
+                    >
+                      <span className={cn('flex items-center gap-1.5 text-body font-medium', active ? 'text-accent-fg' : 'text-ink')}>
+                        <Icon size={14} />
+                        {t.label}
+                      </span>
+                      <span className="text-2xs leading-snug text-ink-3">{t.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </Section>
+
+            <Section step={3} title="Recipient">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Name *">
+                  <Input value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Igor Lavrih" className={inputCls} />
+                </Field>
+                <Field label="Company" optional>
+                  <Input value={recipientCompany} onChange={(e) => setRecipientCompany(e.target.value)} placeholder="Hoppacard" className={inputCls} />
+                </Field>
+                <Field label="Title" optional>
+                  <Input value={recipientTitle} onChange={(e) => setRecipientTitle(e.target.value)} placeholder="Co-Founder & CEO" className={inputCls} />
+                </Field>
+                <Field label="Location" optional>
+                  <Input value={recipientLocation} onChange={(e) => setRecipientLocation(e.target.value)} placeholder="Eindhoven, NL" className={inputCls} />
+                </Field>
+              </div>
+              <Field label="LinkedIn URL" optional>
                 <Input
-                  value={missedMeetingTime}
-                  onChange={(e) => setMissedMeetingTime(e.target.value)}
-                  placeholder="e.g. Tuesday 3pm UTC"
+                  value={recipientLinkedinUrl}
+                  onChange={(e) => setRecipientLinkedinUrl(e.target.value)}
+                  placeholder="https://linkedin.com/in/..."
+                  className={inputCls}
                 />
-              </div>
-            )}
+              </Field>
+            </Section>
 
-            <div>
-              <Label className="text-sm font-medium mb-1.5 block">Track *</Label>
-              <div className="space-y-1">
-                {TRACKS.map(t => (
-                  <label key={t.id} className="flex items-start gap-2 p-2 rounded hover:bg-muted/40 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="track"
-                      value={t.id}
-                      checked={track === t.id}
-                      onChange={() => setTrack(t.id)}
-                      className="mt-1"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{t.icon} {t.label}</p>
-                      <p className="text-xs text-muted-foreground">{t.description}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t pt-4 space-y-3">
-              <h3 className="text-sm font-medium">Recipient</h3>
-              <div>
-                <Label className="text-xs">Name *</Label>
-                <Input value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Igor Lavrih" />
-              </div>
-              <div>
-                <Label className="text-xs">Company</Label>
-                <Input value={recipientCompany} onChange={(e) => setRecipientCompany(e.target.value)} placeholder="Hoppacard" />
-              </div>
-              <div>
-                <Label className="text-xs">Title</Label>
-                <Input value={recipientTitle} onChange={(e) => setRecipientTitle(e.target.value)} placeholder="Co-Founder &amp; CEO" />
-              </div>
-              <div>
-                <Label className="text-xs">Location</Label>
-                <Input value={recipientLocation} onChange={(e) => setRecipientLocation(e.target.value)} placeholder="Eindhoven, NL" />
-              </div>
-              <div>
-                <Label className="text-xs">LinkedIn URL</Label>
-                <Input value={recipientLinkedinUrl} onChange={(e) => setRecipientLinkedinUrl(e.target.value)} placeholder="https://linkedin.com/in/..." />
-              </div>
-            </div>
-
-            <div className="border-t pt-4">
-              <Label className="text-sm font-medium mb-1.5 block">
-                {messageType === 'post_meeting'
-                  ? 'What was discussed? *'
-                  : 'Additional Context (optional)'}
-              </Label>
+            <Section step={4} title={messageType === 'post_meeting' ? 'What was discussed? *' : 'Extra context'}>
               <Textarea
                 value={customContext}
                 onChange={(e) => setCustomContext(e.target.value)}
                 placeholder={
                   messageType === 'post_meeting'
                     ? 'Required. Quick recap: the conversation, the key takeaway, what they cared about, what was decided.'
-                    : 'How you got their info, any hints, a specific angle you want the message to take, etc.'
+                    : 'How you got their info, any hints, a specific angle you want the message to take. Optional.'
                 }
                 rows={3}
+                className="rounded-lg border-line bg-bg-panel text-body focus-visible:ring-accent-weak"
               />
-              {messageType === 'post_meeting' && !customContext.trim() && (
-                <p className="text-xs text-warn-fg mt-1">Post-Meeting requires a recap of the conversation.</p>
-              )}
-            </div>
+              {needsRecap && <p className="m-0 text-xs text-warn-fg">Post-meeting messages need a recap of the conversation.</p>}
+            </Section>
 
-            <Button
-              onClick={handleGenerate}
-              disabled={generate.isPending || (messageType === 'post_meeting' && !customContext.trim())}
-              className="w-full"
-            >
-              {generate.isPending ? <Skeleton className="h-4 w-4 mr-2 rounded-full" /> : <Sparkles className="w-4 h-4 mr-2" />}
-              Generate Message
+            <Button type="button" variant="brand" onClick={handleGenerate} disabled={generate.isPending || needsRecap} className="h-10 w-full rounded-lg">
+              {generate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {generate.isPending ? 'Writing…' : result ? 'Generate again' : 'Generate message'}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        {/* RIGHT: Output */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              {channelMeta && <span>{channelMeta.icon}</span>}
-              {channelMeta?.label ?? 'Output'}
-              {result && <Badge variant="secondary" className="text-2xs ml-auto">{result.track} track</Badge>}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+        {/* RIGHT: output */}
+        <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm lg:sticky lg:top-4">
+          <header className="flex items-center gap-2.5 border-b border-line px-5 py-3.5">
+            <span className="flex size-7 items-center justify-center rounded-row bg-accent-weak text-accent-fg">
+              <ChannelIcon size={14} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="m-0 text-body font-semibold text-ink">{channelMeta.label}</h2>
+              <p className="mb-0 mt-0.5 text-xs text-ink-3">
+                {MESSAGE_TYPES.find((t) => t.id === messageType)?.label} · {TRACKS.find((t) => t.id === track)?.label}
+              </p>
+            </div>
+            {result && <span className="rounded-md bg-bg-sub px-2 py-0.5 text-2xs font-medium capitalize text-ink-2">{result.track} track</span>}
+          </header>
+
+          <div className="p-5">
             {generate.isPending ? (
-              <div className="space-y-3 py-6">
-                <Skeleton className="h-6 w-3/4" />
-                <Skeleton className="h-32 w-full" />
+              <div className="flex flex-col items-center gap-3 py-16 text-center">
+                <Loader2 size={22} className="animate-spin text-accent" />
+                <p className="m-0 text-body text-ink-2">Writing your message…</p>
+                <p className="m-0 text-xs text-ink-3">This usually takes a few seconds.</p>
               </div>
             ) : !result ? (
-              <div className="text-center py-12 text-muted-foreground space-y-2">
-                <p className="text-sm">👋 Fill in the form and click <span className="font-medium">Generate Message</span>.</p>
-                <p className="text-xs">
-                  The system uses your configured ICP and value proposition from{' '}
-                  <Link href="/settings/messaging" className="text-info hover:underline">Settings → Messaging</Link>.
+              <div className="flex flex-col items-center gap-2 py-14 text-center">
+                <span className="flex size-11 items-center justify-center rounded-panel bg-accent-weak text-accent-fg">
+                  <Sparkles size={20} />
+                </span>
+                <p className="m-0 mt-1 text-body font-medium text-ink">Your message will appear here</p>
+                <p className="m-0 max-w-[320px] text-xs leading-relaxed text-ink-3">
+                  Fill in the recipient and click Generate. The ICP and value proposition come from{' '}
+                  <Link href="/settings/messaging" className="font-medium text-accent-fg hover:underline">
+                    Settings → Messaging
+                  </Link>
+                  .
                 </p>
-              </div>
-            ) : channel === 'email_cold' ? (
-              <div className="space-y-4">
-                {result.subject && (
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Subject</Label>
-                    <div className="mt-1 px-3 py-2 rounded border bg-muted/30 text-sm font-medium">
-                      {result.subject}
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <Label className="text-xs text-muted-foreground">Body</Label>
-                  <div className="mt-1 px-3 py-2 rounded border bg-muted/30 text-sm whitespace-pre-wrap">
-                    {result.body}
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
-                  <span>📊 {wordCount} words</span>
-                  <span>•</span>
-                  <span>{result.characterCount} chars</span>
-                  {result.classification && (<><span>•</span><span>{result.classification}</span></>)}
-                </div>
-                <div className="flex flex-wrap gap-2 pt-2 border-t">
-                  {result.subject && (
-                    <Button size="sm" variant="outline" onClick={() => handleCopy(result.subject!, 'Subject')}>
-                      <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy Subject
-                    </Button>
-                  )}
-                  <Button size="sm" variant="outline" onClick={() => handleCopy(result.body, 'Body')}>
-                    <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy Body
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => handleCopy(`Subject: ${result.subject ?? ''}\n\n${result.body}`, 'Email')}>
-                    <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy All
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={handleGenerate}>
-                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Regenerate
-                  </Button>
-                  {result.subject && (
-                    <a
-                      href={`mailto:?subject=${encodeURIComponent(result.subject)}&body=${encodeURIComponent(result.body)}`}
-                    >
-                      <Button size="sm" variant="outline">
-                        <Mail className="w-3.5 h-3.5 mr-1.5" /> Open in Mail App
-                      </Button>
-                    </a>
-                  )}
-                </div>
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="rounded-2xl border bg-muted/30 p-4 whitespace-pre-wrap text-sm">
-                  {result.body}
+                {channel === 'email_cold' && result.subject && (
+                  <div className="space-y-1.5">
+                    <div className={labelCls}>Subject</div>
+                    <div className="rounded-card border border-line bg-bg-sub px-3 py-2 text-body font-medium text-ink">{result.subject}</div>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  {channel === 'email_cold' && <div className={labelCls}>Body</div>}
+                  <div
+                    className={cn(
+                      'whitespace-pre-wrap border border-line bg-bg-sub text-body leading-relaxed text-ink',
+                      channel === 'email_cold' ? 'rounded-card px-3.5 py-3' : 'rounded-2xl rounded-tl-md px-4 py-3.5',
+                    )}
+                  >
+                    {result.body}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
+
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
                   {channel === 'linkedin_connection_request' ? (
-                    <span>
-                      📊 {result.characterCount}/300 characters {result.characterCount <= 300 ? '✓' : '✗ over limit'}
+                    <span className={result.characterCount <= 300 ? 'text-up' : 'text-down'}>
+                      {result.characterCount}/300 characters {result.characterCount <= 300 ? '✓' : '· over the limit'}
                     </span>
                   ) : (
-                    <span>📊 {wordCount} words • {result.characterCount} chars</span>
+                    <span>
+                      {wordCount} words · {result.characterCount} characters
+                    </span>
                   )}
+                  {channel === 'email_cold' && result.classification && <span>· {result.classification}</span>}
                 </div>
-                <div className="flex flex-wrap gap-2 pt-2 border-t">
-                  <Button size="sm" variant="outline" onClick={() => handleCopy(result.body, 'Message')}>
-                    {channelIconLucide(channel)}<span className="ml-1.5">Copy Message</span>
+
+                <div className="flex flex-wrap gap-2 border-t border-line pt-4">
+                  {channel === 'email_cold' ? (
+                    <>
+                      {result.subject && <CopyBtn text={result.subject} label="Subject">Copy subject</CopyBtn>}
+                      <CopyBtn text={result.body} label="Body">Copy body</CopyBtn>
+                      <CopyBtn text={`Subject: ${result.subject ?? ''}\n\n${result.body}`} label="Email">Copy all</CopyBtn>
+                    </>
+                  ) : (
+                    <CopyBtn text={result.body} label="Message">Copy message</CopyBtn>
+                  )}
+                  <Button type="button" size="dense" variant="panel" onClick={handleGenerate} className="h-8 rounded-lg">
+                    <RefreshCw size={13} /> Regenerate
                   </Button>
-                  <Button size="sm" variant="outline" onClick={handleGenerate}>
-                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Regenerate
-                  </Button>
-                  {(() => {
-                    const ext = externalLinkFor(channel, recipientLinkedinUrl);
-                    if (!ext) return null;
-                    return (
-                      <a href={ext.href} target="_blank" rel="noopener noreferrer">
-                        <Button size="sm" variant="outline">
-                          <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> {ext.label}
-                        </Button>
+                  {channel === 'email_cold' && result.subject && (
+                    <Button asChild size="dense" variant="panel" className="h-8 rounded-lg">
+                      <a href={`mailto:?subject=${encodeURIComponent(result.subject)}&body=${encodeURIComponent(result.body)}`}>
+                        <Mail size={13} /> Open in mail app
                       </a>
-                    );
-                  })()}
+                    </Button>
+                  )}
+                  {ext && (
+                    <Button asChild size="dense" variant="panel" className="h-8 rounded-lg">
+                      <a href={ext.href} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink size={13} /> {ext.label}
+                      </a>
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
     </div>
   );

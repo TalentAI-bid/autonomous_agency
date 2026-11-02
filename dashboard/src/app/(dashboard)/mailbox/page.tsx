@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table';
 import { EmailDetailDialog } from '@/components/mailbox/email-detail-dialog';
 import { ThreadDetailDialog } from '@/components/mailbox/thread-detail-dialog';
+import { InboxEmptyState, useInboxIsEmpty } from '@/components/mailbox/inbox-empty';
 import { formatDate, formatRelative, formatNumber } from '@/lib/utils';
 import {
   Mail, Inbox, Send, ArrowDown, ArrowUp, Search, MessageSquare,
@@ -90,6 +91,7 @@ export default function MailboxPage() {
     status: threadStatusFilter || undefined,
   });
   const bulkAction = useBulkAction();
+  const inbox = useInboxIsEmpty();
 
   const sentEmails = sentData?.data ?? [];
   const inboxEmails = inboxData?.data ?? [];
@@ -120,6 +122,9 @@ export default function MailboxPage() {
     bulkAction.mutate({ action, threadIds: Array.from(selectedThreadIds) });
     setSelectedThreadIds(new Set());
   };
+
+  // Never received a reply: show the explanatory empty state instead of an empty table.
+  if (inbox.empty && !search && !threadStatusFilter) return <InboxEmptyState sent={inbox.sent} />;
 
   return (
     <div className="space-y-6">

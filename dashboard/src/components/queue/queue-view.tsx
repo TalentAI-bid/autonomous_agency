@@ -1,15 +1,16 @@
 'use client';
 
 import * as React from 'react';
+import { Info, Loader2 } from 'lucide-react';
 import { useQueue, useRefreshQueue } from '@/hooks/use-queue';
+import { useAgents } from '@/hooks/use-agents';
 import { ActionCard } from '@/components/queue/action-card';
+import { ClearedCard, NoAgentCard, ReplyDetectionBanner } from '@/components/queue/queue-parts';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { AgentFilter } from '@/components/queue/agent-filter';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAuthStore } from '@/stores/auth.store';
 import { useRealtimeStore } from '@/stores/realtime.store';
-import { CheckCircle2 } from 'lucide-react';
-import { EmptyState } from '@/components/shared/empty-state';
 
 const PRIORITY_DEFAULTS = { P0: true, P1: true, P2: false, P3: false } as const;
 const PRIORITY_DESC: Record<string, string> = {
@@ -22,13 +23,15 @@ const PRIORITY_DESC: Record<string, string> = {
 interface QueueViewProps {
   /** When set, scopes the queue to actions whose company.master_agent_id matches. */
   masterAgentId?: string;
-  /** Show the time-of-day greeting + action count header. */
+  /** Full-page layout: reply-detection banner, agent filter and "Skip all" toolbar. */
   showGreeting?: boolean;
 }
 
-export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProps) {
-  const user = useAuthStore((s) => s.user);
-  const { data, isLoading } = useQueue(masterAgentId);
+export function QueueView({ masterAgentId, showGreeting: page = false }: QueueViewProps) {
+  const [agentFilter, setAgentFilter] = React.useState('');
+  const scope = masterAgentId ?? (agentFilter || undefined);
+  const { data, isLoading } = useQueue(scope);
+  const { data: agents } = useAgents();
   const refreshMut = useRefreshQueue();
   const lastManualRefreshAt = useRealtimeStore((s) => s.lastManualRefreshAt);
 
@@ -47,9 +50,6 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
   const refreshInFlight = refreshMut.isPending || lastManualRefreshAt != null;
   const refreshElapsedMs = lastManualRefreshAt ? Date.now() - lastManualRefreshAt : 0;
   const refreshTimedOut = lastManualRefreshAt != null && refreshElapsedMs >= 115_000;
-
-  const greeting = greetByHour();
-  const name = user?.name?.split(' ')[0] ?? '';
 
   const quota = data?.refreshQuota ?? { remaining: 3, limit: 3, resetAt: '' };
   const quotaExhausted = quota.remaining <= 0;
@@ -74,51 +74,81 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
 
   const refreshBanner = refreshInFlight ? (
     <div
-      className="flex items-center gap-2 py-2.5 px-3 border border-border rounded-row bg-bg-panel text-body text-ink-2"
+      role="status"
+      className="flex items-center gap-3 rounded-row border border-accent-line bg-accent-tint px-3.5 py-2.5 text-body text-accent-fg"
     >
-      <span className="text-[14px]">{refreshTimedOut ? 'ℹ️' : '🔄'}</span>
-      <span>
-        {refreshTimedOut
-          ? "No matching actions found for today's rules. Try again after adding more prospects, or check back tomorrow."
-          : 'Triage running — new actions should appear within ~1 minute.'}
-      </span>
+      {refreshTimedOut ? (
+        <Info size={15} className="shrink-0" />
+      ) : (
+        <Loader2 size={15} className="shrink-0 animate-spin" />
+      )}
+      <p className="m-0 min-w-0 flex-1">
+        {refreshTimedOut ? (
+          "No matching actions found for today's rules. Try again after adding more prospects, or check back tomorrow."
+        ) : (
+          <>
+            <strong className="font-semibold">Triage running</strong> — new actions should appear within about a minute.
+          </>
+        )}
+      </p>
     </div>
   ) : null;
 
-  if (isLoading) {
+  const handled = data?.handledToday;
+  const handledCount = handled ? handled.approved + handled.skipped : null;
+  const waiting = data?.count ?? 0;
+
+  const toolbar = page ? (
+    <div className="flex flex-wrap items-center gap-3 rounded-row border border-line bg-bg-panel px-3 py-2">
+      <AgentFilter agents={agents ?? []} value={agentFilter} onChange={setAgentFilter} />
+      <span className="text-xs text-ink-3">
+        {waiting} waiting{handledCount != null ? ` · ${handledCount} handled today` : ''}
+      </span>
+      <Button
+        type="button"
+        variant="panel"
+        size="dense"
+        disabled
+        title={waiting === 0 ? undefined : 'Bulk skip is not available yet'}
+        className="ml-auto h-8 rounded-lg px-3 text-xs font-medium"
+      >
+        {waiting === 0 ? 'Skip all — nothing to skip' : `Skip all (${waiting})`}
+      </Button>
+    </div>
+  ) : null;
+
+  if (page && !masterAgentId && agents && agents.length === 0) return <NoAgentCard />;
+
+  if (isLoading || (page && !agents)) {
     return (
       <div className="flex flex-col gap-3">
-        <Skeleton className="h-16"/>
-        {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24"/>)}
+        <Skeleton className="h-12" />
+        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
       </div>
     );
   }
 
   if (!data || data.count === 0) {
+    const summary = [
+      handled ? `You approved ${handled.approved} and skipped ${handled.skipped}.` : 'Nothing is waiting for your approval.',
+      quotaExhausted
+        ? `The next batch is drafted at 06:00 UTC tomorrow. Manual refresh limit reached — resets ${resetLocal}.`
+        : 'The next batch is drafted at 06:00 UTC tomorrow, or you can pull one now.',
+    ].join(' ');
     return (
       <div className="flex flex-col gap-4">
+        {page && <ReplyDetectionBanner />}
+        {toolbar}
         {refreshBanner}
-        <EmptyState
-          icon={CheckCircle2}
-          title="✅ Queue cleared for today"
-          description={
-            quotaExhausted
-              ? `Tomorrow's queue runs at 6 AM UTC. Manual refresh limit reached — resets ${resetLocal}.`
-              : "Tomorrow's queue runs at 6 AM UTC. You can also refresh now."
-          }
-          action={
-            <Button
-              onClick={refresh}
-              disabled={refreshMut.isPending || quotaExhausted}
-              title={refreshTitle}
-            >
-              {refreshMut.isPending
-                ? 'Refreshing…'
-                : quotaExhausted
-                  ? `Limit reached (0/${quota.limit})`
-                  : `Refresh now (${quota.remaining}/${quota.limit})`}
-            </Button>
-          }
+        <ClearedCard
+          summary={summary}
+          quotaText={`${quota.remaining} of ${quota.limit} daily refreshes left`}
+          exhausted={quotaExhausted}
+          pending={refreshMut.isPending}
+          remaining={quota.remaining}
+          limit={quota.limit}
+          onRefresh={refresh}
+          title={refreshTitle}
         />
       </div>
     );
@@ -126,29 +156,14 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-between items-end flex-wrap gap-3">
-        {showGreeting ? (
-          <div>
-            <h1 className="text-stat font-semibold">
-              {greeting}{name ? `, ${name}` : ''}.
-            </h1>
-            <p className="text-body text-ink-3">
-              <strong className="text-ink">{data.count}</strong> actions today
-              {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
-            </p>
-          </div>
-        ) : (
-          <p className="text-body text-ink-3">
-            <strong className="text-ink">{data.count}</strong> actions
-            {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
-          </p>
-        )}
-        <Button
-          variant="outline"
-          onClick={refresh}
-          disabled={refreshMut.isPending || quotaExhausted}
-          title={refreshTitle}
-        >
+      {page && <ReplyDetectionBanner />}
+      {toolbar}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <p className="text-body text-ink-3">
+          <strong className="text-ink">{data.count}</strong> actions
+          {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
+        </p>
+        <Button variant="outline" onClick={refresh} disabled={refreshMut.isPending || quotaExhausted} title={refreshTitle}>
           {refreshLabel}
         </Button>
       </div>
@@ -162,7 +177,7 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
           <div key={b.priority} className="flex flex-col gap-2">
             <button
               onClick={() => toggle(b.priority)}
-              className="flex items-center gap-2.5 py-2 px-0 bg-transparent border-0 text-ink cursor-pointer text-left"
+              className="flex cursor-pointer items-center gap-2.5 border-0 bg-transparent px-0 py-2 text-left text-ink"
             >
               <Badge variant={
                 b.priority === 'P0' ? 'error' :
@@ -191,11 +206,4 @@ export function QueueView({ masterAgentId, showGreeting = false }: QueueViewProp
       })}
     </div>
   );
-}
-
-function greetByHour(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
 }

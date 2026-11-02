@@ -1,14 +1,46 @@
-import { Activity, BarChart3, Target } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { AgentMonitor } from '@/components/agents/agent-monitor';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatDate, getStatusColor } from '@/lib/utils';
+import { cn, formatDate, getStatusColor } from '@/lib/utils';
 import type { useAgentStats } from '@/hooks/use-agents';
 import type { useRealtimeStore } from '@/stores/realtime.store';
 import type { MasterAgent } from '@/types';
 
 type Stats = ReturnType<typeof useAgentStats>['data'];
 type AgentEvent = ReturnType<typeof useRealtimeStore.getState>['events'][number];
+
+function Panel({ title, aside, children, className }: { title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={cn('overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm', className)}>
+      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
+        {aside}
+      </header>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+const Empty = ({ children }: { children: ReactNode }) => <p className="m-0 py-4 text-center text-body text-ink-3">{children}</p>;
+
+const Chip = ({ children, soft }: { children: ReactNode; soft?: boolean }) => (
+  <span className={cn('rounded-tag px-2 py-1 text-xs', soft ? 'bg-accent-weak text-accent-fg' : 'bg-bg-soft text-ink-2')}>{children}</span>
+);
+
+function ChipGroup({ label, items, soft }: { label: string; items: string[]; soft?: boolean }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((i) => (
+          <Chip key={i} soft={soft}>
+            {i}
+          </Chip>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function OverviewTab({
   agentId,
@@ -28,6 +60,7 @@ export function OverviewTab({
   const requiredSkills = (config.requiredSkills as string[]) ?? [];
   const locations = (config.locations as string[]) ?? [];
   const byStatus = stats?.byStatus ?? {};
+  const sales = agent.useCase === 'sales';
 
   const funnelStages = [
     { label: 'Discovered', value: byStatus.discovered ?? 0, color: 'bg-info' },
@@ -36,135 +69,106 @@ export function OverviewTab({
     { label: 'Contacted', value: byStatus.contacted ?? 0, color: 'bg-up' },
   ];
 
+  const strategy =
+    typeof config.bdStrategy === 'string'
+      ? config.bdStrategy === 'hiring_signal'
+        ? 'Hiring signal (job boards)'
+        : config.bdStrategy === 'industry_target'
+          ? 'Industry targeting (registries)'
+          : 'Hybrid (both)'
+      : null;
+  const noRequirements = targetRoles.length === 0 && requiredSkills.length === 0 && locations.length === 0;
+
   return (
-    <>
-      {/* Agent Monitor */}
+    <div className="space-y-5">
       <AgentMonitor masterAgentId={agentId} />
 
-      {/* Pipeline Stats + Parsed Requirements */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" />
-              Pipeline Stats
-              {stats?.avgScore != null && (
-                <Badge variant="outline" className="ml-auto text-xs">Avg Score: {stats.avgScore}</Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {funnelStages.map((stage) => (
-              <div key={stage.label} className="space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{stage.label}</span>
-                  <span className="font-medium">{stage.value}</span>
-                </div>
-                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${stage.color} rounded-full transition-all`}
-                    style={{ width: totalContacts > 0 ? `${(stage.value / totalContacts) * 100}%` : '0%' }}
-                  />
-                </div>
-              </div>
-            ))}
-            {totalContacts === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No contacts yet. Run the agent to start the pipeline.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Panel
+          title="Pipeline"
+          aside={
+            stats?.avgScore != null ? (
+              <span className="rounded-tag bg-bg-soft px-2 py-1 font-mono text-xs text-ink-3">avg score {stats.avgScore}</span>
+            ) : undefined
+          }
+        >
+          {totalContacts === 0 ? (
+            <Empty>No leads yet. Run the agent to start the pipeline.</Empty>
+          ) : (
+            <div className="space-y-3.5">
+              {funnelStages.map((stage, i) => {
+                const pct = Math.min(100, Math.round((stage.value / totalContacts) * 100));
+                return (
+                  <div key={stage.label} className="flex items-center gap-3">
+                    <span className="grid size-5 shrink-0 place-items-center rounded-full bg-bg-sub font-mono text-2xs text-ink-3">{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between text-body">
+                        <span className="text-ink-2">{stage.label}</span>
+                        <span>
+                          <span className="font-mono font-medium text-ink">{stage.value}</span>
+                          <span className="ml-1.5 font-mono text-2xs text-ink-4">{pct}%</span>
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-bg-soft">
+                        <div className={cn('h-full rounded-full transition-all', stage.color)} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Target className="w-4 h-4" />
-              Parsed Requirements
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {targetRoles.length > 0 && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">
-                  {agent.useCase === 'sales' ? 'Target Decision-Makers' : 'Target Roles'}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {targetRoles.map((role) => (
-                    <Badge key={role} variant="secondary" className="text-xs">{role}</Badge>
-                  ))}
+        <Panel title="What it looks for">
+          {noRequirements && !strategy ? (
+            <Empty>Requirements appear after the agent runs.</Empty>
+          ) : (
+            <div className="space-y-4">
+              <ChipGroup label={sales ? 'Decision-makers' : 'Target roles'} items={targetRoles} soft />
+              <ChipGroup label={sales ? 'Company attributes' : 'Required skills'} items={requiredSkills} />
+              <ChipGroup label="Locations" items={locations} />
+              {strategy && (
+                <div>
+                  <div className="mb-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Discovery strategy</div>
+                  <Chip>{strategy}</Chip>
                 </div>
-              </div>
-            )}
-            {requiredSkills.length > 0 && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">
-                  {agent.useCase === 'sales' ? 'Target Company Attributes' : 'Required Skills'}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {requiredSkills.map((skill) => (
-                    <Badge key={skill} variant="outline" className="text-xs">{skill}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-            {locations.length > 0 && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Locations</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {locations.map((loc) => (
-                    <Badge key={loc} variant="outline" className="text-xs">{loc}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-            {typeof config.bdStrategy === 'string' && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Discovery Strategy</p>
-                <Badge variant="outline" className="text-xs">
-                  {config.bdStrategy === 'hiring_signal' ? 'Hiring Signal (Job boards)' :
-                   config.bdStrategy === 'industry_target' ? 'Industry Targeting (Registries)' :
-                   'Hybrid (Both)'}
-                </Badge>
-              </div>
-            )}
-            {targetRoles.length === 0 && requiredSkills.length === 0 && locations.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Requirements will appear after the agent runs.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </div>
+          )}
+        </Panel>
       </div>
 
-      {/* Live Events */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Activity className="w-4 h-4 text-up" />
-            Live Events
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
-          {events.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              {agent.status === 'running' ? 'Waiting for events...' : 'No events. Start the agent to see activity.'}
-            </p>
-          ) : (
-            events.map((event, i) => (
-              <div key={i} className="flex gap-2 text-xs border-l-2 border-border pl-2 py-1">
-                <div className="min-w-0 flex-1">
-                  <span className={`font-medium ${getStatusColor(event.event)}`}>{event.event}</span>
+      <Panel
+        title="Live events"
+        aside={
+          agent.status === 'running' ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-up">
+              <span className="size-1.5 animate-pulse rounded-full bg-current" /> Live
+            </span>
+          ) : undefined
+        }
+      >
+        {events.length === 0 ? (
+          <Empty>{agent.status === 'running' ? 'Waiting for events…' : 'No events yet. Run the agent to see activity here.'}</Empty>
+        ) : (
+          <ul className="scroll-thin m-0 max-h-[300px] list-none overflow-y-auto p-0">
+            {events.map((event, i) => (
+              <li key={i} className="relative flex gap-3 pb-3 last:pb-0">
+                {i < events.length - 1 && <span className="absolute left-[4.5px] top-3 h-full w-px bg-line" />}
+                <span className="relative mt-1.5 size-[10px] shrink-0 rounded-full border-2 border-bg-panel bg-line-strong ring-1 ring-line" />
+                <div className="min-w-0 flex-1 text-xs">
+                  <span className={cn('font-medium', getStatusColor(event.event))}>{event.event}</span>
                   {event.data && typeof event.data === 'object' && 'message' in event.data && (
-                    <p className="text-muted-foreground mt-0.5 truncate">{String(event.data.message)}</p>
+                    <p className="m-0 mt-0.5 truncate text-ink-3">{String(event.data.message)}</p>
                   )}
                 </div>
-                <span className="text-muted-foreground shrink-0">{formatDate(event.timestamp)}</span>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </>
+                <span className="shrink-0 font-mono text-2xs text-ink-4">{formatDate(event.timestamp, 'HH:mm:ss')}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+    </div>
   );
 }

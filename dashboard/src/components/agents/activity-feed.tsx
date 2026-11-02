@@ -1,12 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { CheckCircle2, Clock, Loader2, Pause, XCircle } from 'lucide-react';
 import { useActivityFeed } from '@/hooks/use-activity';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { formatDate } from '@/lib/utils';
-import { Activity, CheckCircle2, XCircle, Clock, Pause, Play } from 'lucide-react';
+import { cn, formatDate } from '@/lib/utils';
 import type { AgentType } from '@/types';
 
 const AGENT_TYPE_COLORS: Record<string, string> = {
@@ -21,12 +18,14 @@ const AGENT_TYPE_COLORS: Record<string, string> = {
   strategist: 'bg-info/10 text-info',
 };
 
-const STATUS_ICONS = {
-  started: Clock,
-  completed: CheckCircle2,
-  failed: XCircle,
-  skipped: Pause,
-};
+const STATUS = {
+  started: { icon: Clock, tone: 'bg-bg-sub text-ink-3' },
+  completed: { icon: CheckCircle2, tone: 'bg-up/10 text-up' },
+  failed: { icon: XCircle, tone: 'bg-down/10 text-down' },
+  skipped: { icon: Pause, tone: 'bg-bg-sub text-ink-3' },
+} as const;
+
+const AGENT_TYPES: AgentType[] = ['strategist', 'discovery', 'enrichment', 'scoring', 'outreach', 'reply', 'document', 'action', 'strategy'];
 
 interface ActivityFeedProps {
   masterAgentId: string;
@@ -34,7 +33,6 @@ interface ActivityFeedProps {
 
 export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
   const [filter, setFilter] = useState<string | undefined>(undefined);
-  const [paused, setPaused] = useState(false);
   const { data, isLoading } = useActivityFeed({
     masterAgentId,
     agentType: filter,
@@ -43,88 +41,71 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
 
   const activities = data?.data ?? [];
 
-  const agentTypes: AgentType[] = ['strategist', 'discovery', 'enrichment', 'scoring', 'outreach', 'reply', 'document', 'action', 'strategy'];
-
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Activity className="w-4 h-4 text-up" />
-            Activity Feed
-          </CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setPaused(!paused)}
-            className="h-7 px-2 text-xs"
-          >
-            {paused ? <Play className="w-3 h-3 mr-1" /> : <Pause className="w-3 h-3 mr-1" />}
-            {paused ? 'Resume' : 'Pause'}
-          </Button>
+    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="space-y-3 border-b border-line px-5 py-3.5">
+        <div className="flex items-center gap-2">
+          <h2 className="m-0 text-body font-semibold text-ink">Activity</h2>
+          {activities.length > 0 && (
+            <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{activities.length}</span>
+          )}
         </div>
-        <div className="flex flex-wrap gap-1 mt-2">
-          <Badge
-            variant={!filter ? 'default' : 'outline'}
-            className="text-xs cursor-pointer"
-            onClick={() => setFilter(undefined)}
-          >
-            All
-          </Badge>
-          {agentTypes.map((type) => (
-            <Badge
-              key={type}
-              variant={filter === type ? 'default' : 'outline'}
-              className="text-xs cursor-pointer capitalize"
-              onClick={() => setFilter(filter === type ? undefined : type)}
-            >
-              {type}
-            </Badge>
-          ))}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-1.5 max-h-[500px] overflow-y-auto">
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground text-center py-6">Loading...</p>
-        ) : activities.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">
-            No activity logged yet. Run the agent to see activity here.
-          </p>
-        ) : (
-          activities.map((entry: any) => {
-            const StatusIcon = STATUS_ICONS[entry.status as keyof typeof STATUS_ICONS] ?? Clock;
-            const colorClass = AGENT_TYPE_COLORS[entry.agentType] ?? 'bg-ink-3/10 text-ink-3';
-
+        <div className="flex flex-wrap gap-1.5">
+          {[undefined, ...AGENT_TYPES].map((type) => {
+            const active = filter === type;
             return (
-              <div key={entry.id} className="flex items-start gap-2 py-1.5 text-xs border-l-2 border-border pl-2">
-                <StatusIcon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${
-                  entry.status === 'completed' ? 'text-up' :
-                  entry.status === 'failed' ? 'text-destructive' :
-                  'text-muted-foreground'
-                }`} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <Badge variant="outline" className={`text-2xs px-1 py-0 ${colorClass}`}>
-                      {entry.agentType}
-                    </Badge>
-                    <span className="font-medium">{entry.action}</span>
-                    {entry.durationMs != null && (
-                      <span className="text-muted-foreground ml-auto shrink-0">{entry.durationMs}ms</span>
-                    )}
-                  </div>
-                  {entry.inputSummary && (
-                    <p className="text-muted-foreground truncate mt-0.5">{entry.inputSummary}</p>
-                  )}
-                  {entry.error && (
-                    <p className="text-destructive truncate mt-0.5">{entry.error}</p>
-                  )}
-                </div>
-                <span className="text-muted-foreground shrink-0 ml-2">{formatDate(entry.createdAt)}</span>
-              </div>
+              <button
+                key={type ?? 'all'}
+                type="button"
+                onClick={() => setFilter(type)}
+                aria-pressed={active}
+                className={cn(
+                  'rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors',
+                  active ? 'border-accent-mid bg-accent-weak font-medium text-accent-fg' : 'border-line bg-bg-panel text-ink-3 hover:bg-hover hover:text-ink',
+                )}
+              >
+                {type ?? 'All'}
+              </button>
             );
-          })
-        )}
-      </CardContent>
-    </Card>
+          })}
+        </div>
+      </header>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center gap-2 px-5 py-10 text-body text-ink-3">
+          <Loader2 size={15} className="animate-spin" /> Loading activity…
+        </div>
+      ) : activities.length === 0 ? (
+        <p className="m-0 px-5 py-10 text-center text-body text-ink-3">
+          {filter ? `No ${filter} activity yet.` : 'No activity logged yet. Run the agent to see activity here.'}
+        </p>
+      ) : (
+        <ul className="scroll-thin m-0 max-h-[560px] list-none divide-y divide-line overflow-y-auto p-0">
+          {activities.map((entry: any) => {
+            const st = STATUS[entry.status as keyof typeof STATUS] ?? STATUS.started;
+            const StatusIcon = st.icon;
+            return (
+              <li key={entry.id} className="flex items-start gap-3 px-5 py-3 transition-colors hover:bg-bg-soft">
+                <span className={cn('mt-0.5 grid size-6 shrink-0 place-items-center rounded-full', st.tone)} title={entry.status}>
+                  <StatusIcon size={13} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className={cn('rounded-md px-2 py-0.5 text-2xs font-medium capitalize', AGENT_TYPE_COLORS[entry.agentType] ?? 'bg-bg-sub text-ink-3')}>
+                      {entry.agentType}
+                    </span>
+                    <span className="text-body font-medium text-ink">{entry.action}</span>
+                    {entry.durationMs != null && <span className="font-mono text-2xs text-ink-4">{entry.durationMs}ms</span>}
+                  </div>
+                  {entry.inputSummary && <p className="mb-0 mt-1 truncate text-xs text-ink-3">{entry.inputSummary}</p>}
+                  {entry.error && <p className="mb-0 mt-1 truncate text-xs text-down">{entry.error}</p>}
+                </div>
+                <span className="shrink-0 pt-0.5 text-xs text-ink-4">{formatDate(entry.createdAt)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

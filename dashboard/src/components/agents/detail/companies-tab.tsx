@@ -1,14 +1,16 @@
 import Link from 'next/link';
-import { Building2, MapPin, Phone } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ArrowUpRight, ChevronLeft, ChevronRight, MapPin, Phone } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { FitScoreBadge } from '@/components/companies/fit-score-badge';
+import { cn } from '@/lib/utils';
 import type { CompanyFitScoreVerdict } from '@/types';
 import type { CompaniesTabState } from './use-companies-tab';
 
 type Company = CompaniesTabState['companies'][number];
 
-function CompanyCard({ agentId, company }: { agentId: string; company: Company }) {
+const tag = 'rounded-md px-2 py-0.5 text-2xs font-medium';
+
+function CompanyRow({ agentId, company }: { agentId: string; company: Company }) {
   const raw = (company.rawData ?? {}) as Record<string, unknown>;
   const keyPeople = (raw.keyPeople as Array<{ name: string; title: string }>) ?? [];
   const completeness = company.dataCompleteness ?? 0;
@@ -16,9 +18,8 @@ function CompanyCard({ agentId, company }: { agentId: string; company: Company }
   const openJob = typeof raw.openJob === 'string' ? raw.openJob : '';
   const jobUrl = typeof raw.jobUrl === 'string' ? raw.jobUrl : '';
   const jobPostedAt = typeof raw.jobPostedAt === 'string' ? raw.jobPostedAt : '';
-  // Prefer the new continuous fitScore; fall back to nothing
-  // for unscored companies (they're still shown — never hidden).
-  const fitScore = (raw.fitScore as CompanyFitScoreVerdict | undefined);
+  // Prefer the continuous fitScore; unscored companies are still shown, never hidden.
+  const fitScore = raw.fitScore as CompanyFitScoreVerdict | undefined;
   // list_verification mode flags (strict company-list enrichment).
   const isListEntry = raw.listEntry === true;
   const linkedinNotFound = raw.linkedinNotFound === true;
@@ -28,154 +29,130 @@ function CompanyCard({ agentId, company }: { agentId: string; company: Company }
   // Google Maps enrichment (phone/address land on the company's rawData).
   const gmapsPhone = typeof raw.phone === 'string' ? raw.phone : '';
   const gmapsAddress = typeof raw.address === 'string' ? raw.address : '';
+  const sub = [company.domain, company.industry, company.size].filter(Boolean).join(' · ');
 
   return (
-    <Link href={`/agents/${agentId}/companies/${company.id}`} className="block">
-      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors space-y-3">
-        {/* Header: name + domain + badges */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="font-medium truncate">{company.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {[company.domain, company.industry, company.size].filter(Boolean).join(' · ')}
-            </p>
+    <li>
+      <Link href={`/agents/${agentId}/companies/${company.id}`} className="group flex items-start gap-3.5 px-5 py-4 transition-colors hover:bg-bg-soft">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-weak text-sm font-semibold uppercase text-accent-fg">
+          {(company.name?.[0] ?? '?').toUpperCase()}
+        </span>
+
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-body font-medium text-ink">{company.name}</div>
+              {sub && <div className="truncate text-xs text-ink-3">{sub}</div>}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <FitScoreBadge score={fitScore?.buyer_fit_score} explanation={fitScore?.fit_summary} />
+              {fitScore?.data_completeness === 'partial' && <span className={cn(tag, 'bg-warn/15 text-warn-fg')}>partial</span>}
+              {company.funding && <span className={cn(tag, 'bg-bg-sub text-ink-2')}>{company.funding}</span>}
+              <span
+                className={cn(
+                  tag,
+                  completeness >= 50 ? 'bg-up/10 text-up' : completeness >= 30 ? 'bg-warn/15 text-warn-fg' : 'bg-bg-sub text-ink-3',
+                )}
+              >
+                {completeness > 0 ? `${completeness}%` : 'New'}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <FitScoreBadge score={fitScore?.buyer_fit_score} explanation={fitScore?.fit_summary} />
-            {fitScore?.data_completeness === 'partial' && (
-              <Badge variant="outline" className="text-2xs text-warn-fg border-warn/40">
-                partial
-              </Badge>
-            )}
-            {company.funding && (
-              <Badge variant="outline" className="text-xs">{company.funding}</Badge>
-            )}
-            <Badge
-              variant={completeness >= 50 ? 'default' : completeness >= 30 ? 'secondary' : 'outline'}
-              className="text-xs"
-            >
-              {completeness > 0 ? `${completeness}%` : 'New'}
-            </Badge>
-          </div>
+
+          {company.description && <p className="m-0 line-clamp-2 text-xs leading-relaxed text-ink-3">{company.description}</p>}
+
+          {(gmapsPhone || gmapsAddress) && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+              {gmapsPhone && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Phone size={11} className="shrink-0" />
+                  {gmapsPhone}
+                </span>
+              )}
+              {gmapsAddress && (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <MapPin size={11} className="shrink-0" />
+                  <span className="truncate">{gmapsAddress}</span>
+                </span>
+              )}
+            </div>
+          )}
+
+          {(isListEntry || (hiringSignal && openJob)) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {isListEntry && (
+                <>
+                  {linkedinNotFound ? (
+                    <span className={cn(tag, 'bg-down/10 text-down')}>No LinkedIn match</span>
+                  ) : company.linkedinUrl ? (
+                    <span className={cn(tag, 'bg-up/10 text-up')}>LinkedIn ✓</span>
+                  ) : null}
+                  <span className={cn(tag, gmapsNotFound ? 'bg-down/10 text-down' : 'bg-up/10 text-up')}>
+                    {gmapsNotFound ? 'No Maps match' : 'Maps ✓'}
+                  </span>
+                  {crawledCount > 0 && (
+                    <span className={cn(tag, 'bg-info/10 text-info')}>{crawledCount === 2 ? 'Site + source crawled' : 'Site crawled'}</span>
+                  )}
+                </>
+              )}
+              {hiringSignal && openJob && (
+                <>
+                  {jobUrl ? (
+                    <a
+                      href={jobUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className={cn(tag, 'inline-flex items-center gap-1 bg-up/10 text-up transition-colors hover:bg-up/20')}
+                    >
+                      Hiring: {openJob}
+                      <ArrowUpRight size={11} />
+                    </a>
+                  ) : (
+                    <span className={cn(tag, 'bg-up/10 text-up')}>Hiring: {openJob}</span>
+                  )}
+                  {jobPostedAt && <span className="text-2xs text-ink-4">Posted {jobPostedAt}</span>}
+                </>
+              )}
+            </div>
+          )}
+
+          {keyPeople.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {keyPeople.slice(0, 3).map((person, i) => (
+                <span key={i} className="inline-flex items-center gap-1 rounded-full bg-bg-sub px-2.5 py-0.5 text-xs">
+                  <span className="font-medium text-ink">{person.name}</span>
+                  {person.title && <span className="text-ink-3">· {person.title}</span>}
+                </span>
+              ))}
+              {keyPeople.length > 3 && <span className="px-1 py-0.5 text-xs text-ink-4">+{keyPeople.length - 3} more</span>}
+            </div>
+          )}
+
+          {Array.isArray(company.techStack) && company.techStack.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {company.techStack.slice(0, 5).map((tech, i) => (
+                <span key={i} className="rounded-tag bg-info/10 px-1.5 py-0.5 text-2xs text-info">
+                  {tech}
+                </span>
+              ))}
+              {company.techStack.length > 5 && <span className="px-1 py-0.5 text-2xs text-ink-4">+{company.techStack.length - 5}</span>}
+            </div>
+          )}
+
+          {completeness > 0 && (
+            <div className="h-1 w-full overflow-hidden rounded-full bg-bg-soft" title={`Data completeness ${completeness}%`}>
+              <div
+                className={cn('h-full rounded-full transition-all', completeness >= 50 ? 'bg-up' : completeness >= 30 ? 'bg-warn' : 'bg-down')}
+                style={{ width: `${Math.min(completeness, 100)}%` }}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Google Maps contact details (phone / address) */}
-        {(gmapsPhone || gmapsAddress) && (
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            {gmapsPhone && (
-              <span className="inline-flex items-center gap-1.5">
-                <Phone className="w-3 h-3 shrink-0" />
-                {gmapsPhone}
-              </span>
-            )}
-            {gmapsAddress && (
-              <span className="inline-flex items-center gap-1.5">
-                <MapPin className="w-3 h-3 shrink-0" />
-                <span className="truncate">{gmapsAddress}</span>
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* list_verification status row */}
-        {isListEntry && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {linkedinNotFound ? (
-              <Badge variant="outline" className="text-2xs text-down border-down/40">No LinkedIn match</Badge>
-            ) : company.linkedinUrl ? (
-              <Badge variant="outline" className="text-2xs text-up border-up/40">LinkedIn ✓</Badge>
-            ) : null}
-            {gmapsNotFound ? (
-              <Badge variant="outline" className="text-2xs text-down border-down/40">No Maps match</Badge>
-            ) : (
-              <Badge variant="outline" className="text-2xs text-up border-up/40">Maps ✓</Badge>
-            )}
-            {crawledCount > 0 && (
-              <Badge variant="outline" className="text-2xs text-info border-info/40">
-                {crawledCount === 2 ? 'Site + source crawled' : 'Site crawled'}
-              </Badge>
-            )}
-          </div>
-        )}
-
-        {/* Hiring signal chip — shows what role this company is hiring for */}
-        {hiringSignal && openJob && (
-          <div className="flex flex-wrap items-center gap-2">
-            {jobUrl ? (
-              <a
-                href={jobUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-xs bg-up/10 text-up hover:bg-up/20 px-2 py-0.5 rounded-full transition-colors"
-              >
-                <span className="font-medium">Hiring:</span>
-                <span>{openJob}</span>
-                <span className="text-up/70">↗</span>
-              </a>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-xs bg-up/10 text-up px-2 py-0.5 rounded-full">
-                <span className="font-medium">Hiring:</span>
-                <span>{openJob}</span>
-              </span>
-            )}
-            {jobPostedAt && (
-              <span className="text-2xs text-muted-foreground">Posted {jobPostedAt}</span>
-            )}
-          </div>
-        )}
-
-        {/* Description */}
-        {company.description && (
-          <p className="text-xs text-muted-foreground line-clamp-2">{company.description}</p>
-        )}
-
-        {/* Key People */}
-        {keyPeople.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {keyPeople.slice(0, 3).map((person, i) => (
-              <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded-full">
-                <span className="font-medium">{person.name}</span>
-                {person.title && <span className="text-muted-foreground">· {person.title}</span>}
-              </span>
-            ))}
-            {keyPeople.length > 3 && (
-              <span className="text-xs text-muted-foreground px-2 py-0.5">
-                +{keyPeople.length - 3} more
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Tech stack chips */}
-        {Array.isArray(company.techStack) && company.techStack.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {company.techStack.slice(0, 5).map((tech, i) => (
-              <span key={i} className="text-2xs bg-info/10 text-info px-1.5 py-0.5 rounded">
-                {tech}
-              </span>
-            ))}
-            {company.techStack.length > 5 && (
-              <span className="text-2xs text-muted-foreground px-1.5 py-0.5">
-                +{company.techStack.length - 5}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Progress bar */}
-        {completeness > 0 && (
-          <div className="w-full bg-muted rounded-full h-1">
-            <div
-              className={`h-1 rounded-full transition-all ${
-                completeness >= 50 ? 'bg-up' : completeness >= 30 ? 'bg-warn' : 'bg-down'
-              }`}
-              style={{ width: `${Math.min(completeness, 100)}%` }}
-            />
-          </div>
-        )}
-      </div>
-    </Link>
+        <ChevronRight size={14} className="mt-2.5 shrink-0 text-ink-4 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-2" />
+      </Link>
+    </li>
   );
 }
 
@@ -193,72 +170,66 @@ export function CompaniesTab({
   const { companies, pagination, showOnlyWithData, cursorStack } = state;
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Building2 className="w-4 h-4" />
-          Companies ({companies.length}{pagination?.hasMore ? '+' : ''})
-        </CardTitle>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onGmapsEnrich}
-            disabled={gmapsPending || companies.length === 0}
-            title="Search each company on Google Maps by name and fill in phone, website and a generic email (info@/contact@). Falls back to a Google search when Maps has no match."
-            className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <MapPin className="w-3.5 h-3.5" />
-            {gmapsPending ? 'Queuing…' : 'Enrich via Google Maps'}
-          </button>
-          <button
-            type="button"
-            onClick={state.toggleShowOnlyWithData}
-            className="text-xs px-2 py-1 rounded border bg-background hover:bg-muted/50 transition-colors"
-          >
-            {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
-          </button>
+    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+        <div className="mr-auto flex items-center gap-2">
+          <h2 className="m-0 text-body font-semibold text-ink">Companies</h2>
+          <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">
+            {companies.length}
+            {pagination?.hasMore ? '+' : ''}
+          </span>
         </div>
-      </CardHeader>
-      <CardContent>
-        {companies.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">
-            {showOnlyWithData
-              ? 'No enriched companies yet. Toggle "Show all" to see discovered-but-unenriched stubs.'
-              : 'No companies discovered yet.'}
-          </p>
-        ) : (
-          <div className="grid gap-3">
-            {companies.map((company) => (
-              <CompanyCard key={company.id} agentId={agentId} company={company} />
-            ))}
-          </div>
-        )}
-        {(cursorStack.length > 1 || pagination?.hasMore) && (
-          <div className="flex items-center justify-between pt-4 mt-3 border-t">
-            <button
-              type="button"
-              disabled={cursorStack.length <= 1}
-              onClick={state.goPrevious}
-              className="text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              ← Previous
-            </button>
-            <span className="text-xs text-muted-foreground">
-              Page {cursorStack.length}
-            </span>
-            <button
-              type="button"
-              disabled={!pagination?.hasMore || !pagination?.nextCursor}
-              onClick={() => {
-                if (pagination?.nextCursor) state.goNext(pagination.nextCursor);
-              }}
-              className="text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              Next →
-            </button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        <Button
+          type="button"
+          variant="panel"
+          size="dense"
+          onClick={onGmapsEnrich}
+          disabled={gmapsPending || companies.length === 0}
+          title="Search each company on Google Maps by name and fill in phone, website and a generic email (info@/contact@). Falls back to a Google search when Maps has no match."
+          className="h-8 rounded-lg"
+        >
+          <MapPin size={13} />
+          {gmapsPending ? 'Queuing…' : 'Enrich via Google Maps'}
+        </Button>
+        <Button type="button" variant="panel" size="dense" onClick={state.toggleShowOnlyWithData} className="h-8 rounded-lg">
+          {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
+        </Button>
+      </header>
+
+      {companies.length === 0 ? (
+        <p className="m-0 px-5 py-10 text-center text-body text-ink-3">
+          {showOnlyWithData
+            ? 'No enriched companies yet. Switch to "Show all" to see discovered-but-unenriched stubs.'
+            : 'No companies discovered yet.'}
+        </p>
+      ) : (
+        <ul className="m-0 list-none divide-y divide-line p-0">
+          {companies.map((company) => (
+            <CompanyRow key={company.id} agentId={agentId} company={company} />
+          ))}
+        </ul>
+      )}
+
+      {(cursorStack.length > 1 || pagination?.hasMore) && (
+        <footer className="flex items-center justify-between border-t border-line px-5 py-2.5">
+          <Button type="button" variant="panel" size="dense" disabled={cursorStack.length <= 1} onClick={state.goPrevious} className="h-8 rounded-lg">
+            <ChevronLeft size={13} /> Previous
+          </Button>
+          <span className="text-xs text-ink-3">Page {cursorStack.length}</span>
+          <Button
+            type="button"
+            variant="panel"
+            size="dense"
+            disabled={!pagination?.hasMore || !pagination?.nextCursor}
+            onClick={() => {
+              if (pagination?.nextCursor) state.goNext(pagination.nextCursor);
+            }}
+            className="h-8 rounded-lg"
+          >
+            Next <ChevronRight size={13} />
+          </Button>
+        </footer>
+      )}
+    </section>
   );
 }

@@ -82,6 +82,8 @@ export interface QueueResponse {
   etaMinutes: number;
   refreshQuota: RefreshQuota;
   buckets: QueueBucket[];
+  /** Not returned by the API yet; the UI shows it once the backend sends it. */
+  handledToday?: { approved: number; skipped: number };
 }
 
 export async function getQueue(opts: { masterAgentId?: string } = {}) {

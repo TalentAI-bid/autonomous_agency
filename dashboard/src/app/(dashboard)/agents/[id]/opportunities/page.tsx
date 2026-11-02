@@ -3,10 +3,8 @@
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useOpportunities, useOpportunityStats, useUpdateOpportunityStatus } from '@/hooks/use-opportunities';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Zap, TrendingUp, Clock, Target, ExternalLink, Building2, User, ChevronDown, ChevronUp } from 'lucide-react';
+import { Zap, TrendingUp, Clock, Target, ExternalLink, Building2, User, ChevronDown } from 'lucide-react';
 import type { Opportunity, OpportunityType, OpportunityUrgency, OpportunityStatus } from '@/types';
 
 import { Select } from '@/components/ui/select';
@@ -63,180 +61,142 @@ export default function OpportunitiesPage() {
   const opportunities = (listRes as any)?.data ?? [];
   const stats = statsRes as any;
 
+  const selectCls = 'h-8 rounded-lg border-line bg-bg-panel px-2.5 text-xs';
+  const tiles = stats
+    ? [
+        { label: 'Total', value: stats.total, icon: Zap, tone: 'text-warn-fg' },
+        { label: 'Avg intent', value: stats.avgBuyingIntentScore, icon: TrendingUp, tone: scoreColor(stats.avgBuyingIntentScore) },
+        { label: 'Immediate', value: stats.byUrgency?.find((u: any) => u.urgency === 'immediate')?.total ?? 0, icon: Clock, tone: 'text-down' },
+        { label: 'Qualified', value: stats.byStatus?.find((s: any) => s.status === 'qualified')?.total ?? 0, icon: Target, tone: 'text-up' },
+      ]
+    : [];
+
   return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
+    <div className="space-y-5">
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-warn-fg" />
-                <span className="text-sm text-muted-foreground">Total</span>
-              </div>
-              <p className="text-2xl font-bold mt-1">{stats.total}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-up" />
-                <span className="text-sm text-muted-foreground">Avg Intent</span>
-              </div>
-              <p className={`text-2xl font-bold mt-1 ${scoreColor(stats.avgBuyingIntentScore)}`}>
-                {stats.avgBuyingIntentScore}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-down" />
-                <span className="text-sm text-muted-foreground">Immediate</span>
-              </div>
-              <p className="text-2xl font-bold mt-1">
-                {stats.byUrgency?.find((u: any) => u.urgency === 'immediate')?.total ?? 0}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Target className="w-4 h-4 text-info" />
-                <span className="text-sm text-muted-foreground">Qualified</span>
-              </div>
-              <p className="text-2xl font-bold mt-1">
-                {stats.byStatus?.find((s: any) => s.status === 'qualified')?.total ?? 0}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        <dl className="m-0 grid grid-cols-2 divide-x divide-line overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm lg:grid-cols-4">
+          {tiles.map((t) => (
+            <div key={t.label} className="px-5 py-3.5 [&:nth-child(n+3)]:border-t [&:nth-child(n+3)]:border-line lg:[&:nth-child(n+3)]:border-t-0">
+              <dt className="flex items-center gap-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">
+                <t.icon size={12} /> {t.label}
+              </dt>
+              <dd className={`m-0 mt-1.5 font-display text-[26px] leading-none ${t.tone}`}>{t.value}</dd>
+            </div>
+          ))}
+        </dl>
       )}
 
-      {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
-        <Select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="text-sm bg-background border border-border rounded-md px-3 py-1.5"
-        >
-          <option value="">All Types</option>
-          {Object.entries(TYPE_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </Select>
-        <Select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="text-sm bg-background border border-border rounded-md px-3 py-1.5"
-        >
-          <option value="">All Statuses</option>
-          {['new', 'researching', 'qualified', 'contacted', 'converted', 'skipped'].map((s) => (
-            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-          ))}
-        </Select>
-      </div>
+      <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+        <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+          <div className="mr-auto flex items-center gap-2">
+            <h2 className="m-0 text-body font-semibold text-ink">Opportunities</h2>
+            <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{opportunities.length}</span>
+          </div>
+          <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type" className={selectCls}>
+            <option value="">All types</option>
+            {Object.entries(TYPE_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </Select>
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status" className={selectCls}>
+            <option value="">All statuses</option>
+            {['new', 'researching', 'qualified', 'contacted', 'converted', 'skipped'].map((s) => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            ))}
+          </Select>
+        </header>
 
-      {/* Opportunity List */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Zap className="w-4 h-4" />
-            Opportunities ({opportunities.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground text-center py-6">Loading...</p>
-          ) : opportunities.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              No opportunities found. Run the agent in sales mode to discover buying signals.
-            </p>
-          ) : (
-            opportunities.map((opp: Opportunity) => (
-              <div key={opp.id} className="border border-border rounded-lg">
-                <button
-                  onClick={() => setExpandedId(expandedId === opp.id ? null : opp.id)}
-                  className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`text-lg font-bold tabular-nums ${scoreColor(opp.buyingIntentScore)}`}>
+        {isLoading ? (
+          <p className="m-0 px-5 py-10 text-center text-body text-ink-3">Loading…</p>
+        ) : opportunities.length === 0 ? (
+          <div className="px-5 py-12 text-center">
+            <p className="m-0 text-body font-medium text-ink">No opportunities yet</p>
+            <p className="mb-0 mt-1 text-xs text-ink-3">Run the agent in sales mode to discover buying signals.</p>
+          </div>
+        ) : (
+          <ul className="m-0 list-none divide-y divide-line p-0">
+            {opportunities.map((opp: Opportunity) => {
+              const open = expandedId === opp.id;
+              return (
+                <li key={opp.id}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : opp.id)}
+                    aria-expanded={open}
+                    className="flex w-full items-center gap-3.5 px-5 py-3 text-left transition-colors hover:bg-bg-soft"
+                  >
+                    <span className={`grid size-10 shrink-0 place-items-center rounded-xl bg-bg-sub font-mono text-body font-semibold tabular-nums ${scoreColor(opp.buyingIntentScore)}`} title="Buying intent score">
                       {opp.buyingIntentScore}
                     </span>
-                    <div className="min-w-0 text-left">
-                      <p className="text-sm font-medium truncate">{opp.title}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-body font-medium text-ink">{opp.title}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-ink-3">
                         {opp.companyName && (
-                          <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Building2 className="w-3 h-3" />{opp.companyName}
-                          </span>
+                          <span className="inline-flex items-center gap-1"><Building2 size={11} />{opp.companyName}</span>
                         )}
                         {opp.personName && (
-                          <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <User className="w-3 h-3" />{opp.personName}
-                          </span>
+                          <span className="inline-flex items-center gap-1"><User size={11} />{opp.personName}</span>
                         )}
+                        <span>{TYPE_LABELS[opp.opportunityType] ?? opp.opportunityType}</span>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 ml-2 shrink-0">
-                    <Badge className={`text-xs ${STATUS_COLORS[opp.status]}`}>{opp.status}</Badge>
-                    <Badge className={`text-xs ${URGENCY_COLORS[opp.urgency]}`}>{opp.urgency}</Badge>
-                    <Badge variant="outline" className="text-xs">{TYPE_LABELS[opp.opportunityType] ?? opp.opportunityType}</Badge>
-                    {expandedId === opp.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </div>
-                </button>
-                {expandedId === opp.id && (
-                  <div className="px-3 pb-3 space-y-3 border-t border-border pt-3">
-                    {opp.description && <p className="text-sm text-foreground/80">{opp.description}</p>}
-                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                      {opp.sourcePlatform && <span>Platform: {opp.sourcePlatform}</span>}
-                      {opp.budget && <span>Budget: {opp.budget}</span>}
-                      {opp.timeline && <span>Timeline: {opp.timeline}</span>}
-                      {opp.location && <span>Location: {opp.location}</span>}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={`rounded-md px-2 py-0.5 text-2xs font-medium capitalize ${URGENCY_COLORS[opp.urgency]}`}>{opp.urgency}</span>
+                      <span className={`rounded-md px-2 py-0.5 text-2xs font-medium capitalize ${STATUS_COLORS[opp.status]}`}>{opp.status}</span>
+                      <ChevronDown size={14} className={`text-ink-4 transition-transform ${open ? 'rotate-180' : ''}`} />
                     </div>
-                    {opp.technologies && opp.technologies.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {opp.technologies.map((t) => (
-                          <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
-                        ))}
+                  </button>
+                  {open && (
+                    <div className="space-y-3 border-t border-line bg-bg-sub px-5 py-4">
+                      {opp.description && <p className="m-0 text-body leading-relaxed text-ink-2">{opp.description}</p>}
+                      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-3">
+                        {opp.sourcePlatform && <span>Platform: <span className="text-ink-2">{opp.sourcePlatform}</span></span>}
+                        {opp.budget && <span>Budget: <span className="text-ink-2">{opp.budget}</span></span>}
+                        {opp.timeline && <span>Timeline: <span className="text-ink-2">{opp.timeline}</span></span>}
+                        {opp.location && <span>Location: <span className="text-ink-2">{opp.location}</span></span>}
                       </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      {opp.sourceUrl && (
-                        <a href={opp.sourceUrl} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-info hover:underline flex items-center gap-1">
-                          <ExternalLink className="w-3 h-3" />Source
-                        </a>
+                      {opp.technologies && opp.technologies.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {opp.technologies.map((t) => (
+                            <span key={t} className="rounded-tag bg-info/10 px-1.5 py-0.5 text-2xs text-info">{t}</span>
+                          ))}
+                        </div>
                       )}
-                      <div className="ml-auto flex gap-1">
-                        {opp.status === 'new' && (
-                          <Button size="sm" variant="outline" className="text-xs h-7"
-                            onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'researching' })}>
-                            Research
-                          </Button>
+                      <div className="flex items-center gap-2">
+                        {opp.sourceUrl && (
+                          <a href={opp.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-accent-fg hover:underline">
+                            <ExternalLink size={12} />Source
+                          </a>
                         )}
-                        {(opp.status === 'new' || opp.status === 'researching') && (
-                          <Button size="sm" variant="outline" className="text-xs h-7"
-                            onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'qualified' })}>
-                            Qualify
-                          </Button>
-                        )}
-                        {opp.status !== 'skipped' && opp.status !== 'converted' && (
-                          <Button size="sm" variant="ghost" className="text-xs h-7 text-muted-foreground"
-                            onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'skipped' })}>
-                            Skip
-                          </Button>
-                        )}
+                        <div className="ml-auto flex gap-1.5">
+                          {opp.status === 'new' && (
+                            <Button type="button" size="dense" variant="panel" className="h-8 rounded-lg"
+                              onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'researching' })}>
+                              Research
+                            </Button>
+                          )}
+                          {(opp.status === 'new' || opp.status === 'researching') && (
+                            <Button type="button" size="dense" variant="brand" className="h-8 rounded-lg"
+                              onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'qualified' })}>
+                              Qualify
+                            </Button>
+                          )}
+                          {opp.status !== 'skipped' && opp.status !== 'converted' && (
+                            <Button type="button" size="dense" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                              onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'skipped' })}>
+                              Skip
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

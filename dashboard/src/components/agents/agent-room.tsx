@@ -3,15 +3,13 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useAgentRoomMessages, useSendHumanMessage, type AgentMessage } from '@/hooks/use-agent-room';
 import { useRealtimeStore } from '@/stores/realtime.store';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SystemAlertCard } from './system-alert-card';
 import { cn } from '@/lib/utils';
 import { Select } from '@/components/ui/select';
 import {
-  Bot, Send, ChevronDown, ChevronRight, User, ArrowRight, MessageSquare,
-  Search, Database, Star, Mail, AlertCircle, Brain,
+  Bot, Send, ChevronDown, ChevronRight, User, ArrowRight, Search, Database, Star, Mail, AlertCircle, Brain,
 } from 'lucide-react';
 
 // ── Agent styles for avatars and filter pills ──────────────────────────────────
@@ -61,6 +59,7 @@ function MessageCard({ message }: { message: AgentMessage }) {
     : (AGENT_STYLES[message.fromAgent] ? message.fromAgent : 'master');
   const style = AGENT_STYLES[agentKey] ?? AGENT_STYLES.master;
   const AgentIcon = style.icon;
+  const isHuman = agentKey === 'human';
 
   const time = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -78,14 +77,19 @@ function MessageCard({ message }: { message: AgentMessage }) {
   }, [content]);
 
   return (
-    <div className="flex items-start gap-3 px-3 py-2.5 hover:bg-muted/30 rounded-lg transition-colors animate-in fade-in slide-in-from-bottom-1 duration-300">
+    <div className={cn('flex items-start gap-3 px-2 py-1.5 animate-in fade-in slide-in-from-bottom-1 duration-300', isHuman && 'flex-row-reverse')}>
       {/* Avatar */}
-      <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5', style.bg)}>
+      <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 ring-1 ring-line', style.bg)}>
         <AgentIcon className={cn('w-4 h-4', style.color)} />
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-w-0">
+      <div
+        className={cn(
+          'min-w-0 rounded-2xl border px-3.5 py-2.5',
+          isHuman ? 'max-w-[80%] rounded-tr-md border-accent-mid bg-accent-weak' : 'flex-1 rounded-tl-md border-line bg-bg-panel shadow-sm',
+        )}
+      >
         {/* Header */}
         <div className="flex items-center gap-2 mb-1">
           <span className={cn('text-xs font-semibold', style.color)}>
@@ -95,12 +99,12 @@ function MessageCard({ message }: { message: AgentMessage }) {
             {typeBadge.label}
           </span>
           {message.toAgent && message.toAgent !== 'all' && (
-            <span className="flex items-center gap-0.5 text-2xs text-muted-foreground">
+            <span className="flex items-center gap-0.5 text-2xs text-ink-3">
               <ArrowRight className="w-3 h-3" />
               {message.toAgent}
             </span>
           )}
-          <span className="text-2xs text-muted-foreground ml-auto shrink-0">{time}</span>
+          <span className="text-2xs text-ink-3 ml-auto shrink-0">{time}</span>
         </div>
 
         {/* Body — type-specific rendering */}
@@ -108,14 +112,14 @@ function MessageCard({ message }: { message: AgentMessage }) {
           <SystemAlertCard content={content} masterAgentId={message.masterAgentId} />
         ) : message.messageType === 'data_handoff' ? (
           <div>
-            <p className="text-xs text-foreground/90 leading-relaxed">{summary}</p>
+            <p className="text-body text-ink-2 leading-relaxed">{summary}</p>
             {content.dataCompleteness != null && (
               <div className="mt-2 max-w-xs">
-                <div className="flex justify-between text-2xs text-muted-foreground mb-1">
+                <div className="flex justify-between text-2xs text-ink-3 mb-1">
                   <span>Data completeness</span>
                   <span>{String(content.dataCompleteness)}%</span>
                 </div>
-                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div className="h-1.5 bg-bg-soft rounded-full overflow-hidden">
                   <div
                     className="h-full bg-info rounded-full transition-all duration-500"
                     style={{ width: `${Number(content.dataCompleteness)}%` }}
@@ -128,14 +132,14 @@ function MessageCard({ message }: { message: AgentMessage }) {
           <div>
             <button
               onClick={() => setExpanded(!expanded)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1.5 text-xs text-ink-3 hover:text-ink transition-colors"
             >
               <Brain className="w-3 h-3 text-warn-fg" />
               <span className="italic">{summary}</span>
               {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             </button>
             {expanded && (
-              <pre className="mt-2 p-2.5 bg-muted/50 rounded-md text-2xs overflow-x-auto whitespace-pre-wrap border border-border/50">
+              <pre className="mt-2 p-2.5 bg-bg-sub rounded-md text-2xs overflow-x-auto whitespace-pre-wrap border border-line">
                 {JSON.stringify(content, null, 2)}
               </pre>
             )}
@@ -143,11 +147,11 @@ function MessageCard({ message }: { message: AgentMessage }) {
         ) : message.messageType === 'status_update' ? (
           <div className="flex items-center gap-2">
             <span className={cn('w-2 h-2 rounded-full shrink-0', getStatusDotColor(content))} />
-            <p className="text-xs text-foreground/90">{summary}</p>
+            <p className="text-body text-ink-2">{summary}</p>
           </div>
         ) : message.messageType === 'task_assignment' ? (
           <div>
-            <p className="text-xs text-foreground/90 leading-relaxed">
+            <p className="text-body text-ink-2 leading-relaxed">
               {content.action ? (
                 <span className="font-medium text-a-master">{String(content.action).replace(/_/g, ' ')}</span>
               ) : null}
@@ -157,18 +161,18 @@ function MessageCard({ message }: { message: AgentMessage }) {
           </div>
         ) : (
           <div>
-            <p className="text-xs text-foreground/90 leading-relaxed">{summary}</p>
+            <p className="text-body text-ink-2 leading-relaxed">{summary}</p>
             {typeof content === 'object' && content && Object.keys(content).length > 2 && (
               <>
                 <button
                   onClick={() => setExpanded(!expanded)}
-                  className="flex items-center gap-1 text-muted-foreground hover:text-foreground mt-1 text-2xs transition-colors"
+                  className="flex items-center gap-1 text-ink-3 hover:text-ink mt-1 text-2xs transition-colors"
                 >
                   {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                   {expanded ? 'Less' : 'Details'}
                 </button>
                 {expanded && (
-                  <pre className="mt-1.5 p-2 bg-muted/50 rounded-md text-2xs overflow-x-auto whitespace-pre-wrap border border-border/50">
+                  <pre className="mt-1.5 p-2 bg-bg-sub rounded-md text-2xs overflow-x-auto whitespace-pre-wrap border border-line">
                     {JSON.stringify(content, null, 2)}
                   </pre>
                 )}
@@ -256,83 +260,77 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-180px)]">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-3">
+    <section className="flex h-[calc(100vh-180px)] min-h-[480px] flex-col overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="space-y-3 border-b border-line px-5 py-3.5">
         <div className="flex items-center gap-2">
-          <MessageSquare className="w-5 h-5 text-primary" />
-          <h2 className="text-lg font-semibold">Agent Room</h2>
-          <Badge variant="secondary" className="text-xs">{allMessages.length} messages</Badge>
+          <h2 className="m-0 text-body font-semibold text-ink">Agent Room</h2>
+          <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{allMessages.length}</span>
+          <span className="ml-auto text-xs text-ink-3">Live messages between your agents</span>
         </div>
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex items-center gap-1.5 pb-3 overflow-x-auto scrollbar-none">
-        {FILTER_KEYS.map((key) => {
-          const isActive = activeFilter === key;
-          const count = filterCounts[key] ?? 0;
-          if (key === 'all') {
+        <div className="scroll-thin flex items-center gap-1.5 overflow-x-auto">
+          {FILTER_KEYS.map((key) => {
+            const isActive = activeFilter === key;
+            const count = filterCounts[key] ?? 0;
+            const label = key === 'all' ? 'All' : AGENT_STYLES[key]?.label;
+            if (!label) return null;
             return (
               <button
                 key={key}
-                onClick={() => setActiveFilter('all')}
+                type="button"
+                onClick={() => setActiveFilter(key)}
+                aria-pressed={isActive}
                 className={cn(
-                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all shrink-0',
+                  'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors',
                   isActive
-                    ? 'bg-primary/20 text-primary ring-1 ring-primary/30'
-                    : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
+                    ? 'border-accent-mid bg-accent-weak font-medium text-accent-fg'
+                    : 'border-line bg-bg-panel text-ink-3 hover:bg-hover hover:text-ink',
                 )}
               >
-                All
-                {count > 0 && <span className="text-2xs opacity-70">{count}</span>}
+                {label}
+                {count > 0 && <span className="font-mono text-2xs opacity-70">{count}</span>}
               </button>
             );
-          }
-          const s = AGENT_STYLES[key];
-          if (!s) return null;
-          return (
-            <button
-              key={key}
-              onClick={() => setActiveFilter(key)}
-              className={cn(
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all shrink-0',
-                isActive
-                  ? cn(s.activeBg, s.color, 'ring-1 ring-current/30')
-                  : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
-              )}
-            >
-              {s.label}
-              {count > 0 && <span className="text-2xs opacity-70">{count}</span>}
-            </button>
-          );
-        })}
-      </div>
+          })}
+        </div>
+      </header>
 
-      {/* Message feed */}
-      <div
-        ref={feedRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto min-h-0 space-y-0.5 pr-1"
-      >
+      <div ref={feedRef} onScroll={handleScroll} className="scroll-thin min-h-0 flex-1 space-y-1 overflow-y-auto bg-bg-sub p-3">
         {filteredMessages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <Bot className="w-10 h-10 mb-3 opacity-30" />
-            <p className="text-sm">No messages yet</p>
-            <p className="text-xs mt-1">Agent messages will appear here in real-time</p>
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+            <span className="mb-2 grid size-11 place-items-center rounded-panel bg-accent-weak text-accent-fg">
+              <Bot size={20} />
+            </span>
+            <p className="m-0 text-body font-medium text-ink">No messages yet</p>
+            <p className="m-0 text-xs text-ink-3">Agent messages will appear here in real time.</p>
           </div>
         ) : (
-          filteredMessages.map((msg) => <MessageCard key={msg.id} message={msg} />)
+          filteredMessages.map((msg, i) => {
+            const day = new Date(msg.createdAt).toDateString();
+            const newDay = i === 0 || day !== new Date(filteredMessages[i - 1].createdAt).toDateString();
+            return (
+              <div key={msg.id}>
+                {newDay && (
+                  <div className="sticky top-0 z-10 flex justify-center py-2">
+                    <span className="rounded-full border border-line bg-bg-panel px-3 py-0.5 text-2xs font-medium text-ink-3 shadow-sm">
+                      {new Date(msg.createdAt).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
+                    </span>
+                  </div>
+                )}
+                <MessageCard message={msg} />
+              </div>
+            );
+          })
         )}
       </div>
 
-      {/* Human input */}
-      <div className="flex items-center gap-2 pt-3 border-t border-border mt-2">
+      <footer className="flex items-center gap-2 border-t border-line bg-bg-sub px-4 py-3">
         <Select
           value={targetAgent}
           onChange={(e) => setTargetAgent(e.target.value)}
-          className="h-10 rounded-md border border-input bg-background px-3 text-xs min-w-[130px] focus:outline-none focus:ring-1 focus:ring-primary/50"
+          aria-label="Send to"
+          className="h-9 min-w-[130px] rounded-lg border-line bg-bg-panel px-3 text-xs"
         >
-          <option value="all">All Agents</option>
+          <option value="all">All agents</option>
           <option value="master">Master</option>
           <option value="discovery">Discovery</option>
           <option value="enrichment">Enrichment</option>
@@ -340,16 +338,16 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
           <option value="outreach">Outreach</option>
         </Select>
         <Input
-          placeholder="Send instruction to agents..."
+          placeholder="Send an instruction to the agents…"
           value={messageText}
           onChange={(e) => setMessageText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-          className="flex-1 h-10"
+          className="h-9 flex-1 rounded-lg border-line bg-bg-panel text-body focus-visible:ring-accent-weak"
         />
-        <Button size="sm" className="h-10 px-4" onClick={handleSend} disabled={sendMessage.isPending || !messageText.trim()}>
-          <Send className="w-4 h-4" />
+        <Button type="button" variant="brand" className="h-9 rounded-lg px-3.5" onClick={handleSend} disabled={sendMessage.isPending || !messageText.trim()} aria-label="Send">
+          <Send size={14} />
         </Button>
-      </div>
-    </div>
+      </footer>
+    </section>
   );
 }

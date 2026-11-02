@@ -4,7 +4,7 @@ import type { MasterAgent } from '@/types';
 
 export function StrategyTab({ agentId, agent }: { agentId: string; agent: MasterAgent }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <IcpSegmentationCard
         agentMission={agent.mission ?? null}
         segments={

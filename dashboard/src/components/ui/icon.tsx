@@ -7,7 +7,8 @@ export type IconName =
   | 'arrowUp' | 'arrowDn' | 'check' | 'x' | 'eye'
   | 'brain' | 'zap' | 'doc' | 'globe' | 'calendar'
   | 'target' | 'radio' | 'send' | 'msg' | 'database'
-  | 'star' | 'reply' | 'commandLine' | 'signOut';
+  | 'star' | 'reply' | 'commandLine' | 'signOut'
+  | 'circleCheck' | 'home' | 'squareCheck';
 
 const PATHS: Record<IconName, ReactElement> = {
   dash:   <><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></>,
@@ -46,6 +47,9 @@ const PATHS: Record<IconName, ReactElement> = {
   reply:  <><path d="M9 17L4 12l5-5M4 12h12a4 4 0 014 4v3"/></>,
   commandLine: <><path d="M4 17l6-6-6-6M12 19h8"/></>,
   signOut: <><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H3"/></>,
+  circleCheck: <><circle cx="12" cy="12" r="9"/><path d="M8.2 12.4l2.6 2.6 5-5.4"/></>,
+  home:    <><path d="M3.5 11.2 12 4l8.5 7.2"/><path d="M5.5 9.8V20h13V9.8"/><path d="M10 20v-5.2h4V20"/></>,
+  squareCheck: <><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.4 12.3l2.6 2.7 4.7-5.2"/></>,
 };
 
 export function Icon({

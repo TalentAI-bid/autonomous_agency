@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: '/queue', destination: '/approvals', permanent: true },
-      { source: '/linkedin-extension', destination: '/settings/linkedin-extension', permanent: true },
+      { source: '/linkedin-extension', destination: '/settings/extension', permanent: true },
     ];
   },
   async headers() {

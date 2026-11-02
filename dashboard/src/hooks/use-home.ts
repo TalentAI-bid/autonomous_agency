@@ -229,7 +229,7 @@ export function useHomeData() {
           ? 'Chrome may have turned it off. Connection requests will not send until it is back.'
           : 'Install the Chrome extension so agents can send connection requests.',
       actionLabel: 'Open extension page',
-      href: '/settings/linkedin-extension',
+      href: '/settings/extension',
     };
 
     // ── Stats ──────────────────────────────────────────────────────────

@@ -18,7 +18,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { label: 'Products', href: '/settings/products' },
   { label: 'Messaging', href: '/settings/messaging' },
   { label: 'Email & replies', href: '/settings/email' },
-  { label: 'LinkedIn extension', href: '/settings/linkedin-extension' },
   { label: 'Browser extension', href: '/settings/extension' },
   { label: 'Team', href: '/settings/team' },
   { label: 'Plan' },

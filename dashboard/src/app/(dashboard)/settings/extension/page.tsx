@@ -2,11 +2,10 @@
 
 import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  AlertTriangle, Copy, Download, ExternalLink, Info, Linkedin, OctagonX, UserPlus,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
@@ -20,7 +19,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { apiGet, apiPost } from '@/lib/api';
-import { Chrome, Copy, KeyRound, Trash2, Plug, PlugZap, AlertTriangle, RotateCcw, OctagonX } from 'lucide-react';
+import { ago } from '@/hooks/use-home';
+import { cn } from '@/lib/utils';
 
 type ExtensionStatus = {
   hasKey: boolean;
@@ -47,6 +47,13 @@ type RecentTask = {
   completedAt: string | null;
 };
 
+type LatestRelease = {
+  version: string;
+  zipUrl: string;
+  downloadUrl: string;
+  sizeBytes: number | null;
+};
+
 const CAPS: Record<string, number> = {
   'linkedin:search_companies': 10,
   'linkedin:fetch_company': 100,
@@ -55,6 +62,56 @@ const CAPS: Record<string, number> = {
   'crunchbase:search_companies': 10,
   'crunchbase:fetch_company': 50,
 };
+
+type BrowserKey = 'chrome' | 'edge' | 'firefox';
+
+const BROWSERS: Record<BrowserKey, { label: string; extensionsUrl: string }> = {
+  chrome: { label: 'Chrome', extensionsUrl: 'chrome://extensions' },
+  edge: { label: 'Edge', extensionsUrl: 'edge://extensions' },
+  firefox: { label: 'Firefox', extensionsUrl: 'about:debugging#/runtime/this-firefox' },
+};
+
+function detectBrowser(): { key: BrowserKey; version: string | null } {
+  const ua = navigator.userAgent;
+  const edge = ua.match(/Edg\/(\d+)/);
+  if (edge) return { key: 'edge', version: edge[1] };
+  const ff = ua.match(/Firefox\/(\d+)/);
+  if (ff) return { key: 'firefox', version: ff[1] };
+  const ch = ua.match(/Chrome\/(\d+)/);
+  return { key: 'chrome', version: ch ? ch[1] : null };
+}
+
+function formatSize(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return '';
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
+function Panel({ title, aside, children, className }: { title: string; aside?: React.ReactNode; children: React.ReactNode; className?: string }) {
+  return (
+    <section className={cn('overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm', className)}>
+      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
+        {aside}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function StatusPill({ tone, children }: { tone: 'up' | 'warn'; children: React.ReactNode }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium',
+        tone === 'up' ? 'bg-up/10 text-up' : 'bg-warn/15 text-warn-fg',
+      )}
+    >
+      <span className="size-1.5 rounded-full bg-current" />
+      {children}
+    </span>
+  );
+}
 
 export default function ExtensionSettingsPage() {
   const qc = useQueryClient();
@@ -73,31 +130,21 @@ export default function ExtensionSettingsPage() {
     refetchInterval: 10000,
   });
 
-  const generate = useMutation<{ apiKey: string; sessionId: string }>({
-    mutationFn: () => apiPost<{ apiKey: string; sessionId: string }>('/extension/generate-key'),
-    onSuccess: (data) => {
-      setShownKey(data.apiKey);
-      qc.invalidateQueries({ queryKey: ['ext-status'] });
-    },
-    onError: () => toast({ title: 'Failed to generate key', variant: 'destructive' }),
+  const latestQ = useQuery<LatestRelease>({
+    queryKey: ['ext-latest'],
+    queryFn: () => apiGet<LatestRelease>('/extension/latest/info'),
+    // Don't hammer a 503 if no release has been cut yet.
+    retry: false,
+    staleTime: 60_000,
   });
 
   const revoke = useMutation({
     mutationFn: () => apiPost('/extension/revoke'),
     onSuccess: () => {
-      toast({ title: 'Extension key revoked' });
+      toast({ title: 'Extension disconnected' });
       qc.invalidateQueries({ queryKey: ['ext-status'] });
     },
-    onError: () => toast({ title: 'Failed to revoke', variant: 'destructive' }),
-  });
-
-  const resetRateLimits = useMutation<{ sessionsReset: number }>({
-    mutationFn: () => apiPost<{ sessionsReset: number }>('/admin/extension/reset-rate-limits', { userId: user?.id }),
-    onSuccess: (data) => {
-      toast({ title: `Rate limits reset (${data.sessionsReset} session${data.sessionsReset === 1 ? '' : 's'})` });
-      qc.invalidateQueries({ queryKey: ['ext-status'] });
-    },
-    onError: () => toast({ title: 'Failed to reset rate limits', variant: 'destructive' }),
+    onError: () => toast({ title: 'Failed to disconnect', variant: 'destructive' }),
   });
 
   const cancelPending = useMutation<{ cancelledCount: number }>({
@@ -110,234 +157,307 @@ export default function ExtensionSettingsPage() {
     onError: () => toast({ title: 'Failed to stop queued tasks', variant: 'destructive' }),
   });
 
-  const [shownKey, setShownKey] = React.useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = React.useState(false);
+  const [browser, setBrowser] = React.useState<BrowserKey>('chrome');
+  const [browserVersion, setBrowserVersion] = React.useState<string | null>(null);
+  const [detected, setDetected] = React.useState<BrowserKey | null>(null);
 
-  async function copy(text: string) {
+  React.useEffect(() => {
+    const d = detectBrowser();
+    setBrowser(d.key);
+    setDetected(d.key);
+    setBrowserVersion(d.version);
+  }, []);
+
+  async function copy(text: string, label = 'Copied to clipboard') {
     try {
       await navigator.clipboard.writeText(text);
-      toast({ title: 'Copied to clipboard' });
+      toast({ title: label });
     } catch {
       toast({ title: 'Copy failed', variant: 'destructive' });
     }
   }
 
   const status = statusQ.data;
+  const connected = !!status?.connected;
   const counts = status?.dailyTasksCount ?? {};
+  const pending = status?.pendingTaskCount ?? 0;
+  const latest = latestQ.data;
+  const downloadHref = latest?.downloadUrl ?? latest?.zipUrl;
+  const tasks = recentQ.data?.tasks ?? [];
+  const lastDone = tasks.find((t) => t.status === 'completed');
+  const completedCount = tasks.filter((t) => t.status === 'completed').length;
+  const totalUsed = Object.keys(CAPS).reduce((s, k) => s + (counts[k] ?? 0), 0);
+  const totalCap = Object.values(CAPS).reduce((s, n) => s + n, 0);
+  const b = BROWSERS[browser];
+
+  const download = (
+    <Button asChild={!!downloadHref} variant="brand" disabled={!downloadHref} className="h-10 gap-2 rounded-lg px-5 text-body font-semibold">
+      {downloadHref ? (
+        <a href={downloadHref}>
+          <Download size={15} />
+          Download for {BROWSERS[browser === 'firefox' ? 'chrome' : browser].label}
+          {latest?.sizeBytes ? ` · ${formatSize(latest.sizeBytes)}` : ''}
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-2">
+          <Download size={15} /> Download unavailable
+        </span>
+      )}
+    </Button>
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="m-0 font-display text-title font-medium text-ink flex items-center gap-2">
-          <Chrome className="w-6 h-6" /> Browser Extension
-        </h1>
-        <p className="mb-0 mt-1 text-body text-ink-3">
-          Scrape LinkedIn, Google Maps, and Crunchbase using your authenticated browser sessions.
-        </p>
-      </div>
-
-      {/* Status + Key */}
-      <Card>
-        <CardHeader className="border-b border-line px-5 py-3.5">
-          <CardTitle className="flex items-center justify-between text-base">
-            <span>Status</span>
-            {statusQ.isLoading ? (
-              <Skeleton className="h-6 w-24" />
-            ) : status?.connected ? (
-              <Badge className="bg-up/15 text-up hover:bg-up/25 gap-1">
-                <PlugZap className="w-3 h-3" /> Connected
-              </Badge>
-            ) : status?.hasKey ? (
-              <Badge variant="outline" className="gap-1">
-                <Plug className="w-3 h-3" /> Key issued — waiting for extension
-              </Badge>
-            ) : (
-              <Badge variant="outline">No key issued</Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-5 space-y-3">
-          {statusQ.isLoading ? (
-            <Skeleton className="h-16 w-full" />
-          ) : (
-            <p className="text-sm text-ink-3">
-              {status?.hasKey
-                ? status.connected
-                  ? `Extension connected. Last seen: ${fmtDate(status.lastSeenAt)}.`
-                  : 'An API key is issued but the extension has not connected. Open the extension popup, paste the key, and click Connect.'
-                : 'Generate an API key, paste it into the TalentAI Chrome extension popup, and your browser becomes the scraping agent.'}
+    <div className="space-y-5">
+      {statusQ.isLoading ? (
+        <Skeleton className="h-72 rounded-2xl" />
+      ) : !connected ? (
+        /* ───────────── Not connected: install ───────────── */
+        <Panel title="Browser extension" aside={<StatusPill tone="warn">Not connected</StatusPill>}>
+          <div className="space-y-5 p-5">
+            <p className="m-0 max-w-[640px] text-body leading-relaxed text-ink-2">
+              The extension runs on your own LinkedIn session in your browser. Connection requests and Add lead go through it — no cloud bots, no shared
+              accounts.
+              {detected && (
+                <>
+                  {' '}
+                  <strong className="font-semibold text-ink">
+                    You are on {BROWSERS[detected].label}
+                    {browserVersion ? ` ${browserVersion}` : ''}
+                  </strong>
+                  , so these are the {BROWSERS[detected].label} steps.
+                </>
+              )}
             </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={() => generate.mutate()}
-              disabled={generate.isPending}
-            >
-              <KeyRound className="w-4 h-4 mr-2" />
-              {status?.hasKey ? 'Rotate key' : 'Generate API key'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => cancelPending.mutate()}
-              disabled={cancelPending.isPending || !(status?.pendingTaskCount ?? 0)}
-              title="Cancel every queued and in-flight task for this workspace and tell the extension to stop now"
-            >
-              <OctagonX className="w-4 h-4 mr-2" />
-              {status?.pendingTaskCount
-                ? `Stop & clear ${status.pendingTaskCount} queued task${status.pendingTaskCount === 1 ? '' : 's'}`
-                : 'Stop & clear queued tasks'}
-            </Button>
-            {status?.hasKey && (
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => setConfirmRevoke(true)}
-                disabled={revoke.isPending}
-              >
-                <Trash2 className="w-4 h-4 mr-2" /> Revoke key
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Usage */}
-      <Card>
-        <CardHeader className="border-b border-line px-5 py-3.5">
-          <CardTitle className="flex items-center justify-between text-base">
-            <span>Today's usage</span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => resetRateLimits.mutate()}
-              disabled={resetRateLimits.isPending || !status?.hasKey || !user?.id}
-              title="Clear today's daily counters and tell the extension to reset its mirror"
-            >
-              <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Reset Now
-            </Button>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-5">
-          <div className="grid sm:grid-cols-2 gap-3">
-            {Object.entries(CAPS).map(([key, cap]) => {
-              const used = counts[key] ?? 0;
-              const pct = Math.min(100, Math.round((used / cap) * 100));
-              const [site, type] = key.split(':');
-              return (
-                <div key={key} className="space-y-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-ink-3">
-                      <span className="font-medium text-ink">{site}</span> / {type}
+            {browser !== 'firefox' && (
+              <div className="flex items-start gap-2.5 rounded-card border border-warn/30 bg-warn/10 px-3.5 py-3 text-xs leading-relaxed text-warn-fg">
+                <Info size={14} className="mt-px shrink-0" />
+                <span>
+                  <strong className="font-semibold">{b.label} will ask about developer mode every time it starts</strong>, and turns the extension off after an
+                  update. That is {b.label}, not a fault. When it happens, the LinkedIn line in your sidebar turns amber — open {b.extensionsUrl} and switch it
+                  back on. Ten seconds.
+                </span>
+              </div>
+            )}
+
+            {browser === 'firefox' ? (
+              <div className="flex items-start gap-2.5 rounded-card border border-warn/30 bg-warn/10 px-3.5 py-3 text-xs leading-relaxed text-warn-fg">
+                <AlertTriangle size={14} className="mt-px shrink-0" />
+                <span>
+                  Firefox needs a different build of the extension; the {BROWSERS.chrome.label}/{BROWSERS.edge.label} download will not load there. Open this
+                  page in Chrome or Edge to install it.
+                </span>
+              </div>
+            ) : (
+              <ol className="m-0 list-none space-y-4 p-0">
+                {[
+                  {
+                    title: 'Download and unzip',
+                    sub: `Save ${latest ? 'keenpipe-extension.zip' : 'the extension .zip'} and unzip it somewhere you will not delete — ${b.label} loads it from that folder every time.`,
+                  },
+                  {
+                    title: `Open ${b.extensionsUrl} and turn on Developer mode`,
+                    sub: `Top right of the page. ${b.label} shows a security prompt on every start while it is on; dismiss it.`,
+                    copy: b.extensionsUrl,
+                  },
+                  {
+                    title: 'Load unpacked → choose the unzipped folder',
+                    sub: 'Keenpipe appears in your extensions bar. Pin it.',
+                  },
+                  {
+                    title: 'Open LinkedIn while signed in to Keenpipe',
+                    sub: 'The extension links your LinkedIn session to this workspace. The sidebar line turns green when it sees it.',
+                  },
+                ].map((step, i) => (
+                  <li key={step.title} className="flex items-start gap-3.5">
+                    <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border border-line-strong bg-bg-panel font-mono text-2xs text-ink-3">
+                      {i + 1}
                     </span>
-                    <span className="tabular-nums">{used} / {cap}</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-bg-soft overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${pct >= 90 ? 'bg-down' : pct >= 60 ? 'bg-warn' : 'bg-up'}`}
-                      style={{ width: `${pct}%` }}
-                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-body font-medium text-ink">{step.title}</div>
+                      <div className="mt-0.5 text-xs text-ink-3">{step.sub}</div>
+                    </div>
+                    {step.copy && (
+                      <Button type="button" variant="panel" size="dense" onClick={() => copy(step.copy!, `${step.copy} copied — paste it in the address bar`)} className="h-7 shrink-0 rounded-lg">
+                        <Copy size={12} /> Copy link
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {download}
+              <span className="text-xs text-ink-3">
+                {latest
+                  ? `Signed .zip · version ${latest.version}`
+                  : latestQ.isLoading
+                    ? 'Checking the latest version…'
+                    : 'No release has been published yet. Ask your admin to run the extension release script.'}
+              </span>
+            </div>
+
+            <p className="m-0 flex flex-wrap items-center gap-1.5 text-xs text-ink-3">
+              Using another browser?
+              {(Object.keys(BROWSERS) as BrowserKey[])
+                .filter((k) => k !== browser)
+                .map((k) => (
+                  <button key={k} type="button" onClick={() => setBrowser(k)} className="font-medium text-accent-fg hover:underline">
+                    Show {BROWSERS[k].label} steps
+                  </button>
+                ))}
+              <span>— Edge loads it the same way; Firefox needs a different build.</span>
+            </p>
+          </div>
+        </Panel>
+      ) : (
+        /* ───────────── Connected: health ───────────── */
+        <Panel title="Browser extension" aside={<StatusPill tone="up">Connected</StatusPill>}>
+          <div className="space-y-4 p-5">
+            <div className="flex flex-wrap items-center gap-3.5">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-bg-soft text-ink-3">
+                <Linkedin size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-body font-semibold text-ink">Extension connected{user?.name ? ` as ${user.name}` : ''}</div>
+                <div className="text-xs text-ink-3">
+                  {detected ? `${BROWSERS[detected].label}${browserVersion ? ` ${browserVersion}` : ''}` : 'Browser'}
+                  {latest ? ` · latest release ${latest.version}` : ''} · last seen {status?.lastSeenAt ? `${ago(status.lastSeenAt)} ago` : '—'}
+                </div>
+              </div>
+              <StatusPill tone="up">Healthy</StatusPill>
+              <Button type="button" variant="ghost" size="dense" onClick={() => setConfirmRevoke(true)} disabled={revoke.isPending} className="h-8 rounded-lg text-ink-2">
+                Disconnect
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {[
+                { label: 'Requests today', value: `${totalUsed} of ${totalCap}`, sub: 'Daily limits keep your accounts safe' },
+                { label: 'Queued tasks', value: pending, sub: pending ? 'Waiting for the extension' : 'Nothing waiting' },
+                { label: 'Completed', value: completedCount, sub: `of the last ${tasks.length} tasks` },
+                { label: 'Last capture', value: lastDone ? ago(lastDone.createdAt) + ' ago' : '—', sub: lastDone ? `${lastDone.site} · ${lastDone.type.replace(/_/g, ' ')}` : 'No captures yet' },
+              ].map((t) => (
+                <div key={t.label} className="rounded-card border border-line bg-bg-panel px-4 py-3">
+                  <div className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">{t.label}</div>
+                  <div className="mt-1.5 font-display text-[22px] leading-none text-ink">{t.value}</div>
+                  <div className="mt-1.5 truncate text-2xs text-ink-3" title={t.sub}>
+                    {t.sub}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-          {status?.dailyResetAt && (
-            <p className="mt-4 text-xs text-ink-3">
-              Counters reset 24 hours after {fmtDate(status.dailyResetAt)}.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Recent tasks */}
-      <Card>
-        <CardHeader className="border-b border-line px-5 py-3.5">
-          <CardTitle className="text-body">Recent tasks</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-5">
-          {recentQ.isLoading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : (recentQ.data?.tasks ?? []).length === 0 ? (
-            <p className="text-sm text-ink-3">No extension tasks yet.</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {(recentQ.data?.tasks ?? []).map((t) => (
-                <RecentTaskRow key={t.id} task={t} />
               ))}
             </div>
-          )}
-          <p className="mt-3 text-xs text-ink-3">
-            Click a row to see the full request params and the raw response from the
-            extension. If a task shows "completed" with <span className="font-mono">items: 0</span>,
-            the page loaded but the adapter didn't recognise it — inspect{' '}
-            <span className="font-mono">result.debug</span> to see why
-            (login wall, captcha, new DOM, etc.).
-          </p>
-        </CardContent>
-      </Card>
 
-      {/* Install instructions */}
-      <Card>
-        <CardHeader className="border-b border-line px-5 py-3.5">
-          <CardTitle className="text-body">How to install</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-5 text-sm space-y-3 text-ink-3">
-          <div className="rounded-md border border-up/20 bg-up/10 p-3 text-xs text-up">
-            <strong className="text-up">New:</strong> You no longer need to generate an
-            API key manually. After installing the extension, open its popup and sign in with
-            your TalentAI email and password — the extension provisions its own connection key
-            automatically. The buttons above remain available as an advanced fallback (e.g. for
-            SSO-only tenants or scripted provisioning).
+            {pending > 0 && (
+              <div className="flex items-center justify-between gap-3 rounded-card border border-line bg-bg-sub px-3.5 py-2.5 text-xs text-ink-2">
+                <span>
+                  {pending} task{pending === 1 ? '' : 's'} queued. Stopping tells the extension to halt immediately.
+                </span>
+                <Button type="button" variant="panel" size="dense" onClick={() => cancelPending.mutate()} disabled={cancelPending.isPending} className="h-7 shrink-0 rounded-lg">
+                  <OctagonX size={12} /> Stop &amp; clear
+                </Button>
+              </div>
+            )}
           </div>
-          <ol className="list-decimal ml-5 space-y-1">
-            <li>Open <code className="bg-bg-soft px-1 rounded">chrome://extensions</code> in Chrome.</li>
-            <li>Enable <strong>Developer mode</strong> (top-right toggle).</li>
-            <li>Click <strong>Load unpacked</strong> and select the <code className="bg-bg-soft px-1 rounded">extension/</code> folder from the TalentAI repo.</li>
-            <li>Click the TalentAI icon in your toolbar, enter your TalentAI email &amp; password and the server URL, then click <strong>Sign in</strong>.</li>
-            <li>Stay signed into LinkedIn / Google Maps / Crunchbase in your regular Chrome window — the extension uses your existing sessions.</li>
-          </ol>
-        </CardContent>
-      </Card>
+        </Panel>
+      )}
 
-      {/* Generated key dialog */}
-      <Dialog open={!!shownKey} onOpenChange={(open) => !open && setShownKey(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5" /> Your new API key
-            </DialogTitle>
-            <DialogDescription>
-              <span className="flex items-center gap-2 text-warn-fg font-medium">
-                <AlertTriangle className="w-4 h-4" />
-                Copy this now — you won't be able to see it again.
+      {/* ───────────── What it does ───────────── */}
+      {connected && (
+        <Panel title="Add lead — capturing from LinkedIn">
+          <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_280px]">
+            <p className="m-0 text-body leading-relaxed text-ink-2">
+              On any LinkedIn profile, the extension shows one button: <strong className="font-semibold text-ink">Add lead</strong>. It creates the person
+              and their company in Keenpipe, enriches them, scores them against your bar and — if they clear it — drafts a message for Approvals. Nothing
+              sends from LinkedIn itself.
+            </p>
+            <div className="rounded-card border border-dashed border-line-strong bg-bg-sub p-3.5">
+              <div className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Example · the button on a profile</div>
+              <div className="mt-2.5 flex items-center gap-2.5">
+                <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-xs font-semibold text-accent-fg">AM</span>
+                <div className="min-w-0">
+                  <div className="truncate text-body font-medium text-ink">Alex Morgan</div>
+                  <div className="truncate text-xs text-ink-3">Head of Growth · Example Co</div>
+                </div>
+              </div>
+              <span className="mt-3 inline-flex h-7 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-semibold text-white">
+                <UserPlus size={12} /> Add lead
               </span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="bg-bg-soft px-3 py-2 rounded font-mono text-xs break-all select-all">
-            {shownKey}
+            </div>
           </div>
-          <DialogFooter className="sm:justify-between gap-2">
-            <Button variant="outline" size="sm" onClick={() => shownKey && copy(shownKey)}>
-              <Copy className="w-4 h-4 mr-2" /> Copy
-            </Button>
-            <DialogClose asChild>
-              <Button size="sm">I've saved it</Button>
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </Panel>
+      )}
 
-      {/* Revoke confirm */}
+      {/* ───────────── Troubleshooting ───────────── */}
+      <Panel title="If it stops working" aside={<span className="hidden text-xs text-ink-3 sm:block">Each one turns the LinkedIn line amber in the sidebar</span>}>
+        <ul className="m-0 list-none divide-y divide-line p-0">
+          {[
+            {
+              title: `${b.label === 'Firefox' ? 'The browser' : b.label} turned it off after an update`,
+              sub: `Open ${b.extensionsUrl} and switch Keenpipe back on. Developer-mode extensions are disabled on every ${b.label} update.`,
+              action: (
+                <Button type="button" variant="panel" size="dense" onClick={() => copy(b.extensionsUrl, `${b.extensionsUrl} copied — paste it in the address bar`)} className="h-7 rounded-lg">
+                  <Copy size={12} /> Copy {b.extensionsUrl.split('#')[0]}
+                </Button>
+              ),
+            },
+            {
+              title: 'LinkedIn signed you out',
+              sub: 'Sign in to LinkedIn in the same browser profile. The extension reconnects on its own within a minute.',
+              action: (
+                <Button asChild variant="panel" size="dense" className="h-7 rounded-lg">
+                  <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer">
+                    <ExternalLink size={12} /> Open LinkedIn
+                  </a>
+                </Button>
+              ),
+            },
+            {
+              title: 'Session not seen for more than a day',
+              sub: 'The browser was closed, or the profile changed. Open LinkedIn once; if the line stays amber, reinstall from the download above.',
+              action: downloadHref ? (
+                <Button asChild variant="panel" size="dense" className="h-7 rounded-lg">
+                  <a href={downloadHref}>
+                    <Download size={12} /> Reinstall
+                  </a>
+                </Button>
+              ) : null,
+            },
+            {
+              title: 'LinkedIn asked for a check',
+              sub: 'LinkedIn sometimes asks you to confirm it is you. Do it in the tab; requests pause until then and resume on their own.',
+              action: (
+                <Button asChild variant="panel" size="dense" className="h-7 rounded-lg">
+                  <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer">
+                    <ExternalLink size={12} /> Open LinkedIn
+                  </a>
+                </Button>
+              ),
+            },
+          ].map((row) => (
+            <li key={row.title} className="flex items-start gap-3 px-5 py-3.5">
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-warn/15 text-warn-fg">
+                <AlertTriangle size={11} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-body font-medium text-ink">{row.title}</div>
+                <div className="mt-0.5 text-xs leading-relaxed text-ink-3">{row.sub}</div>
+              </div>
+              <div className="shrink-0">{row.action}</div>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+
+      {/* Disconnect confirm */}
       <Dialog open={confirmRevoke} onOpenChange={setConfirmRevoke}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Revoke extension key?</DialogTitle>
+            <DialogTitle>Disconnect the extension?</DialogTitle>
             <DialogDescription>
-              The current Chrome extension will be immediately disconnected.
-              You'll need to generate a new key and paste it into the extension to reconnect.
+              The extension will be disconnected immediately and stop capturing. To connect again, sign in from the extension popup.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -347,97 +467,17 @@ export default function ExtensionSettingsPage() {
             <Button
               size="sm"
               variant="destructive"
-              onClick={() => { revoke.mutate(); setConfirmRevoke(false); }}
+              onClick={() => {
+                revoke.mutate();
+                setConfirmRevoke(false);
+              }}
               disabled={revoke.isPending}
             >
-              Revoke
+              Disconnect
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
-}
-
-function RecentTaskRow({ task }: { task: RecentTask }) {
-  const [open, setOpen] = React.useState(false);
-  const completed = task.status === 'completed';
-  const empty = completed && task.itemCount === 0;
-
-  return (
-    <div className="py-2 text-xs">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 text-left hover:bg-bg-sub -mx-2 px-2 py-1 rounded"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-2xs">{task.site}</Badge>
-            <span className="font-mono truncate">{task.type}</span>
-            {completed && (
-              <span
-                className={`tabular-nums text-2xs ${empty ? 'text-warn-fg' : 'text-up'}`}
-                title="Items extracted by the adapter from the result blob"
-              >
-                items: {task.itemCount}
-              </span>
-            )}
-          </div>
-          {task.error && (
-            <p className="text-down mt-0.5 truncate" title={task.error}>{task.error}</p>
-          )}
-          {empty && !task.error && (
-            <p className="text-warn-fg mt-0.5 truncate">
-              Completed but extracted nothing — expand to inspect the page diagnostics.
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <StatusBadge status={task.status} />
-          <span className="text-ink-3 tabular-nums">{fmtDate(task.createdAt)}</span>
-          <span className="text-ink-3">{open ? '▾' : '▸'}</span>
-        </div>
-      </button>
-      {open && (
-        <div className="mt-2 ml-2 grid gap-2 sm:grid-cols-2">
-          <PayloadBlock label="Params" value={task.params} />
-          <PayloadBlock label="Result" value={task.result} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PayloadBlock({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div className="rounded border border-line bg-bg-sub p-2">
-      <div className="text-2xs uppercase tracking-wider text-ink-3 mb-1">{label}</div>
-      <pre className="text-2xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">
-        {value ? JSON.stringify(value, null, 2) : '—'}
-      </pre>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const style = {
-    completed: 'bg-up/15 text-up',
-    dispatched: 'bg-info/15 text-info',
-    in_progress: 'bg-info/15 text-info',
-    pending: 'bg-ink-3/15 text-ink-3',
-    failed: 'bg-down/15 text-down',
-    cancelled: 'bg-ink-3/15 text-ink-3',
-  }[status] ?? 'bg-ink-3/15 text-ink-3';
-  return <Badge className={`${style} hover:${style} text-2xs`}>{status}</Badge>;
-}
-
-function fmtDate(v: string | null): string {
-  if (!v) return '—';
-  try {
-    const d = new Date(v);
-    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
-  } catch {
-    return v;
-  }
 }

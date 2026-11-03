@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiGetPaginated, apiPost, apiPatch, apiDelete } from '@/lib/api';
-import type { MasterAgent, AgentConfig, Company, Document } from '@/types';
+import type { MasterAgent, Company, Document } from '@/types';
 
 export function useAgents() {
   return useQuery({
@@ -18,28 +18,6 @@ export function useMasterAgent(id: string) {
     queryFn: () => apiGet<MasterAgent>(`/master-agents/${id}`),
     enabled: !!id,
     staleTime: 15000,
-  });
-}
-
-export function useAgentConfigs(masterAgentId: string) {
-  return useQuery({
-    queryKey: ['agents', masterAgentId, 'configs'],
-    queryFn: () => apiGet<AgentConfig[]>(`/master-agents/${masterAgentId}/agents`),
-    enabled: !!masterAgentId,
-  });
-}
-
-export function useCreateAgent() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: {
-      name: string;
-      mission?: string;
-      useCase: string;
-      description?: string;
-      config?: Record<string, unknown>;
-    }) => apiPost<MasterAgent>('/master-agents', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   });
 }
 
@@ -181,27 +159,6 @@ export interface ActionPlanResponse {
   actionPlan: ActionPlan | null;
   status: string;
   useCase: string;
-}
-
-export function useActionPlan(id: string) {
-  return useQuery({
-    queryKey: ['agents', id, 'action-plan'],
-    queryFn: () => apiGet<ActionPlanResponse>(`/master-agents/${id}/action-plan`),
-    enabled: !!id,
-    staleTime: 15000,
-  });
-}
-
-export function useUpdateActionPlan(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { answers: Record<string, string | undefined>; skip?: boolean }) =>
-      apiPatch<{ actionPlan: ActionPlan; status: string }>(`/master-agents/${id}/action-plan`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents', id] });
-      qc.invalidateQueries({ queryKey: ['agents', id, 'action-plan'] });
-    },
-  });
 }
 
 // ── Quota ────────────────────────────────────────────────────────────────────

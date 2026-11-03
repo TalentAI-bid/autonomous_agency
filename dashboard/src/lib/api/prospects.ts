@@ -36,19 +36,6 @@ export async function captureProspect(input: CaptureInput): Promise<CaptureResul
   return apiPost<CaptureResult>('/contacts/capture', input);
 }
 
-export interface LookupResult {
-  exists: boolean;
-  contactId?: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  companyName?: string | null;
-  currentStage?: string | null;
-}
-
-export async function lookupByLinkedinUrl(linkedinUrl: string): Promise<LookupResult> {
-  return apiGet<LookupResult>('/contacts/lookup', { linkedinUrl });
-}
-
 // ─── Stage 2 — list / detail / timeline / management ──────────────
 
 export interface ProspectListRow {
@@ -168,8 +155,4 @@ export async function markProspectDnc(id: string, reason?: string) {
 
 export async function updateProspectTags(id: string, add?: string[], remove?: string[]) {
   return apiPost<{ customTags: string[] }>(`/contacts/${id}/tags`, { add, remove });
-}
-
-export async function reassignProspect(id: string, userId: string) {
-  return apiPost<{ ok: true }>(`/contacts/${id}/reassign`, { userId });
 }

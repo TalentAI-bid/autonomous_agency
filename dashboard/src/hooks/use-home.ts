@@ -22,7 +22,7 @@ import type { MasterAgent, QuotaStatus } from '@/types';
    - search        the top-bar search has no endpoint.
 */
 export const SCORE_BAR: number | null = null;
-export const WINDOW_DAYS = 30;
+const WINDOW_DAYS = 30;
 const STATS_ARE_WINDOWED = false;
 
 const PLACEHOLDER_TOKEN = /\[[A-Z][A-Z _]{2,}\]/;

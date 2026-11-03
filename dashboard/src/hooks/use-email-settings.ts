@@ -14,14 +14,6 @@ export function useEmailAccounts() {
   });
 }
 
-export function useEmailAccount(id: string) {
-  return useQuery({
-    queryKey: ['email-accounts', id],
-    queryFn: () => apiGet<EmailAccount>(`/email-accounts/${id}`),
-    enabled: !!id,
-  });
-}
-
 export function useCreateEmailAccount() {
   const qc = useQueryClient();
   return useMutation({
@@ -104,15 +96,6 @@ export function useCreateEmailListener() {
       mailbox?: string;
       pollingIntervalMs?: number;
     }) => apiPost<EmailListenerConfig>('/email-listeners', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-listeners'] }),
-  });
-}
-
-export function useUpdateEmailListener() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) =>
-      apiPatch<EmailListenerConfig>(`/email-listeners/${id}`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['email-listeners'] }),
   });
 }

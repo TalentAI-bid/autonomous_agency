@@ -8,7 +8,6 @@ import {
   addProspectNote,
   markProspectDnc,
   updateProspectTags,
-  reassignProspect,
   type ProspectListFilters,
 } from '@/lib/api/prospects';
 
@@ -75,13 +74,3 @@ export function useUpdateProspectTags(id: string) {
   });
 }
 
-export function useReassignProspect(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (userId: string) => reassignProspect(id, userId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['prospect', id] });
-      qc.invalidateQueries({ queryKey: ['prospect-timeline', id] });
-    },
-  });
-}

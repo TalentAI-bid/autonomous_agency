@@ -1,7 +1,7 @@
 import { type ClassValue, clsx } from 'clsx';
 import { extendTailwindMerge } from 'tailwind-merge';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
-import type { AgentType, ContactStatus } from '@/types';
+import type { ContactStatus } from '@/types';
 
 // Teach tailwind-merge the custom font-size steps (tailwind.config.ts), otherwise
 // it reads text-label / text-2xs as colors and drops the real color class.
@@ -32,10 +32,6 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat().format(n);
 }
 
-export function formatPercent(n: number, decimals = 1): string {
-  return `${(n * 100).toFixed(decimals)}%`;
-}
-
 export function getStatusColor(status: ContactStatus | string): string {
   const map: Record<string, string> = {
     discovered: 'text-ink-3 bg-bg-soft',
@@ -58,71 +54,3 @@ export function getStatusColor(status: ContactStatus | string): string {
   return map[status] ?? 'text-ink-3 bg-bg-soft';
 }
 
-export function getAgentIcon(agentType: AgentType): string {
-  const map: Partial<Record<AgentType, string>> = {
-    discovery: 'Search',
-    document: 'FileText',
-    enrichment: 'Database',
-    scoring: 'Star',
-    outreach: 'Mail',
-    reply: 'MessageSquare',
-    action: 'Calendar',
-    strategy: 'Brain',
-    strategist: 'Target',
-    'email-listen': 'Inbox',
-    'email-send': 'Send',
-    mailbox: 'Mail',
-    'reddit-monitor': 'Radio',
-  };
-  return map[agentType] ?? 'Bot';
-}
-
-export function getAgentLabel(agentType: AgentType): string {
-  const map: Partial<Record<AgentType, string>> = {
-    discovery: 'Discovery',
-    document: 'Document Parser',
-    enrichment: 'Enrichment',
-    scoring: 'Scoring',
-    outreach: 'Outreach',
-    reply: 'Reply Handler',
-    action: 'Action Taker',
-    strategy: 'Strategy',
-    strategist: 'Strategist',
-    'email-listen': 'Email Listener',
-    'email-send': 'Email Sender',
-    mailbox: 'Mailbox',
-    'reddit-monitor': 'Reddit Monitor',
-  };
-  return map[agentType] ?? agentType;
-}
-
-export function getAgentDescription(agentType: AgentType): string {
-  const map: Partial<Record<AgentType, string>> = {
-    discovery: 'Searches LinkedIn and web for matching profiles',
-    document: 'Parses CVs and extracts structured data',
-    enrichment: 'Finds emails, enriches company data',
-    scoring: 'Scores candidates against requirements',
-    outreach: 'Sends personalized emails via Claude AI',
-    reply: 'Classifies replies and handles responses',
-    action: 'Schedules interviews and creates reports',
-    strategy: 'Analyzes performance and adapts daily strategy',
-    strategist: 'Creates initial sales strategy and optimizes pipeline',
-    'email-listen': 'Monitors inbound email',
-    'email-send': 'Sends queued emails',
-    mailbox: 'Manages email threads',
-    'reddit-monitor': 'Monitors Reddit for opportunities',
-  };
-  return map[agentType] ?? '';
-}
-
-export function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen) + '…';
-}
-
-export function getScoreColor(score: number): string {
-  if (score >= 80) return 'text-up';
-  if (score >= 60) return 'text-warn-fg';
-  if (score >= 40) return 'text-warn-fg';
-  return 'text-down';
-}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPatch } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import type { MailboxEmail, MailboxStats, MailboxThread, MailboxThreadDetail, MailboxDigest } from '@/types';
 
 interface MailboxListResponse {
@@ -96,16 +96,3 @@ export function useBulkAction() {
   });
 }
 
-export function useUpdateThread() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (params: { id: string; status?: string; priority?: string; nextAction?: string }) => {
-      const { id, ...body } = params;
-      return apiPatch<{ id: string }>(`/mailbox/threads/${id}`, body);
-    },
-    onSuccess: (_, params) => {
-      queryClient.invalidateQueries({ queryKey: ['mailbox', 'thread', params.id] });
-      queryClient.invalidateQueries({ queryKey: ['mailbox', 'threads'] });
-    },
-  });
-}

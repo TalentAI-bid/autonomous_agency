@@ -6,7 +6,7 @@
  * A null score renders a dashed "discovering" ring with an em-dash.
  */
 
-export function scoreColor(score: number | null | undefined): string {
+function scoreColor(score: number | null | undefined): string {
   if (score == null) return 'var(--ink-5)';
   if (score >= 80) return 'var(--up)';
   if (score >= 60) return 'var(--accent)';

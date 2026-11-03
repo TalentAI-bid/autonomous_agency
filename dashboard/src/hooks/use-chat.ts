@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiPost, apiGet, apiUpload } from '@/lib/api';
+import { apiPost, apiGet } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import type { ConversationWithMessages, ChatMessage, PipelineProposalData } from '@/types/chat';
 
@@ -20,28 +20,6 @@ export function useConversation(id: string | null) {
     queryFn: () => apiGet<ConversationWithMessages>(`/chat/conversations/${id}`),
     enabled: !!id,
     staleTime: 10000,
-  });
-}
-
-export function useSendMessage(conversationId: string | null) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ content, files }: { content: string; files?: File[] }) => {
-      const formData = new FormData();
-      formData.append('content', content);
-      if (files) {
-        for (const file of files) {
-          formData.append('files', file);
-        }
-      }
-      return apiUpload<{ message: ChatMessage }>(
-        `/chat/conversations/${conversationId}/messages`,
-        formData,
-      );
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
-    },
   });
 }
 

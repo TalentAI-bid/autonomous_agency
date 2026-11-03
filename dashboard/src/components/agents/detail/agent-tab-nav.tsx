@@ -4,7 +4,7 @@ export type AgentTab =
   | 'approvals' | 'overview' | 'contacts' | 'businesses' | 'opportunities' | 'companies'
   | 'documents' | 'emails' | 'activity' | 'strategy' | 'room' | 'settings';
 
-export const VALID_AGENT_TABS: readonly AgentTab[] = [
+const VALID_AGENT_TABS: readonly AgentTab[] = [
   'approvals', 'overview', 'contacts', 'businesses', 'opportunities', 'companies', 'documents', 'emails', 'activity', 'strategy', 'room', 'settings',
 ];
 

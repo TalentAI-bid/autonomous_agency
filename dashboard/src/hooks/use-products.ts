@@ -12,14 +12,6 @@ export function useProducts() {
   });
 }
 
-export function useProduct(id: string) {
-  return useQuery({
-    queryKey: ['products', id],
-    queryFn: () => apiGet<Product>(`/products/${id}`),
-    enabled: !!id,
-  });
-}
-
 export function useCreateProduct() {
   const qc = useQueryClient();
   return useMutation({

@@ -103,26 +103,6 @@ export function useCreateDeal() {
   });
 }
 
-export function useUpdateDeal() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...data }: Partial<Deal> & { id: string }) =>
-      apiPatch<Deal>(`/crm/deals/${id}`, data),
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ['crm', 'deals'] });
-      qc.invalidateQueries({ queryKey: ['crm', 'deals', vars.id] });
-    },
-  });
-}
-
-export function useDeleteDeal() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => apiDelete<{ success: boolean }>(`/crm/deals/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['crm'] }),
-  });
-}
-
 export function useMoveDealStage() {
   const qc = useQueryClient();
   return useMutation({

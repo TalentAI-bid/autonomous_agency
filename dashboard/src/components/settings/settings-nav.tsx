@@ -12,7 +12,7 @@ interface SettingsNavItem {
   also?: string[];
 }
 
-export const SETTINGS_NAV: SettingsNavItem[] = [
+const SETTINGS_NAV: SettingsNavItem[] = [
   { label: 'Company', href: '/settings/company' },
   { label: 'Products', href: '/settings/products' },
   { label: 'Messaging', href: '/settings/messaging' },

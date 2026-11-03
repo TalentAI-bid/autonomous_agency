@@ -107,16 +107,16 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button size="sm">
-            <Plus className="w-4 h-4 mr-2" />
-            New Deal
+          <Button variant="brand" size="sm">
+            <Plus className="mr-1.5 size-4" />
+            New deal
           </Button>
         )}
       </DialogTrigger>
 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New Deal</DialogTitle>
+          <DialogTitle>New deal</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -148,10 +148,10 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
                   aria-checked={stageId === s.id}
                   onClick={() => setStageId(s.id)}
                   className={cn(
-                    'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                    'rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors',
                     stageId === s.id
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-input bg-transparent text-muted-foreground hover:bg-accent-weak hover:text-accent-foreground',
+                      ? 'border-accent-mid bg-accent-weak text-accent-fg'
+                      : 'border-line bg-bg-panel text-ink-2 hover:border-line-strong hover:bg-hover',
                   )}
                   style={stageId === s.id ? undefined : { borderLeftColor: s.color, borderLeftWidth: 3 }}
                 >
@@ -177,7 +177,7 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
                 id="deal-currency"
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                className="w-full"
               >
                 <option value="USD">USD</option>
                 <option value="EUR">EUR</option>
@@ -194,12 +194,7 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional context, next step, owner…"
-              className={cn(
-                'flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm',
-                'placeholder:text-muted-foreground',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                'resize-none',
-              )}
+              className="resize-none"
             />
           </div>
 
@@ -209,8 +204,8 @@ export function NewDealDialog({ trigger, defaultStageId }: NewDealDialogProps) {
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" size="sm" disabled={!isValid || createDeal.isPending}>
-              {createDeal.isPending ? 'Creating…' : 'Create Deal'}
+            <Button type="submit" variant="brand" size="sm" disabled={!isValid || createDeal.isPending}>
+              {createDeal.isPending ? 'Creating…' : 'Create deal'}
             </Button>
           </DialogFooter>
         </form>

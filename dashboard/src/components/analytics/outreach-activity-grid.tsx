@@ -1,91 +1,41 @@
 'use client';
 
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Mail, MessageSquare, UserPlus, UserCheck, Reply } from 'lucide-react';
+import { Mail, MessageSquare, UserPlus, UserCheck, Reply, type LucideIcon } from 'lucide-react';
 import { useOutreachActivity } from '@/hooks/use-analytics';
-
-interface CardDef {
-  title: string;
-  value: number;
-  sub: string;
-  icon: React.ElementType;
-  iconColor: string;
-  bgColor: string;
-}
+import { HomeSection, RowIcon } from '@/components/home/home-parts';
 
 export function OutreachActivityGrid() {
   const { data, isLoading } = useOutreachActivity();
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
-      </div>
-    );
-  }
+  if (isLoading) return <Skeleton className="h-64 rounded-xl" />;
 
-  const cards: CardDef[] = [
-    {
-      title: 'Emails Sent',
-      value: data?.emailsSent ?? 0,
-      sub: 'outreach emails',
-      icon: Mail,
-      iconColor: 'text-a-master',
-      bgColor: 'bg-a-master/10',
-    },
-    {
-      title: 'LinkedIn Messages',
-      value: data?.linkedinMessagesSent ?? 0,
-      sub: 'DMs sent',
-      icon: MessageSquare,
-      iconColor: 'text-info',
-      bgColor: 'bg-info/10',
-    },
-    {
-      title: 'Persons Added',
-      value: data?.personsAddedWithNote ?? 0,
-      sub: 'connection notes sent',
-      icon: UserPlus,
-      iconColor: 'text-a-enrichment',
-      bgColor: 'bg-a-enrichment/10',
-    },
-    {
-      title: 'Connections',
-      value: data?.connectionsAccepted ?? 0,
-      sub: 'connections accepted',
-      icon: UserCheck,
-      iconColor: 'text-up',
-      bgColor: 'bg-up/10',
-    },
-    {
-      title: 'Responses',
-      value: data?.responses ?? 0,
-      sub: 'people who replied',
-      icon: Reply,
-      iconColor: 'text-up',
-      bgColor: 'bg-up/10',
-    },
+  const rows: { label: string; sub: string; value: number; icon: LucideIcon }[] = [
+    { label: 'Emails sent', sub: 'Outreach emails', value: data?.emailsSent ?? 0, icon: Mail },
+    { label: 'LinkedIn messages', sub: 'DMs sent', value: data?.linkedinMessagesSent ?? 0, icon: MessageSquare },
+    { label: 'Connection notes', sub: 'People added with a note', value: data?.personsAddedWithNote ?? 0, icon: UserPlus },
+    { label: 'Connections', sub: 'Accepted requests', value: data?.connectionsAccepted ?? 0, icon: UserCheck },
+    { label: 'Responses', sub: 'People who replied', value: data?.responses ?? 0, icon: Reply },
   ];
+  const max = Math.max(...rows.map((r) => r.value), 1);
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-      {cards.map(({ title, value, sub, icon: Icon, iconColor, bgColor }) => (
-        <Card key={title}>
-          <CardContent className="p-5">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">{title}</p>
-                <p className="text-2xl font-bold tabular-nums">{value}</p>
-                <p className="text-xs text-muted-foreground">{sub}</p>
-              </div>
-              <div className={`p-2.5 rounded-lg ${bgColor}`}>
-                <Icon className={`w-5 h-5 ${iconColor}`} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    <HomeSection title="Outreach activity" meta="Email and LinkedIn, all agents">
+      {rows.map(({ label, sub, value, icon: Icon }) => (
+        <div key={label} className="flex items-center gap-3 border-t border-line px-4 py-3">
+          <RowIcon>
+            <Icon size={15} />
+          </RowIcon>
+          <div className="w-[170px] shrink-0">
+            <div className="text-body font-medium text-ink">{label}</div>
+            <div className="truncate text-xs text-ink-3">{sub}</div>
+          </div>
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-bg-soft">
+            <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${(value / max) * 100}%` }} />
+          </div>
+          <span className="w-12 shrink-0 text-right font-mono text-body font-medium tabular-nums text-ink">{value.toLocaleString()}</span>
+        </div>
       ))}
-    </div>
+    </HomeSection>
   );
 }

@@ -47,12 +47,7 @@ export function DealBoard({ columns, onMoveDeal, onDealClick, className }: DealB
   }
 
   if (columns.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-sm text-muted-foreground">No pipeline stages configured.</p>
-        <p className="mt-1 text-xs text-muted-foreground">Seed default stages to get started.</p>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -62,7 +57,7 @@ export function DealBoard({ columns, onMoveDeal, onDealClick, className }: DealB
       onDragEnd={handleDragEnd}
       onDragCancel={() => setActiveDeal(null)}
     >
-      <div className={cn('flex gap-4 overflow-x-auto pb-4', className)}>
+      <div className={cn('scroll-thin flex items-start gap-3 overflow-x-auto pb-4', className)}>
         {columns.map((column) => (
           <BoardColumnPanel
             key={column.id}
@@ -89,50 +84,50 @@ interface BoardColumnPanelProps {
   onDealClick?: (deal: DealWithContact) => void;
 }
 
+function money(deals: DealWithContact[]): string | null {
+  const byCurrency = new Map<string, number>();
+  for (const d of deals) {
+    if (d.value == null || d.value === '' || Number.isNaN(Number(d.value))) continue;
+    const c = d.currency ?? 'USD';
+    byCurrency.set(c, (byCurrency.get(c) ?? 0) + Number(d.value));
+  }
+  if (byCurrency.size === 0) return null;
+  return [...byCurrency.entries()]
+    .map(([currency, v]) => new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(v))
+    .join(' · ');
+}
+
 function BoardColumnPanel({ column, onDealClick }: BoardColumnPanelProps) {
   const dealCount = column.deals.length;
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const total = money(column.deals);
 
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        'flex w-72 shrink-0 flex-col rounded-xl border bg-muted/30 transition-colors',
-        isOver ? 'border-primary bg-primary/5' : 'border-border',
+        'flex w-[284px] shrink-0 flex-col rounded-2xl border transition-colors',
+        isOver ? 'border-accent-mid bg-accent-weak' : 'border-line bg-bg-soft',
       )}
-      style={{ borderTopColor: column.color, borderTopWidth: 3 }}
     >
       {/* Column header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-border">
-        <div className="flex items-center gap-2 min-w-0">
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: column.color }}
-            aria-hidden
-          />
-          <h3 className="truncate text-sm font-semibold text-foreground">
-            {column.name}
-          </h3>
+      <div className="flex items-center justify-between gap-2 px-3.5 pb-2 pt-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: column.color }} aria-hidden />
+          <h3 className="m-0 truncate text-body font-semibold text-ink">{column.name}</h3>
         </div>
-        <span className="ml-2 shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-          {dealCount}
-        </span>
+        <span className="shrink-0 rounded-tag bg-bg-panel px-2 py-0.5 font-mono text-2xs font-medium text-ink-2">{dealCount}</span>
       </div>
+      {total && <div className="px-3.5 pb-1 font-mono text-2xs text-ink-3">{total}</div>}
 
       {/* Cards */}
-      <div className="flex flex-col gap-2 p-3 flex-1 overflow-y-auto max-h-[calc(100vh-12rem)]">
+      <div className="scroll-thin flex max-h-[calc(100vh-16rem)] flex-1 flex-col gap-2 overflow-y-auto p-2.5">
         {dealCount === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-8 text-center">
-            <p className="text-xs text-muted-foreground">No deals</p>
+          <div className="grid place-items-center rounded-xl border border-dashed border-line-strong py-8 text-center">
+            <p className="m-0 text-xs text-ink-4">{isOver ? 'Drop here' : 'No deals'}</p>
           </div>
         ) : (
-          column.deals.map((deal) => (
-            <DraggableDealCard
-              key={deal.id}
-              deal={deal}
-              onClick={() => onDealClick?.(deal)}
-            />
-          ))
+          column.deals.map((deal) => <DraggableDealCard key={deal.id} deal={deal} onClick={() => onDealClick?.(deal)} />)
         )}
       </div>
     </div>

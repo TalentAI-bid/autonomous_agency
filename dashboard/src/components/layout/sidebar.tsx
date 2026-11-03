@@ -115,7 +115,7 @@ export function Sidebar() {
         { href: '/dashboard', label: 'Home', icon: 'home' },
         { href: '/approvals', label: 'Approvals', icon: 'squareCheck' },
         { href: '/mailbox', label: 'Inbox', icon: 'mail' },
-        { href: '/schedule', label: 'Meetings', icon: 'calendar' },
+        { href: '/schedule', label: 'Schedule', icon: 'calendar' },
       ],
     },
     {

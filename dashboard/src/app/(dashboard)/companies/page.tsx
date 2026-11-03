@@ -5,11 +5,11 @@ import Link from 'next/link';
 import { Building2, Search, ChevronDown, Rocket, Users } from 'lucide-react';
 import { useCompanies } from '@/hooks/use-companies';
 import { ExportButton } from '@/components/shared/export-button';
-import { EmptyState } from '@/components/shared/empty-state';
 import { LeadCard, DiscoveringCard, type LeadTag } from '@/components/leads/lead-card';
 import type { Company } from '@/types';
 
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 const PAGE_SIZE = 24;
 const AVATAR_HUES = [255, 210, 160, 95, 35, 320, 285];
 const TH = 55; // component-score threshold for surfacing a qualifier tag
@@ -48,7 +48,8 @@ function personInitials(name: string) {
 function CompanyGlyph({ name, size = 28 }: { name: string; size?: number }) {
   return (
     <span
-      className="rounded-chip grid place-items-center font-bold text-ink bg-bg-soft border border-line shrink-0" style={{ width: size, height: size, fontSize: size * 0.42 }}
+      className="grid shrink-0 place-items-center rounded-lg bg-accent-weak font-semibold text-accent-fg"
+      style={{ width: size, height: size, fontSize: size * 0.42 }}
     >
       {monogram(name)}
     </span>
@@ -126,105 +127,101 @@ export default function CompaniesPage() {
   );
 
   return (
-    <div className="page py-5 px-6 flex flex-col gap-[18px]">
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="flex items-start gap-4 flex-wrap">
-        <div className="min-w-0">
-          <h1
-            className="flex items-center gap-3 m-0 text-[26px] font-semibold tracking-[-0.02em] text-ink"
-          >
-            <span className="display italic">
-              Companies
-            </span>
-            <span className="text-ink-3 font-normal">—</span>
-            <span className="mono text-stat">
-              {count}
-            </span>
-            {live && <span className="dot is-live w-2 h-2 rounded-full"  />}
-          </h1>
-          <p className="mt-1.5 mx-0 mb-0 text-[12.5px] text-ink-3 flex items-center gap-2">
-            {search ? (
-              <>
-                Searching: <span className="text-ink-2 font-medium">{search}</span>
-              </>
-            ) : (
-              'Every company your agents have discovered and scored'
-            )}
-            {live && (
-              <span
-                className="pill is-accent text-2xs py-px px-2 bg-accent-weak text-accent-fg"
-              >
-                Live
-              </span>
-            )}
-          </p>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <ExportButton />
-          <Button asChild variant="brand" size="dense"><Link href="/agents/new">
-            <Rocket size={14} /> Deploy agent
-          </Link></Button>
-        </div>
-      </div>
-
-      {/* ── Filter pills ───────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 flex-wrap">
-        <label className="filter-pill cursor-text">
-          <Search size={14} className="text-ink-3"/>
+    <div className="flex flex-col gap-4 p-5">
+      {/* ── Toolbar ────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <label className="flex h-9 w-full cursor-text items-center gap-2 rounded-lg border border-line bg-bg-panel px-3 text-body text-ink-3 transition-colors focus-within:border-accent-mid focus-within:ring-2 focus-within:ring-accent-weak hover:border-line-strong sm:w-[280px]">
+          <Search size={14} className="shrink-0" />
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by company name…"
-            className="border-0 bg-transparent text-inherit w-[200px]" style={{ font: 'inherit' }}
+            className="min-w-0 flex-1 border-0 bg-transparent text-body text-ink outline-none placeholder:text-ink-4"
           />
         </label>
 
         <button
           type="button"
-          className="filter-pill"
+          aria-pressed={scoredOnly}
           onClick={() => setScoredOnly((v) => !v)}
-          style={
+          className={cn(
+            'h-9 rounded-lg border px-3.5 text-body font-medium transition-colors',
             scoredOnly
-              ? { background: 'var(--accent-weak)', borderColor: 'transparent', color: 'var(--accent-fg)' }
-              : undefined
-          }
+              ? 'border-accent-mid bg-accent-weak text-accent-fg'
+              : 'border-line bg-bg-panel text-ink-2 hover:border-line-strong hover:bg-hover',
+          )}
         >
           Scored only
         </button>
 
-        <span className="filter-pill ml-auto">
-          Sort by:
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'fit_score' | 'createdAt')}>
-            <option value="fit_score">Fit score</option>
-            <option value="createdAt">Newest</option>
-          </select>
-          <ChevronDown size={13} className="text-ink-3"/>
+        <label className="flex h-9 items-center gap-2 rounded-lg border border-line bg-bg-panel pl-3 text-body text-ink-3 transition-colors hover:border-line-strong">
+          Sort
+          <span className="relative">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'fit_score' | 'createdAt')}
+              className="h-[34px] cursor-pointer appearance-none border-0 bg-transparent pl-1 pr-7 text-body font-medium text-ink outline-none"
+            >
+              <option value="fit_score">Fit score</option>
+              <option value="createdAt">Newest</option>
+            </select>
+            <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-4" />
+          </span>
+        </label>
+
+        <div className="ml-auto flex items-center gap-2">
+          <ExportButton />
+          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-3.5 text-body font-semibold">
+            <Link href="/agents/new">
+              <Rocket size={14} className="mr-1.5" /> Deploy agent
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Summary ────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-1 text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">
+        <span>Companies</span>
+        <span className="normal-case tracking-normal text-ink-3">
+          {search ? (
+            <>
+              {count} matching “<span className="font-medium text-ink-2">{search}</span>”
+            </>
+          ) : (
+            <>{count} shown · discovered and scored by your agents</>
+          )}
         </span>
+        {live && (
+          <span className="inline-flex items-center gap-1.5 normal-case tracking-normal text-up">
+            <span className="size-1.5 animate-pulse rounded-full bg-current" /> Updating
+          </span>
+        )}
       </div>
 
       {/* ── Grid ───────────────────────────────────────────────── */}
       {isLoading ? (
         <div className="leads-grid">
-          {Array.from({ length: 8 }).map((_, i) => (
+          {Array.from({ length: 6 }).map((_, i) => (
             <DiscoveringCard key={i} />
           ))}
         </div>
       ) : count === 0 ? (
-        <EmptyState
-          icon={Building2}
-          title="No companies yet"
-          description={
-            search
+        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+          <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
+            <Building2 size={16} />
+          </span>
+          <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">No companies yet</h2>
+          <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">
+            {search
               ? 'No companies match your search. Try a different name.'
-              : 'Deploy an agent — discovered companies will show up here as they’re scored.'
-          }
-          action={
-            <Button asChild variant="brand" size="dense"><Link href="/agents/new">
-              <Rocket size={14} /> Deploy agent
-            </Link></Button>
-          }
-        />
+              : 'Deploy an agent and the companies it discovers will show up here as they are scored.'}
+          </p>
+          {!search && (
+            <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+              <Link href="/agents/new">Deploy agent</Link>
+            </Button>
+          )}
+        </section>
       ) : (
         <div className="leads-grid">
           {cards.map((c) => (
@@ -235,9 +232,7 @@ export default function CompaniesPage() {
               title={c.name}
               badge={
                 c.size ? (
-                  <span
-                    className="pill inline-flex items-center gap-[5px] text-[10.5px] text-ink-3"
-                  >
+                  <span className="inline-flex items-center gap-1.5 rounded-tag bg-bg-soft px-2 py-1 text-2xs text-ink-3">
                     <Users size={11} /> {c.size}
                   </span>
                 ) : undefined
@@ -246,7 +241,7 @@ export default function CompaniesPage() {
                 c.hasPerson ? (
                   <PersonAvatar name={c.contactName} size={40} />
                 ) : (
-                  <span className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-bg-soft text-ink-4">
+                  <span className="grid size-10 place-items-center rounded-lg bg-bg-soft text-ink-4">
                     <Building2 size={18} />
                   </span>
                 )
@@ -263,33 +258,29 @@ export default function CompaniesPage() {
         </div>
       )}
 
-      {/* ── Footer / pagination ────────────────────────────────── */}
-      <div
-        className="flex items-center justify-between pt-2 border-t border-line text-label text-ink-3"
-      >
-        <span>
-          <span className="mono text-ink-2">
-            {count}
-          </span>{' '}
-          {count === 1 ? 'company' : 'companies'} shown
-        </span>
-
-        {(cursorStack.length > 1 || pagination?.hasMore) && (
+      {/* ── Pagination ─────────────────────────────────────────── */}
+      {(cursorStack.length > 1 || pagination?.hasMore) && (
+        <div className="flex items-center justify-between rounded-2xl border border-line bg-bg-panel px-4 py-2.5 shadow-sm">
+          <span className="text-xs text-ink-3">
+            <span className="font-mono text-ink-2">{count}</span> {count === 1 ? 'company' : 'companies'} on this page
+          </span>
           <div className="flex items-center gap-2.5">
             <Button
               type="button"
-              variant="panel" size="xs"
+              variant="panel"
+              size="dense"
+              className="h-8 rounded-lg px-3 text-xs"
               disabled={cursorStack.length <= 1}
               onClick={() => setCursorStack((s) => s.slice(0, -1))}
             >
-              ← Prev
+              ← Previous
             </Button>
-            <span className="mono text-xs">
-              Page {cursorStack.length}
-            </span>
+            <span className="font-mono text-xs text-ink-3">Page {cursorStack.length}</span>
             <Button
               type="button"
-              variant="panel" size="xs"
+              variant="panel"
+              size="dense"
+              className="h-8 rounded-lg px-3 text-xs"
               disabled={!pagination?.hasMore || !pagination?.nextCursor}
               onClick={() => {
                 if (pagination?.nextCursor) setCursorStack((s) => [...s, pagination.nextCursor!]);
@@ -298,8 +289,8 @@ export default function CompaniesPage() {
               Next →
             </Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

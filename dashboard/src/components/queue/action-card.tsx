@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { QueueAction, QueueContact, QueueCompany, TargetAlternative } from '@/lib/api/queue';
 import { DraftEditorDialog } from './draft-editor-dialog';
@@ -35,11 +34,11 @@ const ACTION_LABELS: Record<string, { icon: string; label: string }> = {
   research_company_decision_makers:  { icon: '🔎', label: 'Find Decision-Makers' },
 };
 
-const PRIORITY_VARIANT: Record<string, 'error' | 'warning' | 'blue' | 'outline'> = {
-  P0: 'error',
-  P1: 'warning',
-  P2: 'blue',
-  P3: 'outline',
+export const PRIORITY_TONE: Record<string, string> = {
+  P0: 'bg-down/10 text-down',
+  P1: 'bg-warn/15 text-warn-fg',
+  P2: 'bg-info/10 text-info',
+  P3: 'bg-bg-soft text-ink-3',
 };
 
 export function ActionCard({
@@ -129,155 +128,133 @@ export function ActionCard({
   const isResearch = action.actionType === 'research_company_decision_makers';
   const alternatives = action.targetAlternatives ?? [];
 
+  const done = action.status === 'completed' || action.status === 'skipped';
+
   return (
-    <div
-      className={cn(
-        'rounded-card border border-border p-3.5',
-        action.status === 'in_progress' ? 'bg-bg-panel' : 'bg-bg-sub',
-        (action.status === 'completed' || action.status === 'skipped') && 'opacity-50',
-      )}
-    >
-      <div className="flex justify-between items-start gap-3 mb-1.5">
-        <div className="flex-1 min-w-0">
-          <div className="flex gap-2 items-center mb-1 flex-wrap">
-            <Badge variant={PRIORITY_VARIANT[action.priority]}>{action.priority}</Badge>
-            <span className="text-[14px]">{labelInfo.icon} {labelInfo.label}</span>
-            {action.priorityReason && (
-              <span className="text-xs text-ink-3">{action.priorityReason}</span>
-            )}
-            {action.draftConfidence != null && action.draftConfidence < 50 && (
-              <Badge variant="warning">⚠️ Low context</Badge>
-            )}
-          </div>
-          {/* Company name is the primary identifier. */}
-          <div className="text-title font-semibold text-ink">
-            {company.name}
-            {company.score != null && (
-              <span className="text-xs text-ink-3 ml-2 font-normal">
-                score {company.score}
+    <li className={cn('px-5 py-4', done && 'opacity-50')}>
+      <div className="flex items-start gap-3.5">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-bg-soft text-[16px]" aria-hidden>
+          {labelInfo.icon}
+        </span>
+
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-body font-semibold text-ink">{company.name}</span>
+              {company.score != null && <span className="font-mono text-2xs text-ink-4">score {company.score}</span>}
+              <span className={cn('rounded-tag px-2 py-0.5 text-2xs font-semibold', PRIORITY_TONE[action.priority] ?? PRIORITY_TONE.P3)}>
+                {action.priority}
               </span>
+              <span className="rounded-tag bg-bg-soft px-2 py-0.5 text-2xs text-ink-2">{labelInfo.label}</span>
+              {action.status === 'in_progress' && (
+                <span className="rounded-tag bg-accent-weak px-2 py-0.5 text-2xs font-medium text-accent-fg">In progress</span>
+              )}
+              {action.draftConfidence != null && action.draftConfidence < 50 && (
+                <span className="rounded-tag bg-warn/15 px-2 py-0.5 text-2xs font-medium text-warn-fg">Low context</span>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-ink-3">
+              {contact ? (
+                <>
+                  To{' '}
+                  <Link href={`/prospects/${contact.id}`} className="font-medium text-ink-2 no-underline hover:text-accent">
+                    {recommendedName}
+                  </Link>
+                  {contact.title && <> · {contact.title}</>}
+                </>
+              ) : (
+                <span className="italic">No contact yet — research needed</span>
+              )}
+              {action.priorityReason && <> · {action.priorityReason}</>}
+            </div>
+          </div>
+
+          {action.whyNow && <p className="m-0 text-xs italic leading-relaxed text-ink-2">{action.whyNow}</p>}
+
+          {showDraft && (
+            <button
+              type="button"
+              onClick={() => setDraftExpanded((v) => !v)}
+              className="block w-full cursor-pointer rounded-lg border border-line bg-bg-sub px-3 py-2.5 text-left transition-colors hover:border-line-strong"
+            >
+              {action.draftSubject && <div className="mb-1 text-xs font-semibold text-ink">Re: {action.draftSubject}</div>}
+              <div
+                className="overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-ink-2"
+                style={{ maxHeight: draftExpanded ? 'none' : 60 }}
+              >
+                {action.draftBody}
+              </div>
+              {!draftExpanded && action.draftBody && action.draftBody.length > 200 && (
+                <div className="mt-1.5 text-2xs text-ink-4">Click to expand · {action.draftBody.length} chars</div>
+              )}
+            </button>
+          )}
+
+          {alternatives.length > 0 && action.status === 'pending' && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setAltsOpen((v) => !v)}
+                className="cursor-pointer border-0 bg-transparent p-0 text-xs font-medium text-ink-2 hover:text-accent"
+              >
+                {altsOpen ? '▼' : '▶'} Other contacts at this company ({alternatives.length})
+              </button>
+              {altsOpen && (
+                <div className="mt-1.5 flex flex-col gap-1">
+                  {alternatives.map((alt) => (
+                    <button
+                      type="button"
+                      key={alt.contactId}
+                      onClick={() => handleRetarget(alt)}
+                      disabled={retargetMut.isPending}
+                      className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-bg-panel px-2.5 py-1.5 text-left text-xs text-ink transition-colors hover:border-line-strong"
+                    >
+                      <span className="font-medium">{alt.name}</span>
+                      {alt.title && <span className="text-ink-3">· {alt.title}</span>}
+                      <span className="ml-auto text-2xs text-ink-3">Switch &amp; regenerate draft</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {action.status === 'pending' && (
+              <Button type="button" variant="brand" size="dense" onClick={handleExecute} disabled={executeMut.isPending} className="h-8 rounded-lg px-3.5 text-xs font-semibold">
+                {executeMut.isPending ? '…' : isResearch ? 'Find decision-makers' : 'Execute'}
+              </Button>
+            )}
+            {action.status === 'in_progress' && (
+              <Button type="button" variant="brand" size="dense" onClick={handleMarkSent} disabled={completeMut.isPending} className="h-8 rounded-lg px-3.5 text-xs font-semibold">
+                {isResearch ? 'Mark researched' : 'Mark sent'}
+              </Button>
+            )}
+            {showDraft && action.status === 'pending' && (
+              <Button type="button" variant="panel" size="dense" onClick={() => setEditing(true)} className="h-8 rounded-lg px-3 text-xs">
+                Edit
+              </Button>
+            )}
+            {action.status === 'pending' && (
+              <button
+                type="button"
+                onClick={() => setSkipping(true)}
+                className="h-8 rounded-lg px-2.5 text-xs font-medium text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+              >
+                Skip
+              </button>
+            )}
+            {contact && (
+              <Link href={`/prospects/${contact.id}`} className="ml-auto text-xs text-ink-3 no-underline hover:text-accent">
+                Open ↗
+              </Link>
             )}
           </div>
-          {/* Recommended target. Null for research actions. */}
-          {contact ? (
-            <div className="text-label text-ink-2 mt-0.5">
-              Recommended target:&nbsp;
-              <Link href={`/prospects/${contact.id}`} className="text-ink no-underline">
-                {recommendedName}
-              </Link>
-              {contact.title && <span className="text-ink-3"> · {contact.title}</span>}
-            </div>
-          ) : (
-            <div className="text-label text-ink-3 mt-0.5 italic">
-              No contact yet — research needed
-            </div>
-          )}
         </div>
       </div>
 
-      {action.whyNow && (
-        <div className="text-label text-ink-2 mb-2 italic">
-          {action.whyNow}
-        </div>
-      )}
-
-      {showDraft && (
-        <div
-          className="border border-dashed border-border rounded-chip p-2 bg-bg-panel mb-2 cursor-pointer"
-          onClick={() => setDraftExpanded((v) => !v)}
-        >
-          {action.draftSubject && (
-            <div className="text-label font-medium mb-1">
-              Re: {action.draftSubject}
-            </div>
-          )}
-          <div
-            className="text-label text-ink-2 whitespace-pre-wrap overflow-hidden" style={{ maxHeight: draftExpanded ? 'none' : 60 }}
-          >
-            {action.draftBody}
-          </div>
-          {!draftExpanded && action.draftBody && action.draftBody.length > 200 && (
-            <div className="text-2xs text-ink-3 mt-1">
-              Click to expand · {action.draftBody.length} chars
-            </div>
-          )}
-        </div>
-      )}
-
-      {alternatives.length > 0 && action.status === 'pending' && (
-        <div className="mb-2">
-          <button
-            onClick={() => setAltsOpen((v) => !v)}
-            className="bg-transparent border-0 text-ink-2 text-label cursor-pointer p-0"
-          >
-            {altsOpen ? '▼' : '▶'} Other contacts at this company ({alternatives.length})
-          </button>
-          {altsOpen && (
-            <div className="mt-1.5 flex flex-col gap-1">
-              {alternatives.map((alt) => (
-                <button
-                  key={alt.contactId}
-                  onClick={() => handleRetarget(alt)}
-                  disabled={retargetMut.isPending}
-                  className="flex items-center gap-1.5 py-1.5 px-2 bg-bg-panel border border-border rounded-chip text-left cursor-pointer text-label text-ink"
-                >
-                  <span className="font-medium">{alt.name}</span>
-                  {alt.title && <span className="text-ink-3">· {alt.title}</span>}
-                  <span className="ml-auto text-2xs text-ink-3">
-                    Switch & regenerate draft
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex gap-1.5 flex-wrap">
-        {action.status === 'pending' && (
-          <Button size="sm" onClick={handleExecute} disabled={executeMut.isPending}>
-            {executeMut.isPending ? '…' : isResearch ? 'Find decision-makers' : 'Execute'}
-          </Button>
-        )}
-        {action.status === 'in_progress' && !isResearch && (
-          <Button size="sm" onClick={handleMarkSent} disabled={completeMut.isPending}>
-            Mark Sent
-          </Button>
-        )}
-        {action.status === 'in_progress' && isResearch && (
-          <Button size="sm" onClick={handleMarkSent} disabled={completeMut.isPending}>
-            Mark Researched
-          </Button>
-        )}
-        {showDraft && action.status === 'pending' && (
-          <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-        )}
-        {action.status === 'pending' && (
-          <Button size="sm" variant="ghost" onClick={() => setSkipping(true)}>
-            Skip
-          </Button>
-        )}
-        {contact && (
-          <Link href={`/prospects/${contact.id}`} className="text-xs text-ink-3 self-center ml-auto">
-            Open ↗
-          </Link>
-        )}
-      </div>
-
-      {editing && (
-        <DraftEditorDialog
-          action={action}
-          onClose={() => setEditing(false)}
-        />
-      )}
-      {skipping && (
-        <SkipDialog
-          actionId={action.id}
-          onClose={() => setSkipping(false)}
-        />
-      )}
+      {editing && <DraftEditorDialog action={action} onClose={() => setEditing(false)} />}
+      {skipping && <SkipDialog actionId={action.id} onClose={() => setSkipping(false)} />}
       {executing?.kind === 'email_confirm' && contact && (
         <ExecuteConfirmDialog
           actionId={action.id}
@@ -287,6 +264,6 @@ export function ActionCard({
           onClose={() => setExecuting(null)}
         />
       )}
-    </div>
+    </li>
   );
 }

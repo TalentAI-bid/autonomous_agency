@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Linkedin, ArrowRight, Briefcase } from 'lucide-react';
 import { FitGauge } from './fit-gauge';
@@ -38,32 +38,22 @@ export interface LeadCardProps {
   isNew?: boolean;
 }
 
-const tagStyle: Record<NonNullable<LeadTag['tone']>, CSSProperties> = {
-  default: { background: 'var(--bg-soft)', color: 'var(--ink-2)', border: '1px solid var(--line)' },
-  up: {
-    background: 'var(--accent-weak)',
-    color: 'var(--accent-fg)',
-    border: '1px solid color-mix(in oklch, var(--accent) 22%, transparent)',
-  },
-  warn: {
-    background: 'var(--warn-weak)',
-    color: 'var(--warn)',
-    border: '1px solid color-mix(in oklch, var(--warn) 30%, transparent)',
-  },
+const tagClass: Record<NonNullable<LeadTag['tone']>, string> = {
+  default: 'bg-bg-soft text-ink-2',
+  up: 'bg-accent-weak text-accent-fg',
+  warn: 'bg-warn/15 text-warn-fg',
 };
 
 function TagChip({ tag }: { tag: LeadTag }) {
   return (
-    <span
-      className="inline-flex items-center py-[3px] px-2 rounded-full text-xs font-medium whitespace-nowrap" style={{ ...tagStyle[tag.tone ?? 'default'] }}
-    >
+    <span className={cn('inline-flex items-center whitespace-nowrap rounded-tag px-2 py-1 text-xs font-medium', tagClass[tag.tone ?? 'default'])}>
       {tag.label}
     </span>
   );
 }
 
 const CARD_BASE =
-  'flex aspect-square min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-card border border-line bg-bg-panel p-[18px]';
+  'flex min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-bg-panel p-[18px] shadow-sm';
 
 /** Discovering placeholder — a live agent is still enriching this lead. */
 export function DiscoveringCard() {
@@ -72,7 +62,7 @@ export function DiscoveringCard() {
   );
   return (
     <div
-      className={cn(CARD_BASE, "border-dashed border-accent-line bg-accent-tint")}
+      className={cn(CARD_BASE, "border-dashed border-accent-mid bg-accent-weak shadow-none")}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -127,9 +117,9 @@ export function LeadCard({
   return (
     <div
       className={cn(
-        'lead-card transition-[border-color,box-shadow] duration-[120ms]',
+        'lead-card transition-[border-color,box-shadow] duration-150 hover:shadow-md',
         CARD_BASE,
-        isNew && 'border-accent-line',
+        isNew && 'border-accent-mid',
       )}
     >
       {/* Header: glyph + title + badge */}
@@ -174,7 +164,7 @@ export function LeadCard({
           {roles.map((role, i) => (
             <span
               key={`${role}-${i}`}
-              className="inline-flex items-center gap-1 py-0.5 px-2 rounded-chip text-xs font-medium text-ink-2 bg-bg-soft border border-line whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
+              className="inline-flex max-w-full items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-tag bg-bg-soft px-2 py-1 text-xs font-medium text-ink-2"
             >
               <Briefcase size={11} className="text-ink-3 shrink-0"/>
               {role}
@@ -203,7 +193,7 @@ export function LeadCard({
 
       {/* Footer: linkedin + view profile */}
       <div
-        className="mt-auto pt-3 border-t border-line flex items-center justify-between"
+        className="mt-auto flex items-center justify-between border-t border-line pt-3"
       >
         {linkedinUrl ? (
           <a
@@ -212,7 +202,7 @@ export function LeadCard({
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             aria-label="Open LinkedIn profile"
-            className="grid place-items-center w-[26px] h-[26px] rounded-[5px] bg-[color:#0a66c2] text-white"
+            className="grid size-7 place-items-center rounded-lg bg-[color:#0a66c2] text-white"
           >
             <Linkedin size={14} />
           </a>
@@ -221,9 +211,9 @@ export function LeadCard({
         )}
         <Link
           href={href}
-          className="inline-flex items-center gap-[5px] text-[12.5px] font-medium text-accent-fg"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-bg-panel px-3 text-xs font-medium text-ink no-underline transition-colors hover:border-accent-mid hover:bg-accent-weak hover:text-accent-fg"
         >
-          View profile <ArrowRight size={14} />
+          View profile <ArrowRight size={13} />
         </Link>
       </div>
     </div>

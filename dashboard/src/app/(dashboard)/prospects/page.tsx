@@ -3,11 +3,10 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Rocket, Plus, Building2, Search, ChevronDown } from 'lucide-react';
+import { Rocket, Plus, Building2, Search, ChevronDown, X } from 'lucide-react';
 import { useProspects } from '@/hooks/use-prospect';
 import type { ProspectListRow } from '@/lib/api/prospects';
 import { ExportButton } from '@/components/shared/export-button';
-import { EmptyState } from '@/components/shared/empty-state';
 import { LeadCard, DiscoveringCard, type LeadTag } from '@/components/leads/lead-card';
 import { Users } from 'lucide-react';
 
@@ -36,7 +35,6 @@ const SOURCE_TYPES = [
   { value: 'imported_csv', label: 'CSV import' },
 ];
 
-const AVATAR_HUES = [255, 210, 160, 95, 35, 320, 285];
 
 function fullName(p: ProspectListRow) {
   return [p.firstName, p.lastName].filter(Boolean).join(' ') || p.email || 'Unnamed lead';
@@ -47,14 +45,36 @@ function initials(p: ProspectListRow) {
   return (a + b || (p.email ?? p.companyName ?? '?').charAt(0)).toUpperCase();
 }
 
-/** Round avatar with deterministic hue from the name. */
+const AVATAR_TONES = ['bg-accent', 'bg-ink-2', 'bg-up', 'bg-info'];
+
+/** Round avatar with a deterministic tone from the name. */
 function Avatar({ text, hueSeed, size = 40 }: { text: string; hueSeed: string; size?: number }) {
-  const hue = AVATAR_HUES[(hueSeed.charCodeAt(0) || 0) % AVATAR_HUES.length];
+  const tone = AVATAR_TONES[(hueSeed.charCodeAt(0) || 0) % AVATAR_TONES.length];
   return (
     <span
-      className="rounded-full grid place-items-center font-semibold text-white shrink-0" style={{ width: size, height: size, fontSize: size * 0.36, background: `oklch(0.62 0.11 ${hue})` }}
+      className={`grid shrink-0 place-items-center rounded-full font-semibold text-white ${tone}`}
+      style={{ width: size, height: size, fontSize: size * 0.36 }}
     >
       {text}
+    </span>
+  );
+}
+
+function FilterSelect({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+  return (
+    <span className="relative inline-flex h-9 items-center rounded-lg border border-line bg-bg-panel transition-colors hover:border-line-strong focus-within:border-accent-mid focus-within:ring-2 focus-within:ring-accent-weak">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-[34px] cursor-pointer appearance-none border-0 bg-transparent pl-3 pr-8 text-body font-medium text-ink outline-none"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 text-ink-4" />
     </span>
   );
 }
@@ -117,127 +137,109 @@ export default function ProspectsPage() {
   const live = isFetching && !isLoading;
 
   return (
-    <div className="page py-5 px-6 flex flex-col gap-[18px]">
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="flex items-start gap-4 flex-wrap">
-        <div className="min-w-0">
-          <h1
-            className="flex items-center gap-3 m-0 text-[26px] font-semibold tracking-[-0.02em] text-ink"
-          >
-            <span className="display italic">
-              Prospects
-            </span>
-            <span className="text-ink-3 font-normal">—</span>
-            <span className="mono text-stat">
-              {count}
-            </span>
-            {live && <span className="dot is-live w-2 h-2 rounded-full"  />}
-          </h1>
-          <p className="mt-1.5 mx-0 mb-0 text-[12.5px] text-ink-3 flex items-center gap-2">
-            {debouncedSearch ? (
-              <>
-                Searching: <span className="text-ink-2 font-medium">{debouncedSearch}</span>
-              </>
-            ) : (
-              'Everyone your agents have surfaced and captured'
-            )}
-            {live && (
-              <span
-                className="pill is-accent text-2xs py-px px-2 bg-accent-weak text-accent-fg"
-              >
-                Live
-              </span>
-            )}
-          </p>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <Button asChild variant="panel" size="dense"><Link href="/prospects/new">
-            <Plus size={14} /> Add prospect
-          </Link></Button>
-          <ExportButton />
-          <Button asChild variant="brand" size="dense"><Link href="/agents/new">
-            <Rocket size={14} /> Deploy agent
-          </Link></Button>
-        </div>
-      </div>
-
-      {/* ── Filter pills ───────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 flex-wrap">
-        <label className="filter-pill cursor-text">
-          <Search size={14} className="text-ink-3"/>
+    <div className="flex flex-col gap-4 p-5">
+      {/* ── Toolbar ────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <label className="flex h-9 w-full cursor-text items-center gap-2 rounded-lg border border-line bg-bg-panel px-3 text-body text-ink-3 transition-colors focus-within:border-accent-mid focus-within:ring-2 focus-within:ring-accent-weak hover:border-line-strong sm:w-[280px]">
+          <Search size={14} className="shrink-0" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, company, title…"
-            className="border-0 bg-transparent text-inherit w-[200px]" style={{ font: 'inherit' }}
+            className="min-w-0 flex-1 border-0 bg-transparent text-body text-ink outline-none placeholder:text-ink-4"
           />
         </label>
 
-        <span className="filter-pill">
-          <select value={stage} onChange={(e) => setParam('stage', e.target.value)}>
-            {STAGES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.value ? `Stage: ${s.label}` : s.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={13} className="text-ink-3"/>
-        </span>
-
-        <span className="filter-pill">
-          <select value={sourceType} onChange={(e) => setParam('sourceType', e.target.value)}>
-            {SOURCE_TYPES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.value ? `Source: ${s.label}` : s.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={13} className="text-ink-3"/>
-        </span>
+        <FilterSelect
+          value={stage}
+          onChange={(v) => setParam('stage', v)}
+          options={STAGES.map((s) => ({ value: s.value, label: s.value ? `Stage: ${s.label}` : s.label }))}
+        />
+        <FilterSelect
+          value={sourceType}
+          onChange={(v) => setParam('sourceType', v)}
+          options={SOURCE_TYPES.map((s) => ({ value: s.value, label: s.value ? `Source: ${s.label}` : s.label }))}
+        />
 
         {tag && (
-          <span className="filter-pill border-transparent bg-accent-weak text-accent-fg">
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-accent-mid bg-accent-weak pl-3 pr-1.5 text-body font-medium text-accent-fg">
             Tag: {tag}
             <button
               type="button"
               onClick={() => setParam('tag', '')}
-              className="border-0 bg-transparent cursor-pointer text-inherit text-[14px] leading-[1]"
+              className="grid size-6 place-items-center rounded-md border-0 bg-transparent text-inherit hover:bg-black/10"
               aria-label="Clear tag filter"
             >
-              ×
+              <X size={13} />
             </button>
           </span>
         )}
 
-        <span className="filter-pill ml-auto">
-          Sort by:
-          <select value={sort} onChange={(e) => setSort(e.target.value as 'score' | 'recent')}>
-            <option value="score">Fit score</option>
-            <option value="recent">Most recent</option>
-          </select>
-          <ChevronDown size={13} className="text-ink-3"/>
+        <FilterSelect
+          value={sort}
+          onChange={(v) => setSort(v as 'score' | 'recent')}
+          options={[
+            { value: 'score', label: 'Sort: Fit score' },
+            { value: 'recent', label: 'Sort: Most recent' },
+          ]}
+        />
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button asChild variant="panel" size="dense" className="h-9 rounded-lg px-3.5 text-body font-medium">
+            <Link href="/prospects/new">
+              <Plus size={14} className="mr-1.5" /> Add prospect
+            </Link>
+          </Button>
+          <ExportButton />
+          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-3.5 text-body font-semibold">
+            <Link href="/agents/new">
+              <Rocket size={14} className="mr-1.5" /> Deploy agent
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Summary ────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-1 text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">
+        <span>Prospects</span>
+        <span className="normal-case tracking-normal text-ink-3">
+          {debouncedSearch ? (
+            <>
+              {count} matching “<span className="font-medium text-ink-2">{debouncedSearch}</span>”
+            </>
+          ) : (
+            <>
+              {count} shown{hasMore ? ' · more available' : ''} · surfaced and captured by your agents
+            </>
+          )}
         </span>
+        {live && (
+          <span className="inline-flex items-center gap-1.5 normal-case tracking-normal text-up">
+            <span className="size-1.5 animate-pulse rounded-full bg-current" /> Updating
+          </span>
+        )}
       </div>
 
       {/* ── Grid ───────────────────────────────────────────────── */}
       {isLoading ? (
         <div className="leads-grid">
-          {Array.from({ length: 8 }).map((_, i) => (
+          {Array.from({ length: 6 }).map((_, i) => (
             <DiscoveringCard key={i} />
           ))}
         </div>
       ) : count === 0 ? (
-        <EmptyState
-          icon={Users}
-          title="No prospects match these filters"
-          description="Try clearing the filters, or add a prospect manually."
-          action={
-            <Button asChild variant="brand" size="dense"><Link href="/prospects/new">
-              <Plus size={14} /> Add prospect
-            </Link></Button>
-          }
-        />
+        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+          <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
+            <Users size={16} />
+          </span>
+          <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">No prospects match</h2>
+          <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">Try clearing the filters, or add a prospect manually.</p>
+          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+            <Link href="/prospects/new">
+              <Plus size={14} className="mr-1.5" /> Add prospect
+            </Link>
+          </Button>
+        </section>
       ) : (
         <div className="leads-grid">
           {rows.map((p) => {
@@ -256,13 +258,11 @@ export default function ProspectsPage() {
                 title={name}
                 badge={
                   p.doNotContact ? (
-                    <span className="pill is-warn text-2xs">
-                      DNC
-                    </span>
+                    <span className="rounded-tag bg-warn/15 px-2 py-1 text-2xs font-semibold text-warn-fg">DNC</span>
                   ) : undefined
                 }
                 contactGlyph={
-                  <span className="grid h-10 w-10 place-items-center rounded-lg border border-line bg-bg-soft text-ink-3">
+                  <span className="grid size-10 place-items-center rounded-lg bg-bg-soft text-ink-4">
                     <Building2 size={18} />
                   </span>
                 }
@@ -278,24 +278,6 @@ export default function ProspectsPage() {
           })}
         </div>
       )}
-
-      {/* ── Footer ─────────────────────────────────────────────── */}
-      <div
-        className="flex items-center justify-between pt-2 border-t border-line text-label text-ink-3"
-      >
-        <span>
-          <span className="mono text-ink-2">
-            {count}
-          </span>{' '}
-          {count === 1 ? 'prospect' : 'prospects'} shown{hasMore ? ' · more available' : ''}
-        </span>
-        {live && (
-          <span className="flex items-center gap-1.5">
-            <span className="pulse-dot w-1.5 h-1.5 rounded-full bg-accent"  />
-            Auto-updating…
-          </span>
-        )}
-      </div>
     </div>
   );
 }

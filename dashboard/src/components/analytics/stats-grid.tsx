@@ -1,91 +1,52 @@
 'use client';
 
-import { Card, CardContent } from '@/components/ui/card';
-import type { AnalyticsOverview } from '@/types';
-import { Users, Mail, Star, TrendingUp } from 'lucide-react';
+import type { DashboardAnalytics } from '@/hooks/use-analytics';
+import { StatCard } from '@/components/home/home-parts';
 
 interface StatsGridProps {
-  analytics?: AnalyticsOverview;
+  analytics?: DashboardAnalytics;
 }
 
-interface StatCardProps {
-  title: string;
-  value: string | number;
-  sub?: string;
-  icon: React.ElementType;
-  iconColor: string;
-  bgColor: string;
-  trend?: number;
-}
-
-function StatCard({ title, value, sub, icon: Icon, iconColor, bgColor, trend }: StatCardProps) {
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-2xl font-bold tabular-nums">{value}</p>
-            {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-            {trend !== undefined && (
-              <p className={`text-xs font-medium ${trend >= 0 ? 'text-up' : 'text-down'}`}>
-                {trend >= 0 ? '+' : ''}{trend}% vs last week
-              </p>
-            )}
-          </div>
-          <div className={`p-2.5 rounded-lg ${bgColor}`}>
-            <Icon className={`w-5 h-5 ${iconColor}`} />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+const rate = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : '—');
 
 export function StatsGrid({ analytics }: StatsGridProps) {
-  const stats = [
-    {
-      title: 'Total Contacts',
-      value: analytics?.contacts.total ?? 0,
-      sub: `${analytics?.contacts.contacted ?? 0} contacted`,
-      icon: Users,
-      iconColor: 'text-info',
-      bgColor: 'bg-info/10',
-      trend: 12,
-    },
-    {
-      title: 'Emails Sent',
-      value: analytics?.emails.sent ?? 0,
-      sub: `${analytics?.emails.openRate ? Math.round(analytics.emails.openRate * 100) : 0}% open rate`,
-      icon: Mail,
-      iconColor: 'text-a-master',
-      bgColor: 'bg-a-master/10',
-      trend: 8,
-    },
-    {
-      title: 'Interviews',
-      value: analytics?.interviews.scheduled ?? 0,
-      sub: `${analytics?.interviews.completed ?? 0} completed`,
-      icon: Star,
-      iconColor: 'text-warn-fg',
-      bgColor: 'bg-warn/10',
-    },
-    {
-      title: 'Reply Rate',
-      value: analytics?.emails.replyRate ? `${Math.round(analytics.emails.replyRate * 100)}%` : '—',
-      sub: `${analytics?.contacts.replied ?? 0} replies`,
-      icon: TrendingUp,
-      iconColor: 'text-up',
-      bgColor: 'bg-up/10',
-      trend: 3,
-    },
-  ];
+  const byStatus = analytics?.contacts.byStatus ?? {};
+  const total = analytics?.contacts.total ?? 0;
+  const contacted = byStatus.contacted ?? 0;
+  const sent = analytics?.emails.sent ?? 0;
+  const replied = analytics?.emails.replied ?? 0;
+  const interviews = analytics?.interviews.scheduled ?? 0;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {stats.map((stat) => (
-        <StatCard key={stat.title} {...stat} />
-      ))}
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <StatCard
+        label="Contacts"
+        value={total.toLocaleString()}
+        tail={contacted > 0 ? `· ${contacted.toLocaleString()} contacted` : undefined}
+        detail={analytics?.avgScore != null ? `Average lead score ${analytics.avgScore}` : 'No scored leads yet'}
+        muted={total === 0}
+      />
+      <StatCard
+        label="Emails sent"
+        value={sent.toLocaleString()}
+        tail={sent > 0 ? `· ${rate(analytics?.emails.opened ?? 0, sent)} opened` : undefined}
+        detail={sent === 0 ? 'Nothing sent yet' : `${(analytics?.emails.opened ?? 0).toLocaleString()} opened`}
+        muted={sent === 0}
+      />
+      <StatCard
+        label="Replies"
+        value={replied.toLocaleString()}
+        tail={sent > 0 ? `· ${rate(replied, sent)} of sent` : undefined}
+        detail={replied === 0 ? 'No replies yet' : 'Email replies from your leads'}
+        muted={replied === 0}
+      />
+      <StatCard
+        label="Interviews booked"
+        value={interviews.toLocaleString()}
+        tail={interviews === 0 ? '· None yet' : undefined}
+        detail={interviews === 0 ? 'Nothing booked yet' : 'Scheduled with your leads'}
+        muted={interviews === 0}
+      />
     </div>
   );
 }

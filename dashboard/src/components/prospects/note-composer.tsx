@@ -23,18 +23,23 @@ export function NoteComposer({ prospectId }: { prospectId: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <Textarea
-        rows={3}
-        placeholder="Add a note — what you learned, follow-up plan, context for the next message…"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-      />
-      <div className="flex justify-end">
-        <Button size="sm" onClick={submit} disabled={!body.trim() || mut.isPending}>
-          {mut.isPending ? 'Saving…' : 'Add note'}
-        </Button>
+    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="border-b border-line px-5 py-3.5">
+        <h2 className="m-0 text-body font-semibold text-ink">Add a note</h2>
+      </header>
+      <div className="space-y-3 p-5">
+        <Textarea
+          rows={3}
+          placeholder="What you learned, the follow-up plan, context for the next message…"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+        />
+        <div className="flex justify-end">
+          <Button type="button" variant="brand" size="sm" onClick={submit} disabled={!body.trim() || mut.isPending}>
+            {mut.isPending ? 'Saving…' : 'Add note'}
+          </Button>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

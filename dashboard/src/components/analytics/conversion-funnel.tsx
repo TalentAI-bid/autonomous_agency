@@ -1,60 +1,48 @@
 'use client';
 
-import type { AnalyticsOverview } from '@/types';
+import type { DashboardAnalytics } from '@/hooks/use-analytics';
+import { HomeSection } from '@/components/home/home-parts';
 
 interface ConversionFunnelProps {
-  analytics?: AnalyticsOverview;
+  analytics?: DashboardAnalytics;
 }
 
 const STAGES = [
-  { key: 'discovered', label: 'Discovered', color: 'bg-info' },
-  { key: 'enriched', label: 'Enriched', color: 'bg-info' },
-  { key: 'scored', label: 'Scored', color: 'bg-a-master' },
-  { key: 'contacted', label: 'Contacted', color: 'bg-up' },
-  { key: 'replied', label: 'Replied', color: 'bg-a-enrichment' },
-  { key: 'interviewed', label: 'Interviewed', color: 'bg-warn' },
+  { key: 'discovered', label: 'Discovered' },
+  { key: 'enriched', label: 'Enriched' },
+  { key: 'scored', label: 'Scored' },
+  { key: 'contacted', label: 'Contacted' },
+  { key: 'replied', label: 'Replied' },
+  { key: 'interview_scheduled', label: 'Interview scheduled' },
 ];
 
 export function ConversionFunnel({ analytics }: ConversionFunnelProps) {
-  const contacts = analytics?.contacts;
-  const funnelData: Record<string, number> = {
-    discovered: contacts?.discovered ?? 0,
-    enriched: contacts?.enriched ?? 0,
-    scored: contacts?.scored ?? 0,
-    contacted: contacts?.contacted ?? 0,
-    replied: contacts?.replied ?? 0,
-    interviewed: contacts?.interview_scheduled ?? 0,
-  };
-  const maxValue = Math.max(...Object.values(funnelData), 1);
+  const byStatus = analytics?.contacts.byStatus ?? {};
+  const total = analytics?.contacts.total ?? 0;
+  const max = Math.max(...STAGES.map((s) => byStatus[s.key] ?? 0), 1);
 
   return (
-    <div className="space-y-3">
-      {STAGES.map((stage, i) => {
-        const value = funnelData[stage.key] ?? 0;
-        const pct = Math.round((value / maxValue) * 100);
-        const prevValue = i > 0 ? funnelData[STAGES[i - 1].key] ?? 0 : value;
-        const convRate = prevValue > 0 ? Math.round((value / prevValue) * 100) : null;
-
-        return (
-          <div key={stage.key} className="space-y-1">
-            <div className="flex justify-between items-baseline text-xs">
-              <span className="text-muted-foreground">{stage.label}</span>
-              <div className="flex items-center gap-2">
-                {convRate !== null && i > 0 && (
-                  <span className="text-muted-foreground">{convRate}%</span>
-                )}
-                <span className="font-semibold tabular-nums">{value}</span>
+    <HomeSection title="Pipeline by stage" meta={total > 0 ? `${total.toLocaleString()} contacts · where they are now` : undefined}>
+      {total === 0 ? (
+        <div className="border-t border-line px-4 py-8 text-center text-body text-ink-3">No contacts yet. Run an agent to start the pipeline.</div>
+      ) : (
+        STAGES.map((stage, i) => {
+          const value = byStatus[stage.key] ?? 0;
+          return (
+            <div key={stage.key} className="flex items-center gap-3 border-t border-line px-4 py-3">
+              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-bg-sub font-mono text-2xs text-ink-3">{i + 1}</span>
+              <div className="w-[132px] shrink-0 truncate text-body text-ink-2">{stage.label}</div>
+              <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-bg-soft">
+                <div className="h-full rounded-full bg-accent transition-all duration-500" style={{ width: `${(value / max) * 100}%` }} />
+              </div>
+              <div className="flex w-[84px] shrink-0 items-baseline justify-end gap-1.5">
+                <span className="font-mono text-body font-medium tabular-nums text-ink">{value.toLocaleString()}</span>
+                <span className="font-mono text-2xs text-ink-4">{Math.round((value / total) * 100)}%</span>
               </div>
             </div>
-            <div className="h-5 bg-muted rounded overflow-hidden flex items-center">
-              <div
-                className={`h-full ${stage.color} rounded transition-all duration-500`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })
+      )}
+    </HomeSection>
   );
 }

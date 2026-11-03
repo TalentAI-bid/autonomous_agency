@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '@/lib/api';
 
-interface DashboardAnalytics {
+export interface DashboardAnalytics {
   contacts: {
     total: number;
     byStatus: Record<string, number>;

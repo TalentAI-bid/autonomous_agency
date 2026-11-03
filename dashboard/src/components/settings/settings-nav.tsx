@@ -13,7 +13,6 @@ interface SettingsNavItem {
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
-  { label: 'Profile', href: '/settings/profile' },
   { label: 'Company', href: '/settings/company' },
   { label: 'Products', href: '/settings/products' },
   { label: 'Messaging', href: '/settings/messaging' },

@@ -67,59 +67,72 @@ export default function CrmPage() {
     );
   }
 
+  const cols = columns ?? [];
+  const dealCount = cols.reduce((n, c) => n + c.deals.length, 0);
+  const totals = new Map<string, number>();
+  for (const d of cols.flatMap((c) => c.deals)) {
+    if (d.value == null || d.value === '' || Number.isNaN(Number(d.value))) continue;
+    const cur = d.currency ?? 'USD';
+    totals.set(cur, (totals.get(cur) ?? 0) + Number(d.value));
+  }
+  const pipelineValue = [...totals.entries()]
+    .map(([currency, v]) => new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(v))
+    .join(' · ');
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Kanban className="w-6 h-6" /> CRM Pipeline
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Track deals through your pipeline stages
-          </p>
+    <div className="flex flex-col gap-4 p-5">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-baseline gap-2 px-1 text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">
+          <span>Deals</span>
+          {!isLoading && cols.length > 0 && (
+            <span className="normal-case tracking-normal text-ink-3">
+              {dealCount} in pipeline{pipelineValue ? ` · ${pipelineValue}` : ''}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <NewDealDialog />
+        <div className="flex flex-wrap items-center gap-2">
           <AddActivityDialog
             trigger={
-              <Button variant="outline" size="sm">
-                <Activity className="w-4 h-4 mr-2" />
-                Log Activity
+              <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-body font-medium">
+                <Activity className="mr-1.5 size-3.5" />
+                Log activity
               </Button>
             }
           />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => seedStages.mutate()}
-            disabled={seedStages.isPending}
-          >
-            <Sprout className="w-4 h-4 mr-2" />
-            {seedStages.isPending ? 'Seeding…' : 'Seed Stages'}
-          </Button>
-          <Link href="/crm/settings">
-            <Button variant="outline" size="sm">
-              <Settings className="w-4 h-4 mr-2" />
+          <Button asChild variant="panel" size="dense" className="h-8 rounded-lg px-3 text-body font-medium">
+            <Link href="/crm/settings">
+              <Settings className="mr-1.5 size-3.5" />
               Stages
-            </Button>
-          </Link>
+            </Link>
+          </Button>
+          <NewDealDialog />
         </div>
       </div>
 
       {/* Board */}
       {isLoading ? (
-        <div className="flex gap-4">
+        <div className="flex gap-3">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="w-72 h-96 shrink-0 rounded-xl" />
+            <Skeleton key={i} className="h-96 w-[284px] shrink-0 rounded-2xl" />
           ))}
         </div>
+      ) : cols.length === 0 ? (
+        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+          <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
+            <Kanban size={16} />
+          </span>
+          <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">No pipeline stages yet</h2>
+          <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">
+            Stages are the columns your deals move through, like Lead, Qualified and Won. Start with the defaults and rename them later.
+          </p>
+          <Button type="button" variant="brand" size="dense" onClick={() => seedStages.mutate()} disabled={seedStages.isPending} className="h-9 rounded-lg px-5 text-body font-semibold">
+            <Sprout className="mr-1.5 size-4" />
+            {seedStages.isPending ? 'Creating…' : 'Create default stages'}
+          </Button>
+        </section>
       ) : (
-        <DealBoard
-          columns={columns ?? []}
-          onDealClick={handleDealClick}
-          onMoveDeal={handleMoveDeal}
-        />
+        <DealBoard columns={cols} onDealClick={handleDealClick} onMoveDeal={handleMoveDeal} />
       )}
     </div>
   );

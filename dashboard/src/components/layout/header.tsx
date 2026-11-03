@@ -18,7 +18,7 @@ const TITLES: Array<[string, { title: string; sub: string }]> = [
   ['/dashboard', { title: 'Home', sub: 'What needs you today.' }],
   ['/approvals', { title: 'Approvals', sub: 'What your agents drafted for you to approve.' }],
   ['/mailbox', { title: 'Inbox', sub: 'Replies and conversations.' }],
-  ['/schedule', { title: 'Meetings', sub: 'Booked and upcoming meetings.' }],
+  ['/schedule', { title: 'Schedule', sub: 'Queued emails and running agent tasks.' }],
   ['/prospects', { title: 'Leads', sub: 'People your agents have found.' }],
   ['/companies', { title: 'Companies', sub: 'Accounts your agents are working.' }],
   ['/crm', { title: 'Pipeline', sub: 'Deals by stage.' }],

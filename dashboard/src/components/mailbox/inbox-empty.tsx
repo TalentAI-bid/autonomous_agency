@@ -13,6 +13,8 @@ export function useInboxIsEmpty() {
   const ready = !!stats.data && !!digest.data;
   return {
     ready,
+    // Both counts are still being fetched: callers should show a placeholder, not guess.
+    loading: stats.isLoading || digest.isLoading,
     empty: ready && stats.data!.totalReceived === 0 && digest.data!.totalThreads === 0,
     sent: stats.data?.totalSent ?? 0,
   };

@@ -4,7 +4,6 @@ import * as React from 'react';
 import {
   MapPin, Phone, Globe, Navigation, Star, Clock, Utensils, ExternalLink, Tag, Sparkles,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { useGenerateGmapsRecommendation, type GmapsRecommendation } from '@/hooks/use-gmaps-recommendation';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -21,8 +20,12 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
-const LABEL = 'mb-1.5 text-2xs uppercase tracking-[0.4px] text-ink-3';
-const ROW = 'flex items-center gap-1.5 text-xs text-ink';
+const LABEL = 'mb-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4';
+
+function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <span className={cn('inline-flex items-center rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2', className)}>{children}</span>;
+}
+const ROW = 'flex items-center gap-2 text-xs text-ink-2 no-underline transition-colors hover:text-accent';
 const SECTION = 'flex flex-col gap-1.5';
 
 function LinkRow({ icon, href, children }: { icon: React.ReactNode; href: string; children: React.ReactNode }) {
@@ -39,14 +42,14 @@ function Collapsible({ label, html }: { label: string; html: string }) {
     <div className={SECTION}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="cursor-pointer self-start rounded-full border border-border bg-bg-sub px-2.5 py-1 text-xs text-ink-2"
+        className="cursor-pointer self-start rounded-lg border border-line bg-bg-panel px-3 py-1.5 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover"
       >
         {open ? `Hide ${label}` : `Show ${label}`}
       </button>
       {open && (
         <div
           dir="auto"
-          className="max-h-[360px] overflow-auto rounded-lg border border-border bg-bg-panel p-2.5 text-xs leading-normal"
+          className="max-h-[360px] overflow-auto rounded-lg border border-line bg-bg-sub p-3 text-xs leading-normal"
           // Sanitized at capture time in maps-core.js (no scripts/handlers).
           dangerouslySetInnerHTML={{ __html: html }}
         />
@@ -61,9 +64,9 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
     if (!contactId) return;
     gen.mutate(undefined, { onError: () => toast({ title: 'Failed to generate recommendation', variant: 'destructive' }) });
   };
-  const fitColor = rec?.fit === 'high' ? 'success' : rec?.fit === 'low' ? 'error' : 'warning';
+  const fitTone = rec?.fit === 'high' ? 'bg-up/10 text-up' : rec?.fit === 'low' ? 'bg-down/10 text-down' : 'bg-warn/15 text-warn-fg';
   return (
-    <div className={SECTION}>
+    <div className={cn(SECTION, 'rounded-xl bg-accent-weak p-3')}>
       <div className="flex items-center justify-between gap-2">
         <div className={cn(LABEL, 'mb-0 flex items-center gap-1')}>
           <Sparkles size={11} /> AI Recommendation
@@ -73,7 +76,7 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
             onClick={run}
             disabled={gen?.isPending}
             className={cn(
-              'rounded-full border border-border bg-bg-panel px-2.5 py-[3px] text-xs text-ink-2',
+              'rounded-lg border border-line bg-bg-panel px-2.5 py-1 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover',
               gen?.isPending ? 'cursor-wait' : 'cursor-pointer',
             )}
           >
@@ -84,7 +87,7 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
       {rec && (
         <div className="flex flex-col gap-1.5 text-xs" dir="auto">
           <div className="flex items-center gap-2">
-            <Badge variant={fitColor as 'success' | 'error' | 'warning'}>{rec.fit} fit</Badge>
+            <Chip className={cn('font-medium', fitTone)}>{rec.fit} fit</Chip>
             {typeof rec.priorityScore === 'number' && (
               <span className="text-ink-3">Priority {rec.priorityScore}/100</span>
             )}
@@ -101,7 +104,7 @@ function AiRecommendation({ contactId, rec }: { contactId?: string; rec: GmapsRe
             </div>
           )}
           {rec.suggestedOpener && (
-            <div className="border-s-2 border-border ps-2 italic text-ink-2">
+            <div className="border-s-2 border-accent-mid ps-2.5 italic text-ink-2">
               {rec.suggestedOpener}
             </div>
           )}
@@ -150,18 +153,20 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
     ? (m.aiRecommendation as unknown as GmapsRecommendation) : null);
 
   return (
-    <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-bg-sub p-4">
-      <div className="flex items-center gap-1.5">
-        <MapPin size={14} />
-        <div className="text-body font-semibold">Google Maps</div>
+    <section className="flex flex-col gap-4 rounded-2xl border border-line bg-bg-panel p-5 shadow-sm">
+      <div className="flex items-center gap-2.5">
+        <span className="grid size-8 place-items-center rounded-lg bg-accent-weak text-accent">
+          <MapPin size={15} />
+        </span>
+        <h2 className="m-0 text-body font-semibold text-ink">Google Maps</h2>
       </div>
 
       {(category || rating != null || reviewsCount != null) && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          {category && <Badge variant="outline">{category}</Badge>}
+          {category && <Chip>{category}</Chip>}
           {rating != null && (
-            <span className="inline-flex items-center gap-[3px]">
-              <Star size={12} fill="currentColor" /> {rating}
+            <span className="inline-flex items-center gap-1 font-medium text-ink">
+              <Star size={12} fill="currentColor" className="text-warn" /> {rating}
               {reviewsCount != null && <span className="text-ink-3">({reviewsCount})</span>}
             </span>
           )}
@@ -214,8 +219,8 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
       {serviceOptions.length > 0 && (
         <div>
           <div className={LABEL}>Service options</div>
-          <div className="flex flex-wrap gap-1">
-            {serviceOptions.map((o) => <Badge key={o} variant="outline">{o}</Badge>)}
+          <div className="flex flex-wrap gap-1.5">
+            {serviceOptions.map((o) => <Chip key={o}>{o}</Chip>)}
           </div>
         </div>
       )}
@@ -281,6 +286,6 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
           <Tag size={11} /> Detail not fetched yet
         </div>
       )}
-    </div>
+    </section>
   );
 }

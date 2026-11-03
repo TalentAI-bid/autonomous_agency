@@ -1,13 +1,13 @@
 'use client';
 
 import * as React from 'react';
-import { Info, Loader2 } from 'lucide-react';
+import { ChevronDown, Info, Loader2, RefreshCw } from 'lucide-react';
 import { useQueue, useRefreshQueue } from '@/hooks/use-queue';
 import { useAgents } from '@/hooks/use-agents';
-import { ActionCard } from '@/components/queue/action-card';
+import { ActionCard, PRIORITY_TONE } from '@/components/queue/action-card';
 import { ClearedCard, NoAgentCard, ReplyDetectionBanner } from '@/components/queue/queue-parts';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { AgentFilter } from '@/components/queue/agent-filter';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useRealtimeStore } from '@/stores/realtime.store';
@@ -121,10 +121,7 @@ export function QueueView({ masterAgentId, showGreeting: page = false }: QueueVi
 
   if (isLoading || (page && !agents)) {
     return (
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-12" />
-        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
-      </div>
+      <Skeleton className="h-72 rounded-2xl" />
     );
   }
 
@@ -158,52 +155,51 @@ export function QueueView({ masterAgentId, showGreeting: page = false }: QueueVi
     <div className="flex flex-col gap-4">
       {page && <ReplyDetectionBanner />}
       {toolbar}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <p className="text-body text-ink-3">
-          <strong className="text-ink">{data.count}</strong> actions
-          {' · ~'}<strong className="text-ink">{data.etaMinutes}</strong> min estimated
-        </p>
-        <Button variant="outline" onClick={refresh} disabled={refreshMut.isPending || quotaExhausted} title={refreshTitle}>
-          {refreshLabel}
-        </Button>
-      </div>
-
       {refreshBanner}
 
-      {data.buckets.map((b) => {
-        if (b.count === 0) return null;
-        const open = expanded[b.priority];
-        return (
-          <div key={b.priority} className="flex flex-col gap-2">
-            <button
-              onClick={() => toggle(b.priority)}
-              className="flex cursor-pointer items-center gap-2.5 border-0 bg-transparent px-0 py-2 text-left text-ink"
-            >
-              <Badge variant={
-                b.priority === 'P0' ? 'error' :
-                b.priority === 'P1' ? 'warning' :
-                b.priority === 'P2' ? 'blue' : 'outline'
-              }>
-                {b.priority}
-              </Badge>
-              <span className="text-[14px] font-medium">
-                {PRIORITY_DESC[b.priority] ?? b.priority}
-              </span>
-              <span className="text-label text-ink-3">({b.count})</span>
-              <span className="ml-auto text-label text-ink-3">
-                {open ? '▼' : '▶'}
-              </span>
-            </button>
-            {open && (
-              <div className="flex flex-col gap-2">
-                {b.actions.map(({ action, company, recommendedContact }) => (
-                  <ActionCard key={action.id} action={action} company={company} contact={recommendedContact} />
-                ))}
-              </div>
-            )}
+      <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+          <div>
+            <h2 className="m-0 text-body font-semibold text-ink">Waiting for your approval</h2>
+            <p className="mb-0 mt-0.5 text-xs text-ink-3">
+              <strong className="font-semibold text-ink-2">{data.count}</strong> {data.count === 1 ? 'action' : 'actions'} · about{' '}
+              <strong className="font-semibold text-ink-2">{data.etaMinutes}</strong> min
+            </p>
           </div>
-        );
-      })}
+          <Button type="button" variant="panel" size="dense" onClick={refresh} disabled={refreshMut.isPending || quotaExhausted} title={refreshTitle} className="h-8 rounded-lg px-3 text-xs">
+            {refreshMut.isPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {refreshLabel}
+          </Button>
+        </header>
+
+        <div className="divide-y divide-line">
+          {data.buckets.map((b) => {
+            if (b.count === 0) return null;
+            const open = expanded[b.priority];
+            return (
+              <div key={b.priority}>
+                <button
+                  type="button"
+                  onClick={() => toggle(b.priority)}
+                  aria-expanded={open}
+                  className="flex w-full cursor-pointer items-center gap-2.5 border-0 bg-bg-sub px-5 py-2.5 text-left text-ink transition-colors hover:bg-hover"
+                >
+                  <span className={cn('rounded-tag px-2 py-0.5 text-2xs font-semibold', PRIORITY_TONE[b.priority] ?? PRIORITY_TONE.P3)}>{b.priority}</span>
+                  <span className="text-body font-medium">{PRIORITY_DESC[b.priority] ?? b.priority}</span>
+                  <span className="text-xs text-ink-3">{b.count}</span>
+                  <ChevronDown size={14} className={cn('ml-auto text-ink-4 transition-transform', open && 'rotate-180')} />
+                </button>
+                {open && (
+                  <ul className="m-0 list-none divide-y divide-line p-0">
+                    {b.actions.map(({ action, company, recommendedContact }) => (
+                      <ActionCard key={action.id} action={action} company={company} contact={recommendedContact} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

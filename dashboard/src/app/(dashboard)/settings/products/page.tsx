@@ -3,12 +3,10 @@
 import * as React from 'react';
 import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct, useSuggestProduct } from '@/hooks/use-products';
 import { useAuthStore } from '@/stores/auth.store';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
@@ -19,7 +17,8 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Package, Plus, Pencil, Trash2, Loader2, Sparkles } from 'lucide-react';
+import { Package, Plus, Loader2, Sparkles, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { Product } from '@/types';
 
 import { Select } from '@/components/ui/select';
@@ -129,8 +128,10 @@ export default function ProductsPage() {
     setDialogOpen(true);
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(product: Product) {
+    if (!confirm(`Delete "${product.name}"? Agents will stop using it.`)) return;
     try {
+      const id = product.id;
       await deleteProduct.mutateAsync(id);
       toast({ title: 'Product deleted' });
     } catch {
@@ -197,311 +198,333 @@ export default function ProductsPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-6 w-32" />
-        {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
+      <div className="space-y-4">
+        <Skeleton className="h-44 rounded-2xl" />
+        <Skeleton className="h-9 w-40 rounded-lg" />
       </div>
     );
   }
 
+  const list = products ?? [];
+  const atLimit = count >= limit;
+  const saving = createProduct.isPending || updateProduct.isPending;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="m-0 font-display text-title font-medium text-ink flex items-center gap-2">
-            <Package className="w-6 h-6" /> Products & Services
-          </h1>
-          <p className="mb-0 mt-1 text-body text-ink-3">
-            Manage what you sell. Agents use this to personalize outreach.
-          </p>
-        </div>
-        <Button size="sm" onClick={openCreate} disabled={count >= limit}>
-          <Plus className="w-4 h-4 mr-2" /> Add Product
-        </Button>
-      </div>
-
-      {/* Plan limit indicator */}
-      <div className="flex items-center gap-2 text-sm text-ink-3">
-        <span>
-          Using <strong className="text-ink">{count}</strong> of{' '}
-          <strong className="text-ink">{limit === Infinity ? 'unlimited' : limit}</strong>{' '}
-          products
-        </span>
-        <Badge variant="outline" className="text-xs capitalize">{plan} plan</Badge>
-        {count >= limit && limit !== Infinity && (
-          <span className="text-warn-fg text-xs">
-            Limit reached — upgrade to add more
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+          <div>
+            <h2 className="m-0 text-body font-semibold text-ink">Products</h2>
+            <p className="mb-0 mt-0.5 text-xs text-ink-3">What you sell. Agents quote this in their outreach.</p>
+          </div>
+          <span className="shrink-0 text-xs text-ink-3">
+            {count} of {limit === Infinity ? 'unlimited' : limit} on your plan
           </span>
-        )}
-      </div>
+        </header>
 
-      {/* Product list */}
-      {count === 0 ? (
-        <Card>
-          <CardContent className="pt-5 py-16 text-center">
-            <Package className="w-10 h-10 mx-auto text-ink-3 mb-3" />
-            <p className="text-sm font-medium">No products yet</p>
-            <p className="text-xs text-ink-3 mt-1 mb-4">
-              Add your first product to help agents personalize outreach
+        {count === 0 ? (
+          <div className="px-5 py-14 text-center">
+            <span className="mx-auto grid size-11 place-items-center rounded-xl bg-accent-weak text-accent">
+              <Package size={20} />
+            </span>
+            <p className="mb-0 mt-3 text-body font-semibold text-ink">No products yet</p>
+            <p className="mx-auto mb-4 mt-1 max-w-sm text-xs leading-relaxed text-ink-3">
+              Add what you sell so agents can write about your real offer instead of sending generic messages.
             </p>
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="w-4 h-4 mr-2" /> Add Product
+            <Button type="button" variant="brand" size="sm" onClick={openCreate}>
+              <Plus size={14} /> Add your first product
             </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {(products ?? []).map(product => (
-            <Card key={product.id} className={!product.isActive ? 'opacity-60' : ''}>
-              <CardContent className="pt-5 py-4">
-                <div className="flex items-start justify-between gap-4">
-                  {/* Left: product info */}
-                  <div className="space-y-2 min-w-0 flex-1">
-                    {/* Name + badges */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{product.name}</span>
-                      {product.category && (
-                        <Badge variant="secondary" className="text-xs">{product.category}</Badge>
-                      )}
+          </div>
+        ) : (
+          <ul className="m-0 list-none divide-y divide-line p-0">
+            {list.map((product) => {
+              const features = product.keyFeatures ?? [];
+              const pains = product.painPointsSolved ?? [];
+              const diffs = product.differentiators ?? [];
+              return (
+                <li key={product.id} className="flex gap-3.5 px-5 py-4">
+                  <span
+                    className={cn(
+                      'grid size-9 shrink-0 place-items-center rounded-xl',
+                      product.isActive ? 'bg-accent-weak text-accent' : 'bg-bg-soft text-ink-4',
+                    )}
+                  >
+                    <Package size={16} />
+                  </span>
+
+                  <div className={cn('min-w-0 flex-1 space-y-3', !product.isActive && 'opacity-70')}>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-body font-semibold text-ink">{product.name}</span>
+                      {!product.isActive && <span className="rounded-tag bg-bg-soft px-2 py-0.5 text-2xs font-medium text-ink-3">Inactive</span>}
+                      {product.category && <span className="rounded-tag bg-accent-weak px-2 py-0.5 text-2xs font-medium text-accent-fg">{product.category}</span>}
                       {product.pricingModel && (
-                        <Badge variant="outline" className="text-xs capitalize">
-                          {product.pricingModel.replace('_', ' ')}
-                        </Badge>
-                      )}
-                      <Badge
-                        variant={product.isActive ? 'secondary' : 'destructive'}
-                        className="text-xs"
-                      >
-                        {product.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </div>
-
-                    {/* Description */}
-                    {product.description && (
-                      <p className="text-sm text-ink-3 line-clamp-2">
-                        {product.description}
-                      </p>
-                    )}
-
-                    {/* Target audience */}
-                    {product.targetAudience && (
-                      <p className="text-xs text-ink-3">
-                        <span className="font-medium text-ink">Target:</span>{' '}
-                        {product.targetAudience}
-                      </p>
-                    )}
-
-                    {/* Pricing */}
-                    {product.pricingDetails && (
-                      <p className="text-xs text-ink-3">
-                        <span className="font-medium text-ink">Pricing:</span>{' '}
-                        {product.pricingDetails}
-                      </p>
-                    )}
-
-                    {/* Tags row */}
-                    <div className="flex flex-wrap gap-1">
-                      {(product.keyFeatures ?? []).slice(0, 4).map((f, i) => (
-                        <Badge key={`f-${i}`} variant="outline" className="text-xs">
-                          {f}
-                        </Badge>
-                      ))}
-                      {(product.painPointsSolved ?? []).slice(0, 3).map((p, i) => (
-                        <Badge key={`p-${i}`} variant="warning" className="text-xs">
-                          {p}
-                        </Badge>
-                      ))}
-                      {((product.keyFeatures?.length ?? 0) + (product.painPointsSolved?.length ?? 0)) > 7 && (
-                        <Badge variant="outline" className="text-xs text-ink-3">
-                          +{(product.keyFeatures?.length ?? 0) + (product.painPointsSolved?.length ?? 0) - 7} more
-                        </Badge>
+                        <span className="rounded-tag bg-bg-soft px-2 py-0.5 text-2xs capitalize text-ink-2">{product.pricingModel.replace(/_/g, ' ')}</span>
                       )}
                     </div>
+
+                    {product.description && <p className="m-0 line-clamp-2 text-xs leading-relaxed text-ink-2">{product.description}</p>}
+
+                    {(product.targetAudience || product.pricingDetails) && (
+                      <dl className="m-0 grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2">
+                        {product.targetAudience && (
+                          <div className="min-w-0">
+                            <dt className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Who it&apos;s for</dt>
+                            <dd className="m-0 mt-0.5 line-clamp-2 text-ink-2">{product.targetAudience}</dd>
+                          </div>
+                        )}
+                        {product.pricingDetails && (
+                          <div className="min-w-0">
+                            <dt className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Pricing</dt>
+                            <dd className="m-0 mt-0.5 line-clamp-2 text-ink-2">{product.pricingDetails}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    )}
+
+                    <TagRow label="What it does" items={features} tone="accent" />
+                    <TagRow label="Pain points it answers" items={pains} tone="warn" />
+                    <TagRow label="Why it wins" items={diffs} tone="neutral" />
                   </div>
 
-                  {/* Right: actions */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="outline"
+                  <div className="flex shrink-0 items-start gap-1">
+                    <Button type="button" variant="panel" size="dense" onClick={() => openEdit(product)} className="h-7 rounded-lg">
+                      Edit
+                    </Button>
+                    <button
+                      type="button"
                       onClick={() => handleToggleActive(product)}
                       disabled={updateProduct.isPending}
+                      className="h-7 rounded-lg px-2 text-xs font-medium text-ink-2 hover:bg-hover disabled:opacity-50"
                     >
                       {product.isActive ? 'Disable' : 'Enable'}
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => openEdit(product)}
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => handleDelete(product.id)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(product)}
                       disabled={deleteProduct.isPending}
+                      className="h-7 rounded-lg px-2 text-xs font-medium text-ink-3 hover:bg-hover hover:text-down disabled:opacity-50"
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-down" />
-                    </Button>
+                      Delete
+                    </button>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {count > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" variant={atLimit ? 'panel' : 'brand'} size="sm" onClick={openCreate} disabled={atLimit}>
+            <Plus size={14} /> {atLimit ? `Add product — plan limit, ${count} of ${limit}` : 'Add product'}
+          </Button>
+          {atLimit && limit !== Infinity && <span className="text-xs text-ink-3">More products need a higher plan.</span>}
         </div>
       )}
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>
-              {editingProduct ? 'Edit Product' : 'Add Product'}
-            </DialogTitle>
+            <DialogTitle>{editingProduct ? 'Edit product' : 'Add product'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <Label>Product Name *</Label>
+              <Label>Product name *</Label>
               <div className="flex gap-2">
                 <Input
                   value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   placeholder="e.g., Cloud Migration Service"
                   required
                   className="flex-1"
                 />
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="panel"
                   size="sm"
                   onClick={handleAiSuggest}
                   disabled={!form.name.trim() || suggestProduct.isPending}
-                  className="shrink-0 gap-1.5"
+                  className="shrink-0 gap-1.5 text-accent-fg"
+                  title="Fill the other fields from the product name"
                 >
-                  {suggestProduct.isPending ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  AI Suggest
+                  {suggestProduct.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                  AI suggest
                 </Button>
               </div>
+              <p className="m-0 text-xs text-ink-3">Type a name, then let AI draft the rest. You can edit everything.</p>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Description</Label>
-              <Textarea
-                value={form.description}
-                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Brief description of the product or service"
-                rows={3}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
+            <FormGroup title="About">
               <div className="space-y-1.5">
-                <Label>Category</Label>
-                <Input
-                  value={form.category}
-                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                  placeholder="e.g., SaaS, Consulting"
+                <Label>Description</Label>
+                <Textarea
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="One or two sentences on what it is"
+                  rows={3}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Pricing Model</Label>
-                <Select
-                  value={form.pricingModel}
-                  onChange={e => setForm(f => ({ ...f, pricingModel: e.target.value }))}
-                  className="w-full"
-                >
-                  {PRICING_MODELS.map(m => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </Select>
+                <Label>Who it&apos;s for</Label>
+                <Textarea
+                  value={form.targetAudience}
+                  onChange={(e) => setForm((f) => ({ ...f, targetAudience: e.target.value }))}
+                  placeholder="e.g., Mid-market SaaS companies looking to scale"
+                  rows={2}
+                />
               </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Target Audience</Label>
-              <Textarea
-                value={form.targetAudience}
-                onChange={e => setForm(f => ({ ...f, targetAudience: e.target.value }))}
-                placeholder="Who buys this product? e.g., Mid-market SaaS companies looking to scale"
-                rows={2}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Pain Points Solved</Label>
-              <Input
-                value={form.painPointsSolved}
-                onChange={e => setForm(f => ({ ...f, painPointsSolved: e.target.value }))}
-                placeholder="Comma-separated: Slow deployments, Manual testing, High infrastructure costs"
-              />
-              {splitTags(form.painPointsSolved).length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {splitTags(form.painPointsSolved).map((p, i) => (
-                    <Badge key={i} variant="warning" className="text-xs">{p}</Badge>
-                  ))}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Category</Label>
+                  <Input
+                    value={form.category}
+                    onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                    placeholder="e.g., SaaS, Consulting"
+                  />
                 </div>
-              )}
-            </div>
+                <div className="space-y-1.5">
+                  <Label>Pricing model</Label>
+                  <Select
+                    value={form.pricingModel}
+                    onChange={(e) => setForm((f) => ({ ...f, pricingModel: e.target.value }))}
+                    className="w-full"
+                  >
+                    {PRICING_MODELS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Pricing details</Label>
+                <Input
+                  value={form.pricingDetails}
+                  onChange={(e) => setForm((f) => ({ ...f, pricingDetails: e.target.value }))}
+                  placeholder="e.g., Starting at $99/mo per seat"
+                />
+              </div>
+            </FormGroup>
 
-            <div className="space-y-1.5">
-              <Label>Key Features</Label>
-              <Input
+            <FormGroup title="What agents say about it" hint="Separate items with commas. Agents quote these in outreach.">
+              <TagField
+                label="What it does"
                 value={form.keyFeatures}
-                onChange={e => setForm(f => ({ ...f, keyFeatures: e.target.value }))}
-                placeholder="Comma-separated: Auto-scaling, Real-time monitoring, One-click deploy"
+                onChange={(v) => setForm((f) => ({ ...f, keyFeatures: v }))}
+                placeholder="Auto-scaling, Real-time monitoring, One-click deploy"
+                tone="accent"
               />
-              {splitTags(form.keyFeatures).length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {splitTags(form.keyFeatures).map((f, i) => (
-                    <Badge key={i} variant="outline" className="text-xs">{f}</Badge>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Differentiators</Label>
-              <Input
+              <TagField
+                label="Pain points it answers"
+                value={form.painPointsSolved}
+                onChange={(v) => setForm((f) => ({ ...f, painPointsSolved: v }))}
+                placeholder="Slow deployments, Manual testing, High infrastructure costs"
+                tone="warn"
+              />
+              <TagField
+                label="Why it wins"
                 value={form.differentiators}
-                onChange={e => setForm(f => ({ ...f, differentiators: e.target.value }))}
-                placeholder="Comma-separated: AI-powered, 24/7 support, SOC2 certified"
+                onChange={(v) => setForm((f) => ({ ...f, differentiators: v }))}
+                placeholder="AI-powered, 24/7 support, SOC2 certified"
+                tone="neutral"
               />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Pricing Details</Label>
-              <Input
-                value={form.pricingDetails}
-                onChange={e => setForm(f => ({ ...f, pricingDetails: e.target.value }))}
-                placeholder="e.g., Starting at $99/mo per seat"
-              />
-            </div>
+            </FormGroup>
 
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="outline" size="sm">Cancel</Button>
               </DialogClose>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={createProduct.isPending || updateProduct.isPending}
-              >
-                {(createProduct.isPending || updateProduct.isPending) ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : null}
-                {editingProduct ? 'Update Product' : 'Create Product'}
+              <Button type="submit" variant="brand" size="sm" disabled={saving}>
+                {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+                {editingProduct ? 'Save changes' : 'Create product'}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+type Tone = 'accent' | 'warn' | 'neutral';
+
+const TONE_CLASS: Record<Tone, string> = {
+  accent: 'bg-accent-weak text-accent-fg',
+  warn: 'bg-warn/15 text-warn-fg',
+  neutral: 'bg-bg-soft text-ink-2',
+};
+
+function Chip({ children, tone, onRemove }: { children: React.ReactNode; tone: Tone; onRemove?: () => void }) {
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 rounded-tag px-2 py-1 text-xs', TONE_CLASS[tone])}>
+      {tone === 'warn' && <span className="size-1.5 rounded-full bg-current opacity-70" />}
+      {children}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${children}`}
+          className="-mr-0.5 grid size-4 place-items-center rounded-full opacity-60 transition hover:bg-black/10 hover:opacity-100"
+        >
+          <X size={11} />
+        </button>
+      )}
+    </span>
+  );
+}
+
+function TagRow({ label, items, tone }: { label: string; items: string[]; tone: Tone }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((t, i) => (
+          <Chip key={`${t}-${i}`} tone={tone}>{t}</Chip>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FormGroup({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <fieldset className="m-0 space-y-3.5 rounded-xl border border-line p-4">
+      <legend className="px-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-3">{title}</legend>
+      {hint && <p className="m-0 -mt-1 text-xs text-ink-3">{hint}</p>}
+      {children}
+    </fieldset>
+  );
+}
+
+function TagField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  tone,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  tone: Tone;
+}) {
+  const tags = splitTags(value);
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {tags.map((t, i) => (
+            <Chip key={`${t}-${i}`} tone={tone} onRemove={() => onChange(tags.filter((_, j) => j !== i).join(', '))}>
+              {t}
+            </Chip>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

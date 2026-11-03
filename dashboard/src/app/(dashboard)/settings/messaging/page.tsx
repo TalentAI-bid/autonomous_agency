@@ -1,15 +1,15 @@
 'use client';
 
+import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import Link from 'next/link';
+import { ArrowUpRight, FileText, Loader2, Save, Sparkles, UserRound, type LucideIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import Link from 'next/link';
-import { Save, Sparkles } from 'lucide-react';
 import { useMessagingConfig, useSaveMessagingConfig, type MessagingConfig } from '@/hooks/use-studio';
 
 const EMPTY: MessagingConfig = {
@@ -23,6 +23,33 @@ const EMPTY: MessagingConfig = {
   pricing_summary: '',
   brand_voice_notes: '',
 };
+
+function Panel({ icon: Icon, title, description, children }: { icon: LucideIcon; title: string; description: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="flex items-center gap-3 border-b border-line px-5 py-3.5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-weak text-accent">
+          <Icon size={15} />
+        </span>
+        <div className="min-w-0">
+          <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
+          <p className="mb-0 mt-0.5 text-xs text-ink-3">{description}</p>
+        </div>
+      </header>
+      <div className="space-y-4 p-5">{children}</div>
+    </section>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      {children}
+      {hint && <p className="m-0 text-xs text-ink-3">{hint}</p>}
+    </div>
+  );
+}
 
 export default function MessagingSettingsPage() {
   const { toast } = useToast();
@@ -39,6 +66,7 @@ export default function MessagingSettingsPage() {
 
   function update<K extends keyof MessagingConfig>(key: K, value: MessagingConfig[K]) {
     setForm((f) => ({ ...f, [key]: value }));
+    if (savedPreview) setSavedPreview(null);
   }
 
   async function handleSave() {
@@ -54,118 +82,102 @@ export default function MessagingSettingsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="m-0 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">Messaging configuration</h2>
-        <p className="mb-0 mt-2 max-w-[560px] text-body leading-relaxed text-ink-3">
-          The sender identity and value proposition used by every message generated in the{' '}
-          <Link href="/studio" className="text-accent hover:underline">
-            Studio
+    <div className="space-y-4">
+      {/* Intro */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent-mid bg-accent-weak px-5 py-4">
+        <div className="flex items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-bg-panel text-accent">
+            <Sparkles size={16} />
+          </span>
+          <div>
+            <div className="text-body font-semibold text-ink">How the AI writes your messages</div>
+            <div className="text-xs text-ink-2">The sender identity and pitch used for every message generated in Studio, outreach drafts and the inbox copilot.</div>
+          </div>
+        </div>
+        <Button asChild type="button" variant="panel" size="sm" className="gap-1.5">
+          <Link href="/studio">
+            Open Studio <ArrowUpRight size={13} />
           </Link>
-          .
-        </p>
+        </Button>
       </div>
 
       {isLoading ? (
         <div className="space-y-4">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-48 w-full" />
+          <Skeleton className="h-44 rounded-2xl" />
+          <Skeleton className="h-72 rounded-2xl" />
         </div>
       ) : (
         <>
-          <Card>
-            <CardHeader className="border-b border-line px-5 py-3.5">
-              <CardTitle className="text-body">Sender Identity</CardTitle>
-              <CardDescription>Who the message comes from. Used as the sender block in every channel prompt.</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-5 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs">Sender Name *</Label>
-                  <Input value={form.sender_name ?? ''} onChange={(e) => update('sender_name', e.target.value)} placeholder="Hatem Azaiez" />
-                </div>
-                <div>
-                  <Label className="text-xs">Sender Title</Label>
-                  <Input value={form.sender_title ?? ''} onChange={(e) => update('sender_title', e.target.value)} placeholder="Founder &amp; CTO" />
-                </div>
-                <div>
-                  <Label className="text-xs">Sender Company *</Label>
-                  <Input value={form.sender_company ?? ''} onChange={(e) => update('sender_company', e.target.value)} placeholder="TalentAI Labs" />
-                </div>
-                <div>
-                  <Label className="text-xs">Sender Location</Label>
-                  <Input value={form.sender_location ?? ''} onChange={(e) => update('sender_location', e.target.value)} placeholder="Vilnius, Lithuania" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <Panel icon={UserRound} title="Sender identity" description="Who the message comes from. Used as the sender block in every channel.">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Sender name *">
+                <Input value={form.sender_name ?? ''} onChange={(e) => update('sender_name', e.target.value)} placeholder="Hatem Azaiez" />
+              </Field>
+              <Field label="Sender title">
+                <Input value={form.sender_title ?? ''} onChange={(e) => update('sender_title', e.target.value)} placeholder="Founder & CTO" />
+              </Field>
+              <Field label="Sender company *">
+                <Input value={form.sender_company ?? ''} onChange={(e) => update('sender_company', e.target.value)} placeholder="TalentAI Labs" />
+              </Field>
+              <Field label="Sender location">
+                <Input value={form.sender_location ?? ''} onChange={(e) => update('sender_location', e.target.value)} placeholder="Vilnius, Lithuania" />
+              </Field>
+            </div>
+          </Panel>
 
-          <Card>
-            <CardHeader className="border-b border-line px-5 py-3.5">
-              <CardTitle className="text-body">Messaging Context</CardTitle>
-              <CardDescription>What the AI uses to write relevant messages.</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-5 space-y-4">
-              <div>
-                <Label className="text-xs">Value Proposition *</Label>
-                <Textarea
-                  value={form.value_prop ?? ''}
-                  onChange={(e) => update('value_prop', e.target.value)}
-                  placeholder="We're an AI-native recruitment agency placing senior engineers via a 5% success-fee model."
-                  rows={3}
-                />
-                <p className="text-xs text-ink-3 mt-1">Used in every generated message. Required.</p>
-              </div>
-              <div>
-                <Label className="text-xs">Target ICP</Label>
-                <Textarea
-                  value={form.target_icp ?? ''}
-                  onChange={(e) => update('target_icp', e.target.value)}
-                  placeholder="EU fintech, AI, and Web3 companies hiring senior engineers, typically Series A-C."
-                  rows={2}
-                />
-                <p className="text-xs text-ink-3 mt-1">Helps the AI write relevant pitches.</p>
-              </div>
-              <div>
-                <Label className="text-xs">Differentiator</Label>
-                <Textarea
-                  value={form.differentiator ?? ''}
-                  onChange={(e) => update('differentiator', e.target.value)}
-                  placeholder="5% success-fee (vs 20-25% traditional agencies), no upfront cost, AI-powered candidate matching."
-                  rows={2}
-                />
-                <p className="text-xs text-ink-3 mt-1">What makes you different from competitors.</p>
-              </div>
-              <div>
-                <Label className="text-xs">Pricing Summary</Label>
-                <Input
-                  value={form.pricing_summary ?? ''}
-                  onChange={(e) => update('pricing_summary', e.target.value)}
-                  placeholder="5% of first-year salary, success-fee only."
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Brand Voice Notes (optional)</Label>
-                <Textarea
-                  value={form.brand_voice_notes ?? ''}
-                  onChange={(e) => update('brand_voice_notes', e.target.value)}
-                  placeholder="Founder-to-founder voice. Direct. No corporate speak. No 'leverage' or 'streamline'."
-                  rows={2}
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <Panel icon={FileText} title="Messaging context" description="What the AI uses to write relevant messages.">
+            <Field label="Value proposition *" hint="Used in every generated message. Required.">
+              <Textarea
+                value={form.value_prop ?? ''}
+                onChange={(e) => update('value_prop', e.target.value)}
+                placeholder="We're an AI-native recruitment agency placing senior engineers via a 5% success-fee model."
+                rows={3}
+              />
+            </Field>
+            <Field label="Target ICP" hint="Helps the AI write relevant pitches.">
+              <Textarea
+                value={form.target_icp ?? ''}
+                onChange={(e) => update('target_icp', e.target.value)}
+                placeholder="EU fintech, AI, and Web3 companies hiring senior engineers, typically Series A-C."
+                rows={2}
+              />
+            </Field>
+            <Field label="Differentiator" hint="What makes you different from competitors.">
+              <Textarea
+                value={form.differentiator ?? ''}
+                onChange={(e) => update('differentiator', e.target.value)}
+                placeholder="5% success-fee (vs 20-25% traditional agencies), no upfront cost, AI-powered candidate matching."
+                rows={2}
+              />
+            </Field>
+            <Field label="Pricing summary">
+              <Input
+                value={form.pricing_summary ?? ''}
+                onChange={(e) => update('pricing_summary', e.target.value)}
+                placeholder="5% of first-year salary, success-fee only."
+              />
+            </Field>
+            <Field label="Brand voice notes (optional)" hint="How it should sound. The AI follows this tone.">
+              <Textarea
+                value={form.brand_voice_notes ?? ''}
+                onChange={(e) => update('brand_voice_notes', e.target.value)}
+                placeholder="Founder-to-founder voice. Direct. No corporate speak. No 'leverage' or 'streamline'."
+                rows={2}
+              />
+            </Field>
+          </Panel>
 
           {savedPreview && (
-            <div className="flex items-start gap-2 rounded-row border border-up/30 bg-up/10 px-3.5 py-2.5 text-body text-up">
-              <Sparkles className="mt-0.5 size-4 shrink-0" />
+            <div className="flex items-start gap-2 rounded-lg border border-up/25 bg-up/10 px-3 py-2.5 text-xs text-up">
+              <Sparkles size={14} className="mt-px shrink-0" />
               <span>{savedPreview}</span>
             </div>
           )}
 
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="brand" size="dense" onClick={handleSave} disabled={save.isPending} className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold">
-              <Save size={14} />
+          <div className="sticky bottom-0 z-10 -mx-1 flex items-center justify-between gap-3 rounded-2xl border border-line bg-bg-panel/95 px-5 py-3 shadow-md backdrop-blur">
+            <span className="text-xs text-ink-3">Fields marked * are required.</span>
+            <Button type="button" variant="brand" size="sm" onClick={handleSave} disabled={save.isPending}>
+              {save.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
               {save.isPending ? 'Saving…' : 'Save configuration'}
             </Button>
           </div>

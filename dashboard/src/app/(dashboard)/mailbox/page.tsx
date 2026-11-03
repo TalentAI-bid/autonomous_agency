@@ -2,10 +2,7 @@
 
 import { useState } from 'react';
 import { useMailboxSent, useMailboxInbox, useMailboxStats, useMailboxThreads, useMailboxDigest, useBulkAction } from '@/hooks/use-mailbox';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -14,65 +11,63 @@ import {
 import { EmailDetailDialog } from '@/components/mailbox/email-detail-dialog';
 import { ThreadDetailDialog } from '@/components/mailbox/thread-detail-dialog';
 import { InboxEmptyState, useInboxIsEmpty } from '@/components/mailbox/inbox-empty';
-import { formatDate, formatRelative, formatNumber } from '@/lib/utils';
-import {
-  Mail, Inbox, Send, ArrowDown, ArrowUp, Search, MessageSquare,
-  Archive, Ban, AlertCircle, ExternalLink,
-} from 'lucide-react';
+import { StatCard } from '@/components/home/home-parts';
+import { formatDate, formatRelative, formatNumber, cn } from '@/lib/utils';
+import { Mail, Inbox, Send, Search, MessageSquare, Archive, Ban, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import type { MailboxEmail, MailboxThread } from '@/types';
 
-function classificationBadge(c?: string) {
-  if (!c) return null;
-  const colorMap: Record<string, string> = {
-    interested: 'bg-up/15 text-up',
-    inquiry: 'bg-info/15 text-info',
-    application: 'bg-info/15 text-info',
-    partnership: 'bg-a-master/15 text-a-master',
-    introduction: 'bg-a-enrichment/15 text-a-enrichment',
-    objection: 'bg-warn/15 text-warn-fg',
-    not_now: 'bg-warn/15 text-warn-fg',
-    out_of_office: 'bg-bg-soft text-ink-3',
-    unsubscribe: 'bg-down/15 text-down',
-    bounce: 'bg-down/15 text-down',
-    spam: 'bg-down/15 text-down',
-    support_request: 'bg-warn/15 text-warn-fg',
-  };
+const TAG = 'inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium capitalize';
+
+function Tag({ tone, children, title }: { tone?: string; children: React.ReactNode; title?: string }) {
   return (
-    <Badge className={colorMap[c] ?? 'bg-bg-soft text-ink-3'}>
-      {c.replace(/_/g, ' ')}
-    </Badge>
+    <span className={cn(TAG, tone ?? 'bg-bg-soft text-ink-3')} title={title}>
+      {children}
+    </span>
   );
 }
 
-function statusBadge(s?: string) {
-  if (!s) return null;
-  const colorMap: Record<string, string> = {
-    sent: 'bg-up/15 text-up',
-    queued: 'bg-info/15 text-info',
-    sending: 'bg-warn/15 text-warn-fg',
-    failed: 'bg-down/15 text-down',
-    cancelled: 'bg-bg-soft text-ink-3',
-  };
-  return (
-    <Badge className={colorMap[s] ?? 'bg-bg-soft text-ink-3'}>
-      {s}
-    </Badge>
-  );
-}
+const CLASSIFICATION_TONE: Record<string, string> = {
+  interested: 'bg-up/10 text-up',
+  inquiry: 'bg-info/10 text-info',
+  application: 'bg-info/10 text-info',
+  partnership: 'bg-accent-weak text-accent-fg',
+  introduction: 'bg-accent-weak text-accent-fg',
+  objection: 'bg-warn/15 text-warn-fg',
+  not_now: 'bg-warn/15 text-warn-fg',
+  out_of_office: 'bg-bg-soft text-ink-3',
+  unsubscribe: 'bg-down/10 text-down',
+  bounce: 'bg-down/10 text-down',
+  spam: 'bg-down/10 text-down',
+  support_request: 'bg-warn/15 text-warn-fg',
+};
 
-const priorityColors: Record<string, string> = {
-  high: 'bg-down/15 text-down',
+const SENT_TONE: Record<string, string> = {
+  sent: 'bg-up/10 text-up',
+  queued: 'bg-info/10 text-info',
+  sending: 'bg-warn/15 text-warn-fg',
+  failed: 'bg-down/10 text-down',
+  cancelled: 'bg-bg-soft text-ink-3',
+};
+
+const PRIORITY_TONE: Record<string, string> = {
+  high: 'bg-down/10 text-down',
   medium: 'bg-warn/15 text-warn-fg',
   low: 'bg-bg-soft text-ink-3',
 };
 
-const threadStatusColors: Record<string, string> = {
-  active: 'bg-up/15 text-up',
-  needs_action: 'bg-down/15 text-down',
-  waiting: 'bg-info/15 text-info',
+const THREAD_TONE: Record<string, string> = {
+  active: 'bg-up/10 text-up',
+  needs_action: 'bg-down/10 text-down',
+  waiting: 'bg-info/10 text-info',
   archived: 'bg-bg-soft text-ink-3',
 };
+
+const TABS = [
+  { key: 'threads', label: 'Threads', icon: MessageSquare },
+  { key: 'inbox', label: 'Inbox', icon: Inbox },
+  { key: 'sent', label: 'Sent', icon: Send },
+] as const;
 
 export default function MailboxPage() {
   const [tab, setTab] = useState<'inbox' | 'sent' | 'threads'>('threads');
@@ -82,7 +77,7 @@ export default function MailboxPage() {
   const [selectedThread, setSelectedThread] = useState<MailboxThread | null>(null);
   const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(new Set());
 
-  const { data: stats, isLoading: statsLoading } = useMailboxStats();
+  const { data: stats } = useMailboxStats();
   const { data: digest } = useMailboxDigest();
   const { data: sentData, isLoading: sentLoading } = useMailboxSent({ search: search || undefined });
   const { data: inboxData, isLoading: inboxLoading } = useMailboxInbox({ search: search || undefined });
@@ -123,348 +118,264 @@ export default function MailboxPage() {
     setSelectedThreadIds(new Set());
   };
 
+  // Wait for the counts that decide between the empty state and the full page.
+  // Without this the full page flashes for a moment, then is replaced by the empty state.
+  if (inbox.loading) {
+    return (
+      <div className="mx-auto flex max-w-[1100px] flex-col gap-4 p-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-[88px] rounded-xl" />
+          ))}
+        </div>
+        <Skeleton className="h-10 w-72 rounded-lg" />
+        <Skeleton className="h-72 rounded-2xl" />
+      </div>
+    );
+  }
+
   // Never received a reply: show the explanatory empty state instead of an empty table.
   if (inbox.empty && !search && !threadStatusFilter) return <InboxEmptyState sent={inbox.sent} />;
 
+  const needsAction = digest?.needsAction ?? 0;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Mail className="w-6 h-6 text-info" />
-        <div>
-          <h1 className="text-2xl font-bold">Mailbox</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">Manage email threads and conversations</p>
-        </div>
-      </div>
-
+    <div className="mx-auto flex max-w-[1100px] flex-col gap-4 p-5">
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        {statsLoading ? (
-          Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-[80px]" />)
-        ) : (
-          <>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-info/10">
-                  <ArrowDown className="w-4 h-4 text-info" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Received Today</p>
-                  <p className="text-xl font-bold">{formatNumber(stats?.todayReceived ?? 0)}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-up/10">
-                  <ArrowUp className="w-4 h-4 text-up" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Sent Today</p>
-                  <p className="text-xl font-bold">{formatNumber(stats?.todaySent ?? 0)}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-info/10">
-                  <MessageSquare className="w-4 h-4 text-info" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Total Threads</p>
-                  <p className="text-xl font-bold">{formatNumber(digest?.totalThreads ?? 0)}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-down/10">
-                  <AlertCircle className="w-4 h-4 text-down" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Needs Action</p>
-                  <p className="text-xl font-bold">{formatNumber(digest?.needsAction ?? 0)}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-warn/10">
-                  <ArrowUp className="w-4 h-4 text-warn-fg" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">High Priority</p>
-                  <p className="text-xl font-bold">{formatNumber(digest?.highPriority ?? 0)}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <StatCard label="Received today" value={formatNumber(stats?.todayReceived ?? 0)} detail="Replies and new mail" muted={(stats?.todayReceived ?? 0) === 0} />
+        <StatCard label="Sent today" value={formatNumber(stats?.todaySent ?? 0)} detail="From your mailbox" muted={(stats?.todaySent ?? 0) === 0} />
+        <StatCard label="Threads" value={formatNumber(digest?.totalThreads ?? 0)} detail="Conversations in total" />
+        <StatCard label="Needs action" value={formatNumber(needsAction)} detail={needsAction > 0 ? 'Waiting on your answer' : 'All caught up'} muted={needsAction === 0} />
+        <StatCard label="High priority" value={formatNumber(digest?.highPriority ?? 0)} detail="Look at these first" muted={(digest?.highPriority ?? 0) === 0} />
       </div>
 
-      {/* Tab Toggle + Search */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex bg-muted rounded-lg p-0.5">
-          <Button
-            variant={tab === 'threads' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setTab('threads')}
-            className="text-xs"
-          >
-            <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
-            Threads
-          </Button>
-          <Button
-            variant={tab === 'inbox' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setTab('inbox')}
-            className="text-xs"
-          >
-            <Inbox className="w-3.5 h-3.5 mr-1.5" />
-            Inbox
-          </Button>
-          <Button
-            variant={tab === 'sent' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setTab('sent')}
-            className="text-xs"
-          >
-            <Send className="w-3.5 h-3.5 mr-1.5" />
-            Sent
-          </Button>
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-0.5 rounded-lg border border-line bg-bg-soft p-0.5" role="tablist" aria-label="Mailbox view">
+          {TABS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={cn(
+                'inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-body font-medium transition-colors',
+                tab === key ? 'bg-bg-panel text-ink shadow-sm' : 'text-ink-3 hover:text-ink',
+              )}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder={tab === 'threads' ? 'Search threads...' : 'Search emails...'}
-            className="pl-9 h-9"
+
+        <label className="flex h-9 min-w-[200px] flex-1 cursor-text items-center gap-2 rounded-lg border border-line bg-bg-panel px-3 text-body text-ink-3 transition-colors focus-within:border-accent-mid focus-within:ring-2 focus-within:ring-accent-weak hover:border-line-strong sm:max-w-xs">
+          <Search size={14} className="shrink-0" />
+          <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            placeholder={tab === 'threads' ? 'Search threads…' : 'Search emails…'}
+            className="min-w-0 flex-1 border-0 bg-transparent text-body text-ink outline-none placeholder:text-ink-4"
           />
-        </div>
+        </label>
+
         {tab === 'threads' && (
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {['', 'active', 'needs_action', 'waiting', 'archived'].map((s) => (
-              <Button
+              <button
                 key={s}
-                variant={threadStatusFilter === s ? 'default' : 'outline'}
-                size="sm"
-                className="text-xs h-8"
+                type="button"
+                aria-pressed={threadStatusFilter === s}
                 onClick={() => setThreadStatusFilter(s)}
+                className={cn(
+                  'h-8 rounded-full border px-3 text-xs font-medium capitalize transition-colors',
+                  threadStatusFilter === s
+                    ? 'border-accent-mid bg-accent-weak text-accent-fg'
+                    : 'border-line bg-bg-panel text-ink-2 hover:border-line-strong hover:bg-hover',
+                )}
               >
                 {s ? s.replace(/_/g, ' ') : 'All'}
-              </Button>
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Bulk Action Toolbar for Threads */}
+      {/* Bulk actions */}
       {tab === 'threads' && selectedThreadIds.size > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border border-border/50">
-          <span className="text-sm font-medium">{selectedThreadIds.size} selected</span>
-          <Button variant="outline" size="sm" onClick={() => handleBulkAction('archive')} disabled={bulkAction.isPending}>
-            <Archive className="w-3.5 h-3.5 mr-1.5" />
-            Archive
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent-mid bg-accent-weak px-4 py-2.5">
+          <span className="mr-1 text-body font-medium text-accent-fg">{selectedThreadIds.size} selected</span>
+          <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={() => handleBulkAction('archive')} disabled={bulkAction.isPending}>
+            <Archive className="mr-1.5 size-3.5" /> Archive
           </Button>
-          <Button variant="outline" size="sm" onClick={() => handleBulkAction('mark_spam')} disabled={bulkAction.isPending}>
-            <Ban className="w-3.5 h-3.5 mr-1.5" />
-            Mark Spam
+          <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={() => handleBulkAction('mark_spam')} disabled={bulkAction.isPending}>
+            <Ban className="mr-1.5 size-3.5" /> Mark spam
           </Button>
-          <Button variant="outline" size="sm" onClick={() => handleBulkAction('unsubscribe')} disabled={bulkAction.isPending}>
+          <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={() => handleBulkAction('unsubscribe')} disabled={bulkAction.isPending}>
             Unsubscribe
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setSelectedThreadIds(new Set())}>
+          <button type="button" onClick={() => setSelectedThreadIds(new Set())} className="ml-auto text-xs font-medium text-accent-fg hover:underline">
             Clear
-          </Button>
+          </button>
         </div>
       )}
 
       {/* Content */}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12" />)}
+      <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+        {isLoading ? (
+          <div className="space-y-2 p-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 rounded-lg" />
+            ))}
+          </div>
+        ) : tab === 'threads' ? (
+          threads.length === 0 ? (
+            <div className="px-5 py-14 text-center">
+              <span className="mx-auto grid size-10 place-items-center rounded-full bg-accent-weak text-accent">
+                <MessageSquare size={18} />
+              </span>
+              <p className="mb-0 mt-3 text-body font-semibold text-ink">No threads found</p>
+              <p className="mx-auto mb-0 mt-1 max-w-sm text-xs text-ink-3">Try a different search or status filter.</p>
             </div>
-          ) : tab === 'threads' ? (
-            /* Thread Table */
-            threads.length === 0 ? (
-              <div className="text-center py-12">
-                <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">No threads found</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">
-                      <Checkbox
-                        checked={selectedThreadIds.size === threads.length && threads.length > 0}
-                        onCheckedChange={toggleAllThreads}
-                      />
-                    </TableHead>
-                    <TableHead>Contact</TableHead>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox checked={selectedThreadIds.size === threads.length && threads.length > 0} onCheckedChange={toggleAllThreads} />
+                  </TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Subject</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Deal</TableHead>
+                  <TableHead className="text-right">Msgs</TableHead>
+                  <TableHead>Last activity</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {threads.map((thread) => (
+                  <TableRow key={thread.id} className="cursor-pointer">
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Checkbox checked={selectedThreadIds.has(thread.id)} onCheckedChange={() => toggleThreadSelection(thread.id)} />
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)}>
+                      {thread.contactName && <p className="m-0 text-body font-medium text-ink">{thread.contactName}</p>}
+                      <p className="m-0 text-xs text-ink-3">{thread.contactEmail ?? '—'}</p>
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)} className="max-w-[260px]">
+                      <p className="m-0 truncate text-body text-ink">{thread.subject ?? '(No subject)'}</p>
+                      {thread.summary && <p className="m-0 mt-0.5 truncate text-xs text-ink-3">{thread.summary}</p>}
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)}>
+                      <Tag tone={THREAD_TONE[thread.status]}>{thread.status.replace(/_/g, ' ')}</Tag>
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)}>
+                      <Tag tone={PRIORITY_TONE[thread.priority]}>{thread.priority}</Tag>
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)}>
+                      {thread.deal ? (
+                        <Link
+                          href={`/crm?dealId=${thread.deal.id}`}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-2 no-underline hover:text-accent"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="size-2 rounded-full" style={{ backgroundColor: thread.deal.stage?.color ?? '#6366f1' }} />
+                          {thread.deal.stage?.name ?? 'Deal'}
+                          <ExternalLink className="size-2.5" />
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-ink-4">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)} className="text-right font-mono text-body text-ink-3">
+                      {thread.messageCount}
+                    </TableCell>
+                    <TableCell onClick={() => setSelectedThread(thread)} className="whitespace-nowrap text-xs text-ink-3">
+                      {thread.lastMessageAt ? formatDate(thread.lastMessageAt, 'MMM d, h:mm a') : '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )
+        ) : emails.length === 0 ? (
+          <div className="px-5 py-14 text-center">
+            <span className="mx-auto grid size-10 place-items-center rounded-full bg-accent-weak text-accent">
+              <Mail size={18} />
+            </span>
+            <p className="mb-0 mt-3 text-body font-semibold text-ink">No emails found</p>
+            <p className="mx-auto mb-0 mt-1 max-w-sm text-xs text-ink-3">{search ? 'Nothing matches your search.' : tab === 'sent' ? 'Emails you send will appear here.' : 'Replies will appear here.'}</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {tab === 'sent' ? (
+                  <>
+                    <TableHead>To</TableHead>
                     <TableHead>Subject</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Priority</TableHead>
-                    <TableHead>Deal</TableHead>
-                    <TableHead>Messages</TableHead>
-                    <TableHead>Last Activity</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {threads.map((thread) => (
-                    <TableRow key={thread.id} className="cursor-pointer">
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          checked={selectedThreadIds.has(thread.id)}
-                          onCheckedChange={() => toggleThreadSelection(thread.id)}
-                        />
+                    <TableHead>Opened</TableHead>
+                    <TableHead>Sent at</TableHead>
+                  </>
+                ) : (
+                  <>
+                    <TableHead>From</TableHead>
+                    <TableHead>Subject</TableHead>
+                    <TableHead>Classification</TableHead>
+                    <TableHead>Received at</TableHead>
+                  </>
+                )}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {emails.map((email) => (
+                <TableRow key={email.id} className="cursor-pointer" onClick={() => setSelectedEmail(email)}>
+                  {tab === 'sent' ? (
+                    <>
+                      <TableCell>
+                        {email.contactName && <p className="m-0 text-body font-medium text-ink">{email.contactName}</p>}
+                        <p className="m-0 text-xs text-ink-3">{email.toEmail}</p>
                       </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)}>
-                        <div>
-                          {thread.contactName && (
-                            <p className="text-sm font-medium">{thread.contactName}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">{thread.contactEmail ?? '—'}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)} className="max-w-[250px]">
-                        <p className="text-sm truncate">{thread.subject ?? '(No subject)'}</p>
-                        {thread.summary && (
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">{thread.summary}</p>
-                        )}
-                      </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)}>
-                        <Badge className={threadStatusColors[thread.status] ?? 'bg-bg-soft text-ink-3'}>
-                          {thread.status.replace(/_/g, ' ')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)}>
-                        <Badge className={priorityColors[thread.priority] ?? ''}>
-                          {thread.priority}
-                        </Badge>
-                      </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)}>
-                        {thread.deal ? (
-                          <Link
-                            href={`/crm?dealId=${thread.deal.id}`}
-                            className="flex items-center gap-1.5 text-xs text-info hover:text-info"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div
-                              className="w-2 h-2 rounded-full"
-                              style={{ backgroundColor: thread.deal.stage?.color ?? '#6366f1' }}
-                            />
-                            {thread.deal.stage?.name ?? 'Deal'}
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </Link>
+                      <TableCell className="max-w-[300px] truncate text-body text-ink">{email.subject ?? '(No subject)'}</TableCell>
+                      <TableCell>{email.status && <Tag tone={SENT_TONE[email.status]}>{email.status}</Tag>}</TableCell>
+                      <TableCell>
+                        {email.openedAt ? (
+                          <Tag tone="bg-up/10 text-up" title={formatDate(email.openedAt, 'MMM d, h:mm a')}>
+                            Opened {formatRelative(email.openedAt)}
+                          </Tag>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <Tag>Not opened</Tag>
                         )}
                       </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)} className="text-sm text-muted-foreground">
-                        {thread.messageCount}
+                      <TableCell className="whitespace-nowrap text-xs text-ink-3">
+                        {formatDate(email.sentAt ?? email.createdAt ?? '', 'MMM d, h:mm a') || '—'}
                       </TableCell>
-                      <TableCell onClick={() => setSelectedThread(thread)} className="text-sm text-muted-foreground">
-                        {thread.lastMessageAt ? formatDate(thread.lastMessageAt, 'MMM d, h:mm a') : '—'}
+                    </>
+                  ) : (
+                    <>
+                      <TableCell>
+                        {email.contactName && <p className="m-0 text-body font-medium text-ink">{email.contactName}</p>}
+                        <p className="m-0 text-xs text-ink-3">{email.fromEmail}</p>
                       </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )
-          ) : (
-            /* Email Table (Inbox/Sent) */
-            emails.length === 0 ? (
-              <div className="text-center py-12">
-                <Mail className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">No emails found</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {tab === 'sent' ? (
-                      <>
-                        <TableHead>To</TableHead>
-                        <TableHead>Subject</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Opened</TableHead>
-                        <TableHead>Sent At</TableHead>
-                      </>
-                    ) : (
-                      <>
-                        <TableHead>From</TableHead>
-                        <TableHead>Subject</TableHead>
-                        <TableHead>Classification</TableHead>
-                        <TableHead>Received At</TableHead>
-                      </>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {emails.map((email) => (
-                    <TableRow
-                      key={email.id}
-                      className="cursor-pointer"
-                      onClick={() => setSelectedEmail(email)}
-                    >
-                      {tab === 'sent' ? (
-                        <>
-                          <TableCell>
-                            <div>
-                              {email.contactName && (
-                                <p className="text-sm font-medium">{email.contactName}</p>
-                              )}
-                              <p className="text-xs text-muted-foreground">{email.toEmail}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="max-w-[300px] truncate text-sm">
-                            {email.subject ?? '(No subject)'}
-                          </TableCell>
-                          <TableCell>{statusBadge(email.status)}</TableCell>
-                          <TableCell>
-                            {email.openedAt ? (
-                              <Badge className="bg-up/15 text-up" title={formatDate(email.openedAt, 'MMM d, h:mm a')}>
-                                Opened {formatRelative(email.openedAt)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-bg-soft text-ink-3">Not opened</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {formatDate(email.sentAt ?? email.createdAt ?? '', 'MMM d, h:mm a') || '—'}
-                          </TableCell>
-                        </>
-                      ) : (
-                        <>
-                          <TableCell>
-                            <div>
-                              {email.contactName && (
-                                <p className="text-sm font-medium">{email.contactName}</p>
-                              )}
-                              <p className="text-xs text-muted-foreground">{email.fromEmail}</p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="max-w-[300px] truncate text-sm">
-                            {email.subject ?? '(No subject)'}
-                          </TableCell>
-                          <TableCell>{classificationBadge(email.classification)}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {email.createdAt ? formatDate(email.createdAt, 'MMM d, h:mm a') : '—'}
-                          </TableCell>
-                        </>
-                      )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )
-          )}
-        </CardContent>
-      </Card>
+                      <TableCell className="max-w-[300px] truncate text-body text-ink">{email.subject ?? '(No subject)'}</TableCell>
+                      <TableCell>
+                        {email.classification && <Tag tone={CLASSIFICATION_TONE[email.classification]}>{email.classification.replace(/_/g, ' ')}</Tag>}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-ink-3">
+                        {email.createdAt ? formatDate(email.createdAt, 'MMM d, h:mm a') : '—'}
+                      </TableCell>
+                    </>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </section>
 
       {/* Email Detail Dialog */}
       <EmailDetailDialog

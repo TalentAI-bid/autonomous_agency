@@ -20,7 +20,7 @@ const labels: Record<string, string> = {
   crm: 'Pipeline',
   deals: 'Deals',
   mailbox: 'Inbox',
-  schedule: 'Meetings',
+  schedule: 'Schedule',
   email: 'Email Accounts',
   team: 'Team',
   company: 'Company Profile',

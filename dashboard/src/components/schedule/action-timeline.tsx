@@ -1,8 +1,8 @@
 'use client';
 
-import { Badge } from '@/components/ui/badge';
-import { formatDate } from '@/lib/utils';
-import { Mail, Bot } from 'lucide-react';
+import { cn, formatDate } from '@/lib/utils';
+import { Mail, Bot, CalendarClock } from 'lucide-react';
+import { RowIcon } from '@/components/home/home-parts';
 import type { ScheduledAction } from '@/types';
 
 interface ActionTimelineProps {
@@ -36,22 +36,24 @@ function groupByDate(items: ScheduledAction[]): Map<string, ScheduledAction[]> {
   return groups;
 }
 
-function statusColor(status: string): string {
-  const map: Record<string, string> = {
-    queued: 'bg-info/15 text-info',
-    pending: 'bg-warn/15 text-warn-fg',
-    processing: 'bg-a-master/15 text-a-master',
-    sending: 'bg-warn/15 text-warn-fg',
-  };
-  return map[status] ?? 'bg-bg-soft text-ink-3';
-}
+const STATUS_TONE: Record<string, string> = {
+  queued: 'bg-info/10 text-info',
+  pending: 'bg-warn/15 text-warn-fg',
+  processing: 'bg-accent-weak text-accent-fg',
+  sending: 'bg-warn/15 text-warn-fg',
+};
 
 export function ActionTimeline({ items }: ActionTimelineProps) {
   if (items.length === 0) {
     return (
-      <div className="text-center py-12">
-        <Bot className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">No upcoming actions</p>
+      <div className="border-t border-line px-4 py-12 text-center">
+        <span className="mx-auto grid size-10 place-items-center rounded-full bg-accent-weak text-accent">
+          <CalendarClock size={18} />
+        </span>
+        <p className="mb-0 mt-3 text-body font-semibold text-ink">Nothing scheduled</p>
+        <p className="mx-auto mb-0 mt-1 max-w-sm text-xs leading-relaxed text-ink-3">
+          Queued emails and agent tasks will show up here, grouped by day.
+        </p>
       </div>
     );
   }
@@ -59,37 +61,28 @@ export function ActionTimeline({ items }: ActionTimelineProps) {
   const groups = groupByDate(items);
 
   return (
-    <div className="space-y-6">
+    <div>
       {Array.from(groups.entries()).map(([label, groupItems]) => (
         <div key={label}>
-          <div className="flex items-center gap-2 mb-3">
-            <div className="h-px flex-1 bg-border" />
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
-            <div className="h-px flex-1 bg-border" />
+          <div className="flex items-center justify-between border-t border-line bg-bg-sub px-4 py-2">
+            <span className="text-2xs font-medium uppercase tracking-[0.09em] text-ink-3">{label}</span>
+            <span className="font-mono text-2xs text-ink-4">{groupItems.length}</span>
           </div>
-          <div className="space-y-2">
-            {groupItems.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-              >
-                <span className="text-xs text-muted-foreground w-14 shrink-0">
-                  {formatDate(item.scheduledAt, 'HH:mm')}
-                </span>
-                <div className="p-1.5 rounded bg-muted">
-                  {item.type === 'email' ? (
-                    <Mail className="w-3.5 h-3.5 text-info" />
-                  ) : (
-                    <Bot className="w-3.5 h-3.5 text-a-master" />
-                  )}
-                </div>
-                <p className="text-sm flex-1 truncate">{item.title}</p>
-                <Badge className={statusColor(item.status)}>
-                  {item.status}
-                </Badge>
+          {groupItems.map((item) => (
+            <div key={item.id} className="flex items-center gap-3 border-t border-line px-4 py-3 transition-colors hover:bg-hover">
+              <span className="w-12 shrink-0 font-mono text-xs tabular-nums text-ink-3">{formatDate(item.scheduledAt, 'HH:mm')}</span>
+              <RowIcon tone={item.type === 'email' ? 'accent' : 'muted'}>
+                {item.type === 'email' ? <Mail size={14} /> : <Bot size={14} />}
+              </RowIcon>
+              <div className="min-w-0 flex-1">
+                <p className="m-0 truncate text-body font-medium text-ink">{item.title}</p>
+                <p className="m-0 text-xs text-ink-3">{item.type === 'email' ? 'Email' : 'Agent task'}</p>
               </div>
-            ))}
-          </div>
+              <span className={cn('shrink-0 rounded-md px-2 py-0.5 text-xs font-medium capitalize', STATUS_TONE[item.status] ?? 'bg-bg-soft text-ink-3')}>
+                {item.status.replace(/_/g, ' ')}
+              </span>
+            </div>
+          ))}
         </div>
       ))}
     </div>

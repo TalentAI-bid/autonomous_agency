@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Check, Sparkles } from 'lucide-react';
@@ -62,7 +63,7 @@ export default function GetStartedPage() {
 
   return (
     <div className="mx-auto max-w-[1100px] p-6">
-      <section className="rounded-2xl border border-line bg-bg-panel px-9 py-9 shadow-sm">
+      <Card as="section" className="px-9 py-9">
         <h1 className="m-0 font-display text-[34px] font-normal leading-[1.1] tracking-[-0.01em] text-ink">
           {left === 1 ? 'One step left' : `${cap(numberWord(left))} steps left`} before your first message
         </h1>
@@ -134,7 +135,7 @@ export default function GetStartedPage() {
             Skip for now
           </Link>
         </div>
-      </section>
+      </Card>
 
       <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>

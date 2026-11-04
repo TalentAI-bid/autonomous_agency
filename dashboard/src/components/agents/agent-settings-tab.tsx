@@ -1,10 +1,11 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { CardSection } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { FileSpreadsheet, Upload } from 'lucide-react';
-import { Field, Panel } from '@/components/settings/settings-ui';
+import { Field } from '@/components/settings/settings-ui';
 import { Button } from '@/components/ui/button';
 import { useEmailAccounts } from '@/hooks/use-email-settings';
 import { useUpdateAgent, useStartAgent } from '@/hooks/use-agents';
@@ -72,7 +73,7 @@ export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
 
   return (
     <div className="space-y-5">
-      <Panel title="Company verification list" description="Check a fixed list of companies instead of discovering new ones.">
+      <CardSection title="Company verification list" description="Check a fixed list of companies instead of discovering new ones.">
         <div className="space-y-4">
           <p className="m-0 text-xs leading-relaxed text-ink-3">
             Upload a CSV or Excel list of companies. The agent will strictly investigate only these companies: finding each on LinkedIn (info + team),
@@ -110,9 +111,9 @@ export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
             </Button>
           </div>
         </div>
-      </Panel>
+      </CardSection>
 
-      <Panel title="Sending email account" description="Which mailbox this agent sends from.">
+      <CardSection title="Sending email account" description="Which mailbox this agent sends from.">
         <div className="space-y-4">
           <Field label="Outbound email account">
             {accounts.length > 0 ? (
@@ -147,7 +148,7 @@ export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
             </Button>
           </div>
         </div>
-      </Panel>
+      </CardSection>
     </div>
   );
 }

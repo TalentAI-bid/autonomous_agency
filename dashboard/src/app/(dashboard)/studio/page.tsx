@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, type ReactNode } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import {
@@ -202,7 +203,7 @@ export default function StudioPage() {
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* LEFT: compose */}
-        <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+        <Card as="section" className="overflow-hidden">
           <header className="border-b border-line px-5 py-3.5">
             <h2 className="m-0 text-body font-semibold text-ink">Compose</h2>
             <p className="mb-0 mt-0.5 text-xs text-ink-3">Choose where it goes, who it is for, then generate.</p>
@@ -332,10 +333,10 @@ export default function StudioPage() {
               {generate.isPending ? 'Writing…' : result ? 'Generate again' : 'Generate message'}
             </Button>
           </div>
-        </section>
+        </Card>
 
         {/* RIGHT: output */}
-        <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm lg:sticky lg:top-4">
+        <Card as="section" className="overflow-hidden lg:sticky lg:top-4">
           <header className="flex items-center gap-2.5 border-b border-line px-5 py-3.5">
             <span className="flex size-7 items-center justify-center rounded-row bg-accent-weak text-accent-fg">
               <ChannelIcon size={14} />
@@ -434,7 +435,7 @@ export default function StudioPage() {
               </div>
             )}
           </div>
-        </section>
+        </Card>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { CardSection } from '@/components/ui/card';
 import { StatusPill } from '@/components/home/home-parts';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
@@ -35,28 +36,6 @@ import { cn, formatRelative } from '@/lib/utils';
 /* ─── Shared pieces ─────────────────────────────────────────────────────────── */
 
 type PillTone = 'up' | 'warn';
-
-function SectionCard({
-  title,
-  pill,
-  loading,
-  children,
-}: {
-  title: string;
-  pill: { tone: PillTone; text: string };
-  loading: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
-      <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {!loading && <StatusPill tone={pill.tone}>{pill.text}</StatusPill>}
-      </header>
-      <div className="p-6">{loading ? <Skeleton className="h-40 w-full" /> : children}</div>
-    </section>
-  );
-}
 
 function EmptyBlock({ title, body, children, note }: { title: string; body: string; children: React.ReactNode; note: React.ReactNode }) {
   return (
@@ -143,7 +122,8 @@ function SendingCard() {
   );
 
   return (
-    <SectionCard title="Sending" pill={pill} loading={isLoading}>
+    <CardSection title="Sending" meta={!isLoading && <StatusPill tone={pill.tone}>{pill.text}</StatusPill>}>
+      {isLoading ? <Skeleton className="h-40 w-full" /> : (<>
       {list.length === 0 ? (
         <EmptyBlock
           title="Nothing can be sent yet"
@@ -171,7 +151,8 @@ function SendingCard() {
         </div>
       )}
       <AccountDialog preset={preset} onClose={() => setPreset(null)} />
-    </SectionCard>
+    </>)}
+    </CardSection>
   );
 }
 
@@ -344,7 +325,8 @@ function ReplyDetectionCard() {
   }
 
   return (
-    <SectionCard title="Reply detection" pill={pill} loading={isLoading}>
+    <CardSection title="Reply detection" meta={!isLoading && <StatusPill tone={pill.tone}>{pill.text}</StatusPill>}>
+      {isLoading ? <Skeleton className="h-40 w-full" /> : (<>
       {list.length === 0 ? (
         <EmptyBlock
           title="Keenpipe cannot see replies yet"
@@ -388,7 +370,8 @@ function ReplyDetectionCard() {
       )}
 
       <ListenerDialog open={adding} onClose={() => setAdding(false)} />
-    </SectionCard>
+    </>)}
+    </CardSection>
   );
 }
 

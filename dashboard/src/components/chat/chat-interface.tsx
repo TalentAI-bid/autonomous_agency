@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Card } from '@/components/ui/card';
 import { useRouter } from 'next/navigation';
 import { useCreateConversation, useConversation, useSendMessageStream, useApproveProposal } from '@/hooks/use-chat';
 import { useToast } from '@/hooks/use-toast';
@@ -127,7 +128,7 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
   // Loading state while creating the initial conversation
   if (!conversationId) {
     return (
-      <div className="flex h-[calc(100vh-10rem)] min-h-[420px] flex-col items-center justify-center gap-3 rounded-2xl border border-line bg-bg-panel px-6 text-center shadow-sm">
+      <Card className="flex h-[calc(100vh-10rem)] min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center">
         {startFailed ? (
           <>
             <p className="m-0 text-body font-medium text-ink">The assistant could not start.</p>
@@ -145,7 +146,7 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
             <p className="m-0 text-xs text-ink-4">The assistant writes its first message, which can take a few seconds.</p>
           </>
         )}
-      </div>
+      </Card>
     );
   }
 
@@ -153,7 +154,7 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
   const showStarters = !messages.some((m) => m.role === 'user') && !isSending && !isStreaming;
 
   return (
-    <div className="flex h-[calc(100vh-10rem)] min-h-[420px] flex-col overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card className="flex h-[calc(100vh-10rem)] min-h-[420px] flex-col overflow-hidden">
       <MessageList
         messages={messages}
         isLoading={isSending && !isStreaming}
@@ -184,6 +185,6 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
         onSend={handleSend}
         disabled={isSending || isStreaming || approveProposal.isPending}
       />
-    </div>
+    </Card>
   );
 }

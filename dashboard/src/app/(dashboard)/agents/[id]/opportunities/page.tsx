@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useParams } from 'next/navigation';
 import { useOpportunities, useOpportunityStats, useUpdateOpportunityStatus } from '@/hooks/use-opportunities';
@@ -87,7 +88,7 @@ export default function OpportunitiesPage() {
         </dl>
       )}
 
-      <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <Card as="section" className="overflow-hidden">
         <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
           <div className="mr-auto flex items-center gap-2">
             <h2 className="m-0 text-body font-semibold text-ink">Opportunities</h2>
@@ -197,7 +198,7 @@ export default function OpportunitiesPage() {
             })}
           </ul>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

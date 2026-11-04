@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { Check, Inbox } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -59,7 +60,7 @@ export function NoAgentCard() {
   const gs = useGetStarted();
   const onlyAgentLeft = !gs.isLoading && gs.remaining === 1;
   return (
-    <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+    <Card as="section" className="p-7">
       <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
         <Inbox size={16} />
       </span>
@@ -70,7 +71,7 @@ export function NoAgentCard() {
       <Button asChild variant="brand">
         <Link href={onlyAgentLeft ? '/agents/new' : '/get-started'}>{onlyAgentLeft ? 'Create agent' : 'Finish setting up'}</Link>
       </Button>
-    </section>
+    </Card>
   );
 }
 
@@ -88,7 +89,7 @@ interface ClearedCardProps {
 /** "Cleared for today" card shown when nothing is waiting. */
 export function ClearedCard({ summary, quotaText, exhausted, pending, remaining, limit, onRefresh, title }: ClearedCardProps) {
   return (
-    <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+    <Card as="section" className="p-7">
       <span className="grid size-9 place-items-center rounded-full bg-up/10 text-up">
         <Check size={16} strokeWidth={2.5} />
       </span>
@@ -108,6 +109,6 @@ export function ClearedCard({ summary, quotaText, exhausted, pending, remaining,
           {quotaText || `${remaining} of ${limit} daily refreshes left`}
         </span>
       </div>
-    </section>
+    </Card>
   );
 }

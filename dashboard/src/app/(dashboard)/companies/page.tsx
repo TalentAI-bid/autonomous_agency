@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { Building2, Search, Rocket, Users } from 'lucide-react';
@@ -203,7 +204,7 @@ export default function CompaniesPage() {
           ))}
         </div>
       ) : count === 0 ? (
-        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+        <Card as="section" className="p-7">
           <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
             <Building2 size={16} />
           </span>
@@ -218,7 +219,7 @@ export default function CompaniesPage() {
               <Link href="/agents/new">Deploy agent</Link>
             </Button>
           )}
-        </section>
+        </Card>
       ) : (
         <div className="leads-grid">
           {cards.map((c) => (
@@ -257,7 +258,7 @@ export default function CompaniesPage() {
 
       {/* ── Pagination ─────────────────────────────────────────── */}
       {(cursorStack.length > 1 || pagination?.hasMore) && (
-        <div className="flex items-center justify-between rounded-2xl border border-line bg-bg-panel px-4 py-2.5 shadow-sm">
+        <Card className="flex items-center justify-between px-4 py-2.5">
           <span className="text-xs text-ink-3">
             <span className="font-mono text-ink-2">{count}</span> {count === 1 ? 'company' : 'companies'} on this page
           </span>
@@ -282,7 +283,7 @@ export default function CompaniesPage() {
               Next →
             </Button>
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );

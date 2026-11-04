@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { CardSection } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
@@ -88,18 +89,6 @@ function RoleSelect<T extends TeamRole>({
   );
 }
 
-function Panel({ title, aside, children }: { title: string; aside?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
-      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {aside}
-      </header>
-      {children}
-    </section>
-  );
-}
-
 export default function TeamSettingsPage() {
   const confirm = useConfirm();
   const currentUser = useAuthStore((s) => s.user);
@@ -184,9 +173,9 @@ export default function TeamSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Panel
+      <CardSection layout="bare"
         title="Members"
-        aside={!membersQuery.isLoading && <span className="text-xs text-ink-3">{members.length} {members.length === 1 ? 'member' : 'members'}</span>}
+        meta={!membersQuery.isLoading && <span className="text-xs text-ink-3">{members.length} {members.length === 1 ? 'member' : 'members'}</span>}
       >
         {membersQuery.isLoading ? (
           <div className="space-y-3 p-5"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
@@ -247,10 +236,10 @@ export default function TeamSettingsPage() {
             })}
           </ul>
         )}
-      </Panel>
+      </CardSection>
 
       {canManage && (
-        <Panel title="Invite someone">
+        <CardSection layout="bare" title="Invite someone">
           <form onSubmit={handleInvite} className="space-y-3 p-5">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto] sm:items-end">
               <div className="space-y-1.5">
@@ -285,13 +274,13 @@ export default function TeamSettingsPage() {
               </div>
             )}
           </form>
-        </Panel>
+        </CardSection>
       )}
 
       {canManage && (invitesQuery.isLoading || invitations.length > 0) && (
-        <Panel
+        <CardSection layout="bare"
           title="Pending invitations"
-          aside={<span className="text-xs text-ink-3">{invitations.length} waiting</span>}
+          meta={<span className="text-xs text-ink-3">{invitations.length} waiting</span>}
         >
           {invitesQuery.isLoading ? (
             <div className="p-5"><Skeleton className="h-10" /></div>
@@ -326,7 +315,7 @@ export default function TeamSettingsPage() {
               ))}
             </ul>
           )}
-        </Panel>
+        </CardSection>
       )}
     </div>
   );

@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { CardSection } from '@/components/ui/card';
 import { Check, Copy, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Field, Panel, readOnlyInput } from '@/components/settings/settings-ui';
+import { Field, readOnlyInput } from '@/components/settings/settings-ui';
 
 export default function ApiSettingsPage() {
   const { token } = useAuth();
@@ -33,7 +34,7 @@ export default function ApiSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <Panel title="API access" description="Use this token to authenticate requests to the Keenpipe API.">
+      <CardSection title="API access" description="Use this token to authenticate requests to the Keenpipe API.">
         <div className="space-y-4">
           <Field label="Access token">
             <div className="flex gap-2">
@@ -62,9 +63,9 @@ export default function ApiSettingsPage() {
           </div>
           <p className="m-0 text-xs text-ink-3">The token is tied to your account and the workspace you are in. Keep it private.</p>
         </div>
-      </Panel>
+      </CardSection>
 
-      <Panel title="Workspace endpoints" description="Where this app talks to the backend.">
+      <CardSection title="Workspace endpoints" description="Where this app talks to the backend.">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="API URL">
             <Input value={apiUrl} readOnly className={`${readOnlyInput} font-mono text-xs`} />
@@ -73,7 +74,7 @@ export default function ApiSettingsPage() {
             <Input value={wsUrl} readOnly className={`${readOnlyInput} font-mono text-xs`} />
           </Field>
         </div>
-      </Panel>
+      </CardSection>
     </div>
   );
 }

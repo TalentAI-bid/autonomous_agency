@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useMemo, useEffect } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAgentRoomMessages, useSendHumanMessage, type AgentMessage } from '@/hooks/use-agent-room';
 import { useRealtimeStore } from '@/stores/realtime.store';
@@ -261,7 +262,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
   };
 
   return (
-    <section className="flex h-[calc(100vh-180px)] min-h-[480px] flex-col overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="flex h-[calc(100vh-180px)] min-h-[480px] flex-col overflow-hidden">
       <header className="space-y-3 border-b border-line px-5 py-3.5">
         <div className="flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Agent Room</h2>
@@ -349,6 +350,6 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
           <Send size={14} />
         </Button>
       </footer>
-    </section>
+    </Card>
   );
 }

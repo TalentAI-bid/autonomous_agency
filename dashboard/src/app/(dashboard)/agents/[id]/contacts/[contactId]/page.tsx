@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { useParams } from 'next/navigation';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useContact, useUpdateContact } from '@/hooks/use-contacts';
@@ -86,7 +87,7 @@ export default function ContactDetailPage() {
   if (!contact) {
     return (
       <div className="mx-auto max-w-[1100px] p-5">
-        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+        <Card as="section" className="p-7">
           <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
             <User size={16} />
           </span>
@@ -95,7 +96,7 @@ export default function ContactDetailPage() {
           <Button asChild variant="brand">
             <Link href={`/agents/${agentId}?tab=contacts`}>Back to contacts</Link>
           </Button>
-        </section>
+        </Card>
       </div>
     );
   }
@@ -125,7 +126,7 @@ export default function ContactDetailPage() {
       />
 
       {/* Header */}
-      <section className="rounded-2xl border border-line bg-bg-panel p-5 shadow-sm">
+      <Card as="section" className="p-5">
         <div className="flex flex-wrap items-start gap-4">
           <span className={cn('grid size-12 shrink-0 place-items-center rounded-full text-body font-semibold text-white', avatarTone)}>
             {initials}
@@ -170,7 +171,7 @@ export default function ContactDetailPage() {
             )}
           </div>
         </div>
-      </section>
+      </Card>
 
       {/* Followup sequence panel — hidden when no campaign_contact rows exist */}
       <SequencePanel contactId={contactId} />

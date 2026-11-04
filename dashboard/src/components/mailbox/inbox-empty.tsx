@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { Inbox } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useEmailAccounts, useEmailListeners } from '@/hooks/use-email-settings';
@@ -64,15 +65,15 @@ export function InboxEmptyState({ sent }: { sent: number }) {
 
   return (
     <div className="mx-auto grid max-w-[1100px] items-start gap-4 p-6 md:grid-cols-[300px_1fr]">
-      <section className="rounded-xl border border-line bg-bg-panel shadow-sm">
+      <Card as="section">
         <div className="border-b border-line px-4 py-3 text-xs text-ink-3">No threads yet</div>
         <p className="m-0 px-4 py-4 text-xs leading-relaxed text-ink-3">
           Replies appear here within a minute of arriving
           {cause === 'quiet' ? '.' : ' — once reply detection is connected.'}
         </p>
-      </section>
+      </Card>
 
-      <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+      <Card as="section" className="p-7">
         <span className="grid size-9 place-items-center rounded-full bg-warn/10 text-warn-fg">
           <Inbox size={16} />
         </span>
@@ -83,7 +84,7 @@ export function InboxEmptyState({ sent }: { sent: number }) {
             <Link href={c.cta.href}>{c.cta.label}</Link>
           </Button>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

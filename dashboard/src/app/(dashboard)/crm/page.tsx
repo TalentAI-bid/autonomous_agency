@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { Card } from '@/components/ui/card';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCrmBoard, useSeedStages, useMoveDealStage } from '@/hooks/use-crm';
 import { DealBoard } from '@/components/crm/deal-board';
@@ -118,7 +119,7 @@ export default function CrmPage() {
           ))}
         </div>
       ) : cols.length === 0 ? (
-        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+        <Card as="section" className="p-7">
           <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
             <Kanban size={16} />
           </span>
@@ -130,7 +131,7 @@ export default function CrmPage() {
             <Sprout className="mr-1.5 size-4" />
             {seedStages.isPending ? 'Creating…' : 'Create default stages'}
           </Button>
-        </section>
+        </Card>
       ) : (
         <DealBoard columns={cols} onDealClick={handleDealClick} onMoveDeal={handleMoveDeal} />
       )}

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { ReactNode } from 'react';
@@ -52,12 +53,12 @@ function TagChip({ tag }: { tag: LeadTag }) {
 }
 
 const CARD_BASE =
-  'flex min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-bg-panel p-[18px] shadow-sm';
+  'flex min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden p-[18px]';
 
 /** Loading placeholder that mirrors the LeadCard layout, so nothing jumps when data arrives. */
 export function LeadCardSkeleton() {
   return (
-    <div className={cn(CARD_BASE)} aria-hidden>
+    <Card className={CARD_BASE} aria-hidden>
       {/* Header: glyph + title + badge */}
       <div className="flex items-center gap-2">
         <Skeleton className="size-7 shrink-0 rounded-full" />
@@ -96,7 +97,7 @@ export function LeadCardSkeleton() {
         <Skeleton className="size-7 rounded-lg" />
         <Skeleton className="h-8 w-28 rounded-lg" />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -116,7 +117,7 @@ export function LeadCard({
   isNew,
 }: LeadCardProps) {
   return (
-    <div
+    <Card
       className={cn(
         'lead-card transition-[border-color,box-shadow] duration-150 hover:shadow-md',
         CARD_BASE,
@@ -216,6 +217,6 @@ export function LeadCard({
           </Link>
         </Button>
       </div>
-    </div>
+    </Card>
   );
 }

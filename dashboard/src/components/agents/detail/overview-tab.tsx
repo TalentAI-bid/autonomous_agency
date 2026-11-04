@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CardSection } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AgentMonitor } from '@/components/agents/agent-monitor';
 import { cn, formatDate, getStatusColor } from '@/lib/utils';
@@ -8,18 +9,6 @@ import type { MasterAgent } from '@/types';
 
 type Stats = ReturnType<typeof useAgentStats>['data'];
 type AgentEvent = ReturnType<typeof useRealtimeStore.getState>['events'][number];
-
-function Panel({ title, aside, children, className }: { title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
-  return (
-    <section className={cn('overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm', className)}>
-      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {aside}
-      </header>
-      <div className="p-5">{children}</div>
-    </section>
-  );
-}
 
 const Empty = ({ children }: { children: ReactNode }) => <p className="m-0 py-4 text-center text-body text-ink-3">{children}</p>;
 
@@ -85,9 +74,9 @@ export function OverviewTab({
       <AgentMonitor masterAgentId={agentId} />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Panel
+        <CardSection
           title="Pipeline"
-          aside={
+          meta={
             stats?.avgScore != null ? (
               <Badge variant="muted" className="font-mono">avg score {stats.avgScore}</Badge>
             ) : undefined
@@ -119,9 +108,9 @@ export function OverviewTab({
               })}
             </div>
           )}
-        </Panel>
+        </CardSection>
 
-        <Panel title="What it looks for">
+        <CardSection title="What it looks for">
           {noRequirements && !strategy ? (
             <Empty>Requirements appear after the agent runs.</Empty>
           ) : (
@@ -137,12 +126,12 @@ export function OverviewTab({
               )}
             </div>
           )}
-        </Panel>
+        </CardSection>
       </div>
 
-      <Panel
+      <CardSection
         title="Live events"
-        aside={
+        meta={
           agent.status === 'running' ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-up">
               <span className="size-1.5 animate-pulse rounded-full bg-current" /> Live
@@ -169,7 +158,7 @@ export function OverviewTab({
             ))}
           </ul>
         )}
-      </Panel>
+      </CardSection>
     </div>
   );
 }

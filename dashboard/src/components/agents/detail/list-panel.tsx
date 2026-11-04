@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CardSection } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -19,17 +20,21 @@ export function ListPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
-      <header className="flex items-center gap-2 border-b border-line px-5 py-3.5">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {count !== undefined && <Badge variant="muted" size="sm" className="font-mono">{count}</Badge>}
-      </header>
+    <CardSection
+      layout="bare"
+      title={
+        <span className="flex items-center gap-2">
+          {title}
+          {count !== undefined && <Badge variant="muted" size="sm" className="font-mono">{count}</Badge>}
+        </span>
+      }
+    >
       {isEmpty ? (
         <p className="m-0 px-5 py-10 text-center text-body text-ink-3">{empty}</p>
       ) : (
         <ul className={cn('m-0 list-none divide-y divide-line p-0', scroll && 'scroll-thin max-h-[520px] overflow-y-auto')}>{children}</ul>
       )}
-    </section>
+    </CardSection>
   );
 }
 

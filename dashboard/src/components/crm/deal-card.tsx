@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { Card } from '@/components/ui/card';
 import type { DealWithContact } from '@/types';
 
 interface DealCardProps {
@@ -38,9 +39,9 @@ export function DealCard({ deal, className, onClick }: DealCardProps) {
       : null;
 
   return (
-    <div
+    <Card
       className={cn(
-        'cursor-pointer select-none rounded-xl border border-line bg-bg-panel p-3 shadow-sm transition-all hover:border-line-strong hover:shadow-md active:shadow-sm',
+        'cursor-pointer select-none p-3 transition-all hover:border-line-strong hover:shadow-md active:shadow-sm',
         className,
       )}
       onClick={onClick}
@@ -62,6 +63,6 @@ export function DealCard({ deal, className, onClick }: DealCardProps) {
           <span className="font-mono text-xs font-semibold tabular-nums text-ink">{formattedValue}</span>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

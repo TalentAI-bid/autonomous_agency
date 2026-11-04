@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
@@ -23,7 +24,7 @@ export function NoteComposer({ prospectId }: { prospectId: string }) {
   }
 
   return (
-    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section">
       <header className="border-b border-line px-5 py-3.5">
         <h2 className="m-0 text-body font-semibold text-ink">Add a note</h2>
       </header>
@@ -40,6 +41,6 @@ export function NoteComposer({ prospectId }: { prospectId: string }) {
           </Button>
         </div>
       </div>
-    </section>
+    </Card>
   );
 }

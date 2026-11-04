@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { CardSection, Card } from '@/components/ui/card';
 import { StatusPill } from '@/components/home/home-parts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -21,7 +22,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { apiGet, apiPost } from '@/lib/api';
 import { ago } from '@/hooks/use-home';
-import { cn } from '@/lib/utils';
 
 type ExtensionStatus = {
   hasKey: boolean;
@@ -86,18 +86,6 @@ function formatSize(bytes: number | null | undefined): string {
   if (!bytes || bytes <= 0) return '';
   const mb = bytes / 1024 / 1024;
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
-}
-
-function Panel({ title, aside, children, className }: { title: string; aside?: React.ReactNode; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={cn('overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm', className)}>
-      <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {aside}
-      </header>
-      {children}
-    </section>
-  );
 }
 
 export default function ExtensionSettingsPage() {
@@ -200,7 +188,7 @@ export default function ExtensionSettingsPage() {
         <Skeleton className="h-72 rounded-2xl" />
       ) : !connected ? (
         /* ───────────── Not connected: install ───────────── */
-        <Panel title="Browser extension" aside={<StatusPill tone="warn">Not connected</StatusPill>}>
+        <CardSection layout="bare" title="Browser extension" meta={<StatusPill tone="warn">Not connected</StatusPill>}>
           <div className="space-y-5 p-5">
             <p className="m-0 max-w-[640px] text-body leading-relaxed text-ink-2">
               The extension runs on your own LinkedIn session in your browser. Connection requests and Add lead go through it — no cloud bots, no shared
@@ -298,10 +286,10 @@ export default function ExtensionSettingsPage() {
               <span>— Edge loads it the same way; Firefox needs a different build.</span>
             </p>
           </div>
-        </Panel>
+        </CardSection>
       ) : (
         /* ───────────── Connected: health ───────────── */
-        <Panel title="Browser extension" aside={<StatusPill tone="up">Connected</StatusPill>}>
+        <CardSection layout="bare" title="Browser extension" meta={<StatusPill tone="up">Connected</StatusPill>}>
           <div className="space-y-4 p-5">
             <div className="flex flex-wrap items-center gap-3.5">
               <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-bg-soft text-ink-3">
@@ -327,13 +315,13 @@ export default function ExtensionSettingsPage() {
                 { label: 'Completed', value: completedCount, sub: `of the last ${tasks.length} tasks` },
                 { label: 'Last capture', value: lastDone ? ago(lastDone.createdAt) + ' ago' : '—', sub: lastDone ? `${lastDone.site} · ${lastDone.type.replace(/_/g, ' ')}` : 'No captures yet' },
               ].map((t) => (
-                <div key={t.label} className="rounded-card border border-line bg-bg-panel px-4 py-3">
+                <Card key={t.label} className="px-4 py-3">
                   <div className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">{t.label}</div>
                   <div className="mt-1.5 font-display text-[22px] leading-none text-ink">{t.value}</div>
                   <div className="mt-1.5 truncate text-2xs text-ink-3" title={t.sub}>
                     {t.sub}
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
 
@@ -348,12 +336,12 @@ export default function ExtensionSettingsPage() {
               </div>
             )}
           </div>
-        </Panel>
+        </CardSection>
       )}
 
       {/* ───────────── What it does ───────────── */}
       {connected && (
-        <Panel title="Add lead — capturing from LinkedIn">
+        <CardSection layout="bare" title="Add lead — capturing from LinkedIn">
           <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_280px]">
             <p className="m-0 text-body leading-relaxed text-ink-2">
               On any LinkedIn profile, the extension shows one button: <strong className="font-semibold text-ink">Add lead</strong>. It creates the person
@@ -374,11 +362,11 @@ export default function ExtensionSettingsPage() {
               </span>
             </div>
           </div>
-        </Panel>
+        </CardSection>
       )}
 
       {/* ───────────── Troubleshooting ───────────── */}
-      <Panel title="If it stops working" aside={<span className="hidden text-xs text-ink-3 sm:block">Each one turns the LinkedIn line amber in the sidebar</span>}>
+      <CardSection layout="bare" title="If it stops working" meta={<span className="hidden text-xs text-ink-3 sm:block">Each one turns the LinkedIn line amber in the sidebar</span>}>
         <ul className="m-0 list-none divide-y divide-line p-0">
           {[
             {
@@ -436,7 +424,7 @@ export default function ExtensionSettingsPage() {
             </li>
           ))}
         </ul>
-      </Panel>
+      </CardSection>
 
       {/* Disconnect confirm */}
       <Dialog open={confirmRevoke} onOpenChange={setConfirmRevoke}>

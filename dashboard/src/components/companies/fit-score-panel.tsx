@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
+import { Card } from '@/components/ui/card';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { CompanyFitScoreVerdict } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -119,7 +120,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
   );
 
   const shell = (children: ReactNode, title: ReactNode, short: boolean) => (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="overflow-hidden">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
         <div className="flex items-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-lg bg-accent-weak text-accent">
@@ -130,7 +131,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
         {actions(short)}
       </header>
       {children}
-    </section>
+    </Card>
   );
 
   if (!triage) {

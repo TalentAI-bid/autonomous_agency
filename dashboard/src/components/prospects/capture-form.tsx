@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { CardSection, Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
@@ -127,7 +128,7 @@ export function CaptureForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <FormCard title="Who is it" hint="Where you found them and how to reach them.">
+      <CardSection title="Who is it" description="Where you found them and how to reach them." bodyClassName="flex flex-col gap-4">
         <Field id="sourceType" label="Source" required>
           <Select
             id="sourceType"
@@ -180,9 +181,9 @@ export function CaptureForm() {
             <Input id="whatsapp" value={form.whatsapp ?? ''} onChange={(e) => update('whatsapp', e.target.value)} />
           </Field>
         </div>
-      </FormCard>
+      </CardSection>
 
-      <FormCard title="Role" hint="Helps agents pitch the right angle.">
+      <CardSection title="Role" description="Helps agents pitch the right angle." bodyClassName="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field id="company" label="Company">
             <Input id="company" value={form.company ?? ''} onChange={(e) => update('company', e.target.value)} />
@@ -194,9 +195,9 @@ export function CaptureForm() {
         <Field id="location" label="Location">
           <Input id="location" value={form.location ?? ''} onChange={(e) => update('location', e.target.value)} />
         </Field>
-      </FormCard>
+      </CardSection>
 
-      <FormCard title="Context" hint="Anything you want the timeline to start with.">
+      <CardSection title="Context" description="Anything you want the timeline to start with." bodyClassName="flex flex-col gap-4">
         <Field id="tags" label="Tags" hint="Comma-separated.">
           <Input
             id="tags"
@@ -223,9 +224,9 @@ export function CaptureForm() {
             placeholder="Met at FintechCon — they mentioned hiring 4 devops in Q2."
           />
         </Field>
-      </FormCard>
+      </CardSection>
 
-      <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-bg-panel px-5 py-3.5 shadow-sm">
+      <Card className="flex items-center justify-between gap-3 px-5 py-3.5">
         <span className="text-xs text-ink-3">
           {rateLimited ? 'Daily capture limit reached. Try again tomorrow.' : <><span className="text-down">*</span> Required</>}
         </span>
@@ -237,20 +238,8 @@ export function CaptureForm() {
             {submitting ? 'Adding…' : 'Add to pipeline'}
           </Button>
         </div>
-      </div>
+      </Card>
     </form>
-  );
-}
-
-function FormCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
-      <header className="border-b border-line px-5 py-3.5">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {hint && <p className="m-0 mt-0.5 text-xs text-ink-3">{hint}</p>}
-      </header>
-      <div className="flex flex-col gap-4 p-5">{children}</div>
-    </section>
   );
 }
 

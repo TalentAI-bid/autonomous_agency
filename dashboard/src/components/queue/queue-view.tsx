@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import { ChevronDown, Info, Loader2, RefreshCw } from 'lucide-react';
 import { useQueue, useRefreshQueue } from '@/hooks/use-queue';
 import { useAgents } from '@/hooks/use-agents';
@@ -156,7 +157,7 @@ export function QueueView({ masterAgentId, showGreeting: page = false }: QueueVi
       {toolbar}
       {refreshBanner}
 
-      <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <Card as="section">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
           <div>
             <h2 className="m-0 text-body font-semibold text-ink">Waiting for your approval</h2>
@@ -198,7 +199,7 @@ export function QueueView({ masterAgentId, showGreeting: page = false }: QueueVi
             );
           })}
         </div>
-      </section>
+      </Card>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { CardSection } from '@/components/ui/card';
 import { useState, useEffect } from 'react';
 import { useCompanyProfile, useUpdateCompanyProfile } from '@/hooks/use-company-profile';
 import { Input } from '@/components/ui/input';
@@ -11,7 +12,7 @@ import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { Building2, Target, TrendingUp, Award, Send, Loader2, Save, Sparkles, X, type LucideIcon } from 'lucide-react';
+import { Building2, Target, TrendingUp, Award, Send, Loader2, Save, Sparkles, X } from 'lucide-react';
 import { CopilotPanel } from '@/components/copilot/copilot-panel';
 import type { CompanyProfile } from '@/types';
 
@@ -24,33 +25,6 @@ const TONE_CLASS: Record<Tone, string> = {
   warn: 'bg-warn/15 text-warn-fg',
   neutral: 'bg-bg-soft text-ink-2',
 };
-
-function Panel({
-  icon: Icon,
-  title,
-  description,
-  children,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
-      <header className="flex items-center gap-3 border-b border-line px-5 py-3.5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-weak text-accent">
-          <Icon size={15} />
-        </span>
-        <div className="min-w-0">
-          <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-          <p className="mb-0 mt-0.5 text-xs text-ink-3">{description}</p>
-        </div>
-      </header>
-      <div className="space-y-4 p-5">{children}</div>
-    </section>
-  );
-}
 
 function Field({ label, hint, htmlFor, children }: { label: string; hint?: React.ReactNode; htmlFor?: string; children: React.ReactNode }) {
   return (
@@ -201,7 +175,7 @@ export default function CompanyProfilePage() {
 
       <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
 
-      <Panel icon={Building2} title="Company identity" description="Basic information about your company">
+      <CardSection bodyClassName="space-y-4" icon={Building2} title="Company identity" description="Basic information about your company">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Company name *" htmlFor="companyName">
             <Input id="companyName" value={form.companyName ?? ''} onChange={(e) => updateField('companyName', e.target.value)} placeholder="Acme Corp" />
@@ -231,9 +205,9 @@ export default function CompanyProfilePage() {
             <Input id="headquarters" value={form.headquarters ?? ''} onChange={(e) => updateField('headquarters', e.target.value)} placeholder="e.g., Paris, France" />
           </Field>
         </div>
-      </Panel>
+      </CardSection>
 
-      <Panel icon={TrendingUp} title="Sales positioning" description="How you present your company to prospects">
+      <CardSection bodyClassName="space-y-4" icon={TrendingUp} title="Sales positioning" description="How you present your company to prospects">
         <Field
           label="Value proposition *"
           htmlFor="valueProposition"
@@ -274,9 +248,9 @@ export default function CompanyProfilePage() {
             tone="accent"
           />
         </Field>
-      </Panel>
+      </CardSection>
 
-      <Panel icon={Target} title="Ideal customer profile" description="Who your best customers are. Agents use this to find the right prospects.">
+      <CardSection bodyClassName="space-y-4" icon={Target} title="Ideal customer profile" description="Who your best customers are. Agents use this to find the right prospects.">
         <Field label="Target industries" hint="Type and press Enter or comma to add.">
           <TagInput value={form.icp?.targetIndustries ?? []} onChange={(v) => updateIcp('targetIndustries', v)} placeholder="Fintech, Healthcare, E-commerce" tone="accent" />
         </Field>
@@ -319,9 +293,9 @@ export default function CompanyProfilePage() {
             tone="warn"
           />
         </Field>
-      </Panel>
+      </CardSection>
 
-      <Panel icon={Award} title="Social proof" description="Case studies, notable clients and credibility signals">
+      <CardSection bodyClassName="space-y-4" icon={Award} title="Social proof" description="Case studies, notable clients and credibility signals">
         <Field label="Notable clients & case studies" htmlFor="socialProof">
           <Textarea
             id="socialProof"
@@ -331,9 +305,9 @@ export default function CompanyProfilePage() {
             rows={4}
           />
         </Field>
-      </Panel>
+      </CardSection>
 
-      <Panel icon={Send} title="Outreach defaults" description="Default sender identity and call to action for emails">
+      <CardSection bodyClassName="space-y-4" icon={Send} title="Outreach defaults" description="Default sender identity and call to action for emails">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Default sender name" htmlFor="senderName">
             <Input id="senderName" value={form.defaultSenderName ?? ''} onChange={(e) => updateField('defaultSenderName', e.target.value)} placeholder="e.g., John from Acme" />
@@ -348,7 +322,7 @@ export default function CompanyProfilePage() {
             <Input id="cta" value={form.callToAction ?? ''} onChange={(e) => updateField('callToAction', e.target.value)} placeholder="e.g., Book a 15-min call" />
           </Field>
         </div>
-      </Panel>
+      </CardSection>
 
       {/* Save bar */}
       <div className="sticky bottom-0 z-10 -mx-1 flex items-center justify-between gap-3 rounded-2xl border border-line bg-bg-panel/95 px-5 py-3 shadow-md backdrop-blur">

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Cpu, Info } from 'lucide-react';
 import { useAgents, useDeleteAgent, useStartAgent, useStopAgent } from '@/hooks/use-agents';
@@ -63,7 +64,7 @@ export default function AgentsPage() {
           ))}
         </div>
       ) : agents.length === 0 ? (
-        <section className="rounded-2xl border border-line bg-bg-panel p-8 shadow-sm">
+        <Card as="section" className="p-8">
           <span className="grid size-10 place-items-center rounded-full bg-accent-weak text-accent">
             <Cpu size={18} />
           </span>
@@ -74,7 +75,7 @@ export default function AgentsPage() {
           <Button size="lg" asChild variant="brand">
             <Link href="/agents/new">Create agent</Link>
           </Button>
-        </section>
+        </Card>
       ) : (
         <>
           <p className="m-0 flex items-center gap-2 text-body text-ink-3">

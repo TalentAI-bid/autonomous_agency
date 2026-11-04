@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, Clock, Loader2, Pause, XCircle } from 'lucide-react';
 import { useActivityFeed } from '@/hooks/use-activity';
@@ -43,7 +44,7 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
   const activities = data?.data ?? [];
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="overflow-hidden">
       <header className="space-y-3 border-b border-line px-5 py-3.5">
         <div className="flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Activity</h2>
@@ -107,6 +108,6 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
           })}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }

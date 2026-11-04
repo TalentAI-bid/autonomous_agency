@@ -1,6 +1,7 @@
 'use client';
 
 import { useRealtimeStore } from '@/stores/realtime.store';
+import { Card } from '@/components/ui/card';
 import { AgentStatusCard } from './agent-status-card';
 import type { AgentType } from '@/types';
 
@@ -16,7 +17,7 @@ export function AgentMonitor({ masterAgentId: _ }: AgentMonitorProps) {
   const running = AGENT_TYPES.filter((t) => agentStatuses[t]?.status === 'running').length;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="overflow-hidden">
       <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
         <div>
           <h2 className="m-0 text-body font-semibold text-ink">Agent pipeline</h2>
@@ -35,6 +36,6 @@ export function AgentMonitor({ masterAgentId: _ }: AgentMonitorProps) {
           <AgentStatusCard key={type} agentType={type} status={agentStatuses[type]} liveAction={agentLiveActions[type]} />
         ))}
       </div>
-    </section>
+    </Card>
   );
 }

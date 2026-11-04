@@ -1,6 +1,7 @@
 'use client';
 
 import { use, type ReactNode } from 'react';
+import { Card } from '@/components/ui/card';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useCompany } from '@/hooks/use-companies';
 import { useMasterAgent } from '@/hooks/use-agents';
@@ -94,7 +95,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   if (!company) {
     return (
       <div className="mx-auto max-w-[1100px] p-5">
-        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+        <Card as="section" className="p-7">
           <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
             <Building2 size={16} />
           </span>
@@ -103,7 +104,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           <Button asChild variant="brand">
             <Link href={`/agents/${agentId}?tab=companies`}>Back to companies</Link>
           </Button>
-        </section>
+        </Card>
       </div>
     );
   }
@@ -160,7 +161,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       />
 
       {/* Header + overview */}
-      <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <Card as="section" className="overflow-hidden">
         <div className="flex flex-wrap items-start gap-4 p-5">
           <span className={cn('grid size-12 shrink-0 place-items-center rounded-xl text-body font-semibold text-white', avatarTone)}>{initials}</span>
           <div className="min-w-0 flex-1">
@@ -208,7 +209,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             )}
           </Fact>
         </dl>
-      </section>
+      </Card>
 
       {/* Fit score — always rendered (offers a "Score now" button when no verdict yet) */}
       <FitScorePanel companyId={company.id} triage={fitScore} />

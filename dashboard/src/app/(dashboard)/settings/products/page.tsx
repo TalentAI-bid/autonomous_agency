@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct, useSuggestProduct } from '@/hooks/use-products';
 import { useAuthStore } from '@/stores/auth.store';
@@ -219,7 +220,7 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <Card as="section">
         <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
           <div>
             <h2 className="m-0 text-body font-semibold text-ink">Products</h2>
@@ -320,7 +321,7 @@ export default function ProductsPage() {
             })}
           </ul>
         )}
-      </section>
+      </Card>
 
       {count > 0 && (
         <div className="flex flex-wrap items-center gap-3">

@@ -1,6 +1,7 @@
 'use client';
 
 import { Cpu, Pause, Play } from 'lucide-react';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ExportButton } from '@/components/shared/export-button';
 import { QuotaBadge } from '@/components/agents/quota-badge';
@@ -33,7 +34,7 @@ export function AgentHeader({ agent, stats, totalContacts, starting, stopping, o
   const replies = sum(by, ['replied', 'qualified', 'interview_scheduled']);
 
   return (
-    <section className="rounded-2xl border border-line bg-bg-panel p-6 shadow-sm">
+    <Card as="section" className="p-6">
       <div className="flex flex-wrap items-start gap-4">
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-bg-soft text-ink-3">
           <Cpu size={18} />
@@ -90,6 +91,6 @@ export function AgentHeader({ agent, stats, totalContacts, starting, stopping, o
           </div>
         ))}
       </dl>
-    </section>
+    </Card>
   );
 }

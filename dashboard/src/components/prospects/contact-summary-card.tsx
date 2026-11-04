@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Mail, Linkedin, Phone, MessageCircle, Twitter, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -88,7 +89,7 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
   const hasContacts = prospect.email || prospect.linkedinUrl || prospect.phone || prospect.whatsapp || prospect.twitterUrl;
 
   return (
-    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section">
       {/* Identity */}
       <div className="flex items-start gap-3.5 p-5">
         <span className={cn('grid size-12 shrink-0 place-items-center rounded-full text-body font-semibold text-white', tone)}>{initials}</span>
@@ -211,6 +212,6 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </Card>
   );
 }

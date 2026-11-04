@@ -4,8 +4,9 @@ import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardSection } from '@/components/ui/card';
 
-/** White rounded card with a titled header and optional right-hand meta. */
+/** Titled card whose body is a list of rows. Thin wrapper over CardSection. */
 export function HomeSection({
   title,
   meta,
@@ -18,13 +19,9 @@ export function HomeSection({
   className?: string;
 }) {
   return (
-    <section className={cn('overflow-hidden rounded-xl border border-line bg-bg-panel shadow-sm', className)}>
-      <header className="flex h-11 items-center justify-between gap-3 px-4">
-        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {meta && <div className="text-xs text-ink-3">{meta}</div>}
-      </header>
-      <div>{children}</div>
-    </section>
+    <CardSection title={title} meta={meta} layout="rows" className={className}>
+      {children}
+    </CardSection>
   );
 }
 
@@ -81,14 +78,14 @@ export function StatCard({
   muted?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-bg-panel p-4 shadow-sm">
+    <Card className="p-4">
       <div className="text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">{label}</div>
       <div className={cn('mt-2 flex items-baseline gap-1.5 text-[18px] font-semibold leading-none', muted ? 'text-ink-4' : 'text-ink')}>
         <span>{value}</span>
         {tail && <span className={cn('text-[18px] font-semibold', muted ? 'text-ink-4' : 'text-ink')}>{tail}</span>}
       </div>
       {detail && <div className="mt-2.5 text-xs text-ink-3">{detail}</div>}
-    </div>
+    </Card>
   );
 }
 

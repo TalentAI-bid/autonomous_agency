@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -223,7 +224,7 @@ export default function ProspectsPage() {
           ))}
         </div>
       ) : count === 0 ? (
-        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+        <Card as="section" className="p-7">
           <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
             <Users size={16} />
           </span>
@@ -234,7 +235,7 @@ export default function ProspectsPage() {
               <Plus size={14} className="mr-1.5" /> Add prospect
             </Link>
           </Button>
-        </section>
+        </Card>
       ) : (
         <div className="leads-grid">
           {rows.map((p) => {

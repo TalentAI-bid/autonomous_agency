@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { useMailboxSent, useMailboxInbox, useMailboxStats, useMailboxThreads, useMailboxDigest, useBulkAction } from '@/hooks/use-mailbox';
 import { Button } from '@/components/ui/button';
@@ -222,7 +223,7 @@ export default function MailboxPage() {
       )}
 
       {/* Content */}
-      <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <Card as="section" className="overflow-hidden">
         {isLoading ? (
           <div className="space-y-2 p-5">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -374,7 +375,7 @@ export default function MailboxPage() {
             </TableBody>
           </Table>
         )}
-      </section>
+      </Card>
 
       {/* Email Detail Dialog */}
       <EmailDetailDialog

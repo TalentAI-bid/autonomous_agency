@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { BadgeCheck, ChevronRight, MapPin, Search } from 'lucide-react';
@@ -61,7 +62,7 @@ export function ContactsTab({
   const filtering = query.trim() !== '' || status !== 'all';
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="overflow-hidden">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <div className="mr-auto flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Contacts</h2>
@@ -158,6 +159,6 @@ export function ContactsTab({
           </footer>
         </>
       )}
-    </section>
+    </Card>
   );
 }

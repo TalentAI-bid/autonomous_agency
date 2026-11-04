@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useLatestStrategy, useTriggerStrategy } from '@/hooks/use-strategy';
 import { Button } from '@/components/ui/button';
@@ -43,7 +44,7 @@ export function StrategyPanel({ masterAgentId }: StrategyPanelProps) {
   const plan = (strategy?.actionPlan as any)?.plan as string[] | undefined;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="overflow-hidden">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <span className="grid size-7 place-items-center rounded-row bg-accent-weak text-accent-fg">
           <Brain size={14} />
@@ -128,6 +129,6 @@ export function StrategyPanel({ masterAgentId }: StrategyPanelProps) {
           </div>
         )}
       </div>
-    </section>
+    </Card>
   );
 }

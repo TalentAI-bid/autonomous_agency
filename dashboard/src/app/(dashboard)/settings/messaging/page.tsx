@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
+import { CardSection } from '@/components/ui/card';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, FileText, Loader2, Save, Sparkles, UserRound, type LucideIcon } from 'lucide-react';
+import { ArrowUpRight, FileText, Loader2, Save, Sparkles, UserRound } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -23,23 +24,6 @@ const EMPTY: MessagingConfig = {
   pricing_summary: '',
   brand_voice_notes: '',
 };
-
-function Panel({ icon: Icon, title, description, children }: { icon: LucideIcon; title: string; description: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
-      <header className="flex items-center gap-3 border-b border-line px-5 py-3.5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-weak text-accent">
-          <Icon size={15} />
-        </span>
-        <div className="min-w-0">
-          <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-          <p className="mb-0 mt-0.5 text-xs text-ink-3">{description}</p>
-        </div>
-      </header>
-      <div className="space-y-4 p-5">{children}</div>
-    </section>
-  );
-}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -108,7 +92,7 @@ export default function MessagingSettingsPage() {
         </div>
       ) : (
         <>
-          <Panel icon={UserRound} title="Sender identity" description="Who the message comes from. Used as the sender block in every channel.">
+          <CardSection bodyClassName="space-y-4" icon={UserRound} title="Sender identity" description="Who the message comes from. Used as the sender block in every channel.">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Sender name *">
                 <Input value={form.sender_name ?? ''} onChange={(e) => update('sender_name', e.target.value)} placeholder="Hatem Azaiez" />
@@ -123,9 +107,9 @@ export default function MessagingSettingsPage() {
                 <Input value={form.sender_location ?? ''} onChange={(e) => update('sender_location', e.target.value)} placeholder="Vilnius, Lithuania" />
               </Field>
             </div>
-          </Panel>
+          </CardSection>
 
-          <Panel icon={FileText} title="Messaging context" description="What the AI uses to write relevant messages.">
+          <CardSection bodyClassName="space-y-4" icon={FileText} title="Messaging context" description="What the AI uses to write relevant messages.">
             <Field label="Value proposition *" hint="Used in every generated message. Required.">
               <Textarea
                 value={form.value_prop ?? ''}
@@ -165,7 +149,7 @@ export default function MessagingSettingsPage() {
                 rows={2}
               />
             </Field>
-          </Panel>
+          </CardSection>
 
           {savedPreview && (
             <div className="flex items-start gap-2 rounded-lg border border-up/25 bg-up/10 px-3 py-2.5 text-xs text-up">

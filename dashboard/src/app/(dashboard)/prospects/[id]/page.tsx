@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
@@ -60,7 +61,7 @@ export default function ProspectDetailPage() {
         <div className="flex min-w-0 flex-col gap-4">
           <NoteComposer prospectId={prospect.id} />
 
-          <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+          <Card as="section">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
               <h2 className="m-0 text-body font-semibold text-ink">Activity</h2>
               <div className="flex flex-wrap gap-1.5">
@@ -91,7 +92,7 @@ export default function ProspectDetailPage() {
             ) : (
               <TimelineFeed events={timeline?.events ?? []} hasMore={Boolean(timeline?.hasMore)} />
             )}
-          </section>
+          </Card>
         </div>
       </div>
     </div>

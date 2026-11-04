@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { Cpu, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAgentStats, useMasterAgentQuota } from '@/hooks/use-agents';
@@ -66,7 +67,7 @@ export function AgentCard({ agent, busy, onStart, onStop, onDelete }: AgentCardP
   const blurb = agent.mission || agent.description;
 
   return (
-    <article className="group rounded-2xl border border-line bg-bg-panel p-5 shadow-sm">
+    <Card as="article" className="group p-5">
       <div className="flex items-start gap-3">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-bg-soft text-ink-3">
           <Cpu size={15} />
@@ -144,6 +145,6 @@ export function AgentCard({ agent, busy, onStart, onStop, onDelete }: AgentCardP
           <Link href={`/agents/${agent.id}`}>View</Link>
         </Button>
       </div>
-    </article>
+    </Card>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,7 +27,7 @@ export function OnboardingView() {
 
   return (
     <div className="mx-auto max-w-[1100px] p-6">
-      <section className="rounded-2xl border border-line bg-bg-panel p-8 shadow-sm">
+      <Card as="section" className="p-8">
         <span className="grid size-10 place-items-center rounded-full bg-accent-weak text-accent">
           <CheckCircle2 size={18} />
         </span>
@@ -43,7 +44,7 @@ export function OnboardingView() {
           </Button>
           <span className="text-xs text-ink-3">About {minutes} minutes</span>
         </div>
-      </section>
+      </Card>
     </div>
   );
 }

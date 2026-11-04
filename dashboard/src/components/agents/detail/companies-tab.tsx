@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowUpRight, ChevronLeft, ChevronRight, MapPin, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -171,7 +172,7 @@ export function CompaniesTab({
   const { companies, pagination, showOnlyWithData, cursorStack } = state;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+    <Card as="section" className="overflow-hidden">
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <div className="mr-auto flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Companies</h2>
@@ -227,6 +228,6 @@ export function CompaniesTab({
           </Button>
         </footer>
       )}
-    </section>
+    </Card>
   );
 }

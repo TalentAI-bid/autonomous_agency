@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -153,7 +154,7 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
     ? (m.aiRecommendation as unknown as GmapsRecommendation) : null);
 
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-line bg-bg-panel p-5 shadow-sm">
+    <Card as="section" className="flex flex-col gap-4 p-5">
       <div className="flex items-center gap-2.5">
         <span className="grid size-8 place-items-center rounded-lg bg-accent-weak text-accent">
           <MapPin size={15} />
@@ -286,6 +287,6 @@ export function GmapsBusinessCard({ contactId, sourceType, meta }: { contactId?:
           <Tag size={11} /> Detail not fetched yet
         </div>
       )}
-    </section>
+    </Card>
   );
 }

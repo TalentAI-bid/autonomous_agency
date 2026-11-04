@@ -345,7 +345,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
           className="h-9 flex-1 rounded-lg border-line bg-bg-panel text-body focus-visible:ring-accent-weak"
         />
-        <Button type="button" variant="brand" className="h-9 rounded-lg px-3.5" onClick={handleSend} disabled={sendMessage.isPending || !messageText.trim()} aria-label="Send">
+        <Button type="button" variant="brand" onClick={handleSend} disabled={sendMessage.isPending || !messageText.trim()} aria-label="Send">
           <Send size={14} />
         </Button>
       </footer>

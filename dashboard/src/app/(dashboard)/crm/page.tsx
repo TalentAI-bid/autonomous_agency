@@ -94,13 +94,13 @@ export default function CrmPage() {
         <div className="flex flex-wrap items-center gap-2">
           <AddActivityDialog
             trigger={
-              <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-body font-medium">
+              <Button size="sm" type="button" variant="panel">
                 <Activity className="mr-1.5 size-3.5" />
                 Log activity
               </Button>
             }
           />
-          <Button asChild variant="panel" size="dense" className="h-8 rounded-lg px-3 text-body font-medium">
+          <Button size="sm" asChild variant="panel">
             <Link href="/crm/settings">
               <Settings className="mr-1.5 size-3.5" />
               Stages
@@ -126,7 +126,7 @@ export default function CrmPage() {
           <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">
             Stages are the columns your deals move through, like Lead, Qualified and Won. Start with the defaults and rename them later.
           </p>
-          <Button type="button" variant="brand" size="dense" onClick={() => seedStages.mutate()} disabled={seedStages.isPending} className="h-9 rounded-lg px-5 text-body font-semibold">
+          <Button type="button" variant="brand" onClick={() => seedStages.mutate()} disabled={seedStages.isPending}>
             <Sprout className="mr-1.5 size-4" />
             {seedStages.isPending ? 'Creating…' : 'Create default stages'}
           </Button>

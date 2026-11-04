@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
@@ -209,12 +210,11 @@ export function LeadCard({
         ) : (
           <span />
         )}
-        <Link
-          href={href}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-bg-panel px-3 text-xs font-medium text-ink no-underline transition-colors hover:border-accent-mid hover:bg-accent-weak hover:text-accent-fg"
-        >
-          View profile <ArrowRight size={13} />
-        </Link>
+        <Button asChild variant="panel" size="sm">
+          <Link href={href} className="no-underline">
+            View profile <ArrowRight size={13} />
+          </Link>
+        </Button>
       </div>
     </div>
   );

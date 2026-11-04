@@ -38,7 +38,7 @@ export function OnboardingView() {
           {numberWord(gs.remaining)} and your first drafts are waiting here the next morning — nothing sends until you approve them.
         </p>
         <div className="flex items-center gap-4">
-          <Button asChild variant="brand" size="dense" className="h-10 rounded-lg px-5 text-body font-semibold">
+          <Button size="lg" asChild variant="brand">
             <Link href="/get-started">Finish setting up</Link>
           </Button>
           <span className="text-xs text-ink-3">About {minutes} minutes</span>

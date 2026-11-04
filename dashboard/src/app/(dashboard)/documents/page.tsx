@@ -82,7 +82,7 @@ export default function DocumentsPage() {
                 {pendingFiles.map((f, i) => (
                   <div key={i} className="flex items-center justify-between p-2 rounded bg-muted/50 text-sm">
                     <span className="truncate">{f.name}</span>
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-destructive" onClick={() => setPendingFiles((p) => p.filter((_, j) => j !== i))}>
+                    <Button size="xs" variant="ghost" className="text-destructive" onClick={() => setPendingFiles((p) => p.filter((_, j) => j !== i))}>
                       Remove
                     </Button>
                   </div>

@@ -104,13 +104,12 @@ export function QueueView({ masterAgentId, showGreeting: page = false }: QueueVi
       <span className="text-xs text-ink-3">
         {waiting} waiting{handledCount != null ? ` · ${handledCount} handled today` : ''}
       </span>
-      <Button
+      <Button size="sm"
         type="button"
         variant="panel"
-        size="dense"
         disabled
         title={waiting === 0 ? undefined : 'Bulk skip is not available yet'}
-        className="ml-auto h-8 rounded-lg px-3 text-xs font-medium"
+        className="ml-auto"
       >
         {waiting === 0 ? 'Skip all — nothing to skip' : `Skip all (${waiting})`}
       </Button>
@@ -166,7 +165,7 @@ export function QueueView({ masterAgentId, showGreeting: page = false }: QueueVi
               <strong className="font-semibold text-ink-2">{data.etaMinutes}</strong> min
             </p>
           </div>
-          <Button type="button" variant="panel" size="dense" onClick={refresh} disabled={refreshMut.isPending || quotaExhausted} title={refreshTitle} className="h-8 rounded-lg px-3 text-xs">
+          <Button size="sm" type="button" variant="panel" onClick={refresh} disabled={refreshMut.isPending || quotaExhausted} title={refreshTitle}>
             {refreshMut.isPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {refreshLabel}
           </Button>
         </header>

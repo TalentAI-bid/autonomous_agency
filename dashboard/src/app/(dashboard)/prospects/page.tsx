@@ -180,13 +180,13 @@ export default function ProspectsPage() {
         />
 
         <div className="ml-auto flex items-center gap-2">
-          <Button asChild variant="panel" size="dense" className="h-9 rounded-lg px-3.5 text-body font-medium">
+          <Button asChild variant="panel">
             <Link href="/prospects/new">
               <Plus size={14} className="mr-1.5" /> Add prospect
             </Link>
           </Button>
           <ExportButton />
-          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-3.5 text-body font-semibold">
+          <Button asChild variant="brand">
             <Link href="/agents/new">
               <Rocket size={14} className="mr-1.5" /> Deploy agent
             </Link>
@@ -229,7 +229,7 @@ export default function ProspectsPage() {
           </span>
           <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">No prospects match</h2>
           <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">Try clearing the filters, or add a prospect manually.</p>
-          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+          <Button asChild variant="brand">
             <Link href="/prospects/new">
               <Plus size={14} className="mr-1.5" /> Add prospect
             </Link>

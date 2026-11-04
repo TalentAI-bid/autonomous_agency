@@ -283,7 +283,7 @@ export function CopilotPanel({ open, onClose }: CopilotPanelProps) {
             disabled={busy}
             autoFocus
           />
-          <Button type="submit" variant="brand" size="icon" disabled={busy || !input.trim()} className="size-10 shrink-0 rounded-lg" aria-label="Send">
+          <Button type="submit" variant="brand" size="icon" disabled={busy || !input.trim()} className="size-10 shrink-0" aria-label="Send">
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
           </Button>
         </form>

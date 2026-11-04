@@ -180,19 +180,17 @@ export function CompaniesTab({
             {pagination?.hasMore ? '+' : ''}
           </Badge>
         </div>
-        <Button
+        <Button size="sm"
           type="button"
           variant="panel"
-          size="dense"
           onClick={onGmapsEnrich}
           disabled={gmapsPending || companies.length === 0}
           title="Search each company on Google Maps by name and fill in phone, website and a generic email (info@/contact@). Falls back to a Google search when Maps has no match."
-          className="h-8 rounded-lg"
         >
           <MapPin size={13} />
           {gmapsPending ? 'Queuing…' : 'Enrich via Google Maps'}
         </Button>
-        <Button type="button" variant="panel" size="dense" onClick={state.toggleShowOnlyWithData} className="h-8 rounded-lg">
+        <Button size="sm" type="button" variant="panel" onClick={state.toggleShowOnlyWithData}>
           {showOnlyWithData ? 'Show all (incl. unenriched)' : 'Show only with data'}
         </Button>
       </header>
@@ -213,19 +211,17 @@ export function CompaniesTab({
 
       {(cursorStack.length > 1 || pagination?.hasMore) && (
         <footer className="flex items-center justify-between border-t border-line px-5 py-2.5">
-          <Button type="button" variant="panel" size="dense" disabled={cursorStack.length <= 1} onClick={state.goPrevious} className="h-8 rounded-lg">
+          <Button size="sm" type="button" variant="panel" disabled={cursorStack.length <= 1} onClick={state.goPrevious}>
             <ChevronLeft size={13} /> Previous
           </Button>
           <span className="text-xs text-ink-3">Page {cursorStack.length}</span>
-          <Button
+          <Button size="sm"
             type="button"
             variant="panel"
-            size="dense"
             disabled={!pagination?.hasMore || !pagination?.nextCursor}
             onClick={() => {
               if (pagination?.nextCursor) state.goNext(pagination.nextCursor);
             }}
-            className="h-8 rounded-lg"
           >
             Next <ChevronRight size={13} />
           </Button>

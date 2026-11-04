@@ -98,7 +98,7 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
 
   const actions = (short: boolean) => (
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={handleRefetchInfo} disabled={refetchInfo.isPending} title="Re-enqueue the about-page scrape">
+      <Button size="sm" variant="panel" onClick={handleRefetchInfo} disabled={refetchInfo.isPending} title="Re-enqueue the about-page scrape">
         <Download className="mr-1.5 size-3.5" /> {short ? 'Info' : 'Refetch info'}
       </Button>
       <Input
@@ -108,10 +108,10 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
         className="h-8 w-44 text-xs"
         title="Optional: fetch only employees whose title matches this role"
       />
-      <Button variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={handleRefetchTeam} disabled={refetchTeam.isPending} title="Re-enqueue the people-page scrape (optionally filtered by role)">
+      <Button size="sm" variant="panel" onClick={handleRefetchTeam} disabled={refetchTeam.isPending} title="Re-enqueue the people-page scrape (optionally filtered by role)">
         <Users className="mr-1.5 size-3.5" /> {short ? 'Team' : 'Refetch team'}
       </Button>
-      <Button variant="brand" size="dense" className="h-8 rounded-lg px-3 text-xs font-semibold" onClick={handleReScore} disabled={reScore.isPending}>
+      <Button size="sm" variant="brand" onClick={handleReScore} disabled={reScore.isPending}>
         {reScore.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
         {triage ? 'Re-score' : 'Score now'}
       </Button>

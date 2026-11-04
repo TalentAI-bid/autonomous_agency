@@ -44,11 +44,11 @@ export default function ApiSettingsPage() {
                 size="dense"
                 onClick={() => setReveal((r) => !r)}
                 aria-label={reveal ? 'Hide token' : 'Show token'}
-                className="size-9 rounded-lg p-0"
+                className="size-9 p-0"
               >
                 {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
               </Button>
-              <Button type="button" variant="panel" size="dense" onClick={copyToken} disabled={!token} className="h-9 gap-1.5 rounded-lg px-3.5 text-body font-medium">
+              <Button type="button" variant="panel" onClick={copyToken} disabled={!token}>
                 {copied ? <Check size={14} className="text-up" /> : <Copy size={14} />}
                 {copied ? 'Copied' : 'Copy'}
               </Button>

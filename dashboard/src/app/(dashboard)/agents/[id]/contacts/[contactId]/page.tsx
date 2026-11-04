@@ -92,7 +92,7 @@ export default function ContactDetailPage() {
           </span>
           <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">Contact not found</h2>
           <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">It may have been removed, or the link is out of date.</p>
-          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+          <Button asChild variant="brand">
             <Link href={`/agents/${agentId}?tab=contacts`}>Back to contacts</Link>
           </Button>
         </section>

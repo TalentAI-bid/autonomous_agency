@@ -168,7 +168,7 @@ export default function CompaniesPage() {
 
         <div className="ml-auto flex items-center gap-2">
           <ExportButton />
-          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-3.5 text-body font-semibold">
+          <Button asChild variant="brand">
             <Link href="/agents/new">
               <Rocket size={14} className="mr-1.5" /> Deploy agent
             </Link>
@@ -214,7 +214,7 @@ export default function CompaniesPage() {
               : 'Deploy an agent and the companies it discovers will show up here as they are scored.'}
           </p>
           {!search && (
-            <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+            <Button asChild variant="brand">
               <Link href="/agents/new">Deploy agent</Link>
             </Button>
           )}
@@ -262,22 +262,18 @@ export default function CompaniesPage() {
             <span className="font-mono text-ink-2">{count}</span> {count === 1 ? 'company' : 'companies'} on this page
           </span>
           <div className="flex items-center gap-2.5">
-            <Button
+            <Button size="sm"
               type="button"
               variant="panel"
-              size="dense"
-              className="h-8 rounded-lg px-3 text-xs"
               disabled={cursorStack.length <= 1}
               onClick={() => setCursorStack((s) => s.slice(0, -1))}
             >
               ← Previous
             </Button>
             <span className="font-mono text-xs text-ink-3">Page {cursorStack.length}</span>
-            <Button
+            <Button size="sm"
               type="button"
               variant="panel"
-              size="dense"
-              className="h-8 rounded-lg px-3 text-xs"
               disabled={!pagination?.hasMore || !pagination?.nextCursor}
               onClick={() => {
                 if (pagination?.nextCursor) setCursorStack((s) => [...s, pagination.nextCursor!]);

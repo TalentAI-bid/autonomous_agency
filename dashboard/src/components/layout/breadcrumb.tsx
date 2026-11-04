@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { useRouter, usePathname } from 'next/navigation';
 import { ChevronRight, Home, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -80,15 +81,10 @@ export function Breadcrumb({ items, showBack = false, backFallback = '/dashboard
   return (
     <nav className={cn('flex items-center gap-1 text-sm flex-wrap', className)}>
       {showBack && (
-        <button
-          type="button"
-          onClick={handleBack}
-          className="mr-2 inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground hover:bg-accent-weak hover:text-accent-foreground"
-          aria-label="Back"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
+        <Button type="button" variant="panel" size="xs" onClick={handleBack} className="mr-2" aria-label="Back">
+          <ArrowLeft className="size-3.5" />
           Back
-        </button>
+        </Button>
       )}
       <Link href="/dashboard" className="text-muted-foreground hover:text-foreground" aria-label="Dashboard">
         <Home className="w-3.5 h-3.5" />

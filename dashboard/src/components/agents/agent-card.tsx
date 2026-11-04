@@ -128,19 +128,19 @@ export function AgentCard({ agent, busy, onStart, onStop, onDelete }: AgentCardP
 
       <div className="mt-4 flex items-center gap-2">
         {quotaPaused ? (
-          <Button asChild variant="panel" size="dense" className="h-8 rounded-lg px-3.5 text-xs font-medium">
+          <Button size="sm" asChild variant="panel">
             <Link href={`/agents/${agent.id}?tab=settings`}>View limits</Link>
           </Button>
         ) : status === 'running' ? (
-          <Button type="button" variant="panel" size="dense" onClick={onStop} disabled={busy} className="h-8 rounded-lg px-3.5 text-xs font-medium">
+          <Button size="sm" type="button" variant="panel" onClick={onStop} disabled={busy}>
             Pause
           </Button>
         ) : status !== 'awaiting_action_plan' ? (
-          <Button type="button" variant="panel" size="dense" onClick={onStart} disabled={busy} className="h-8 rounded-lg px-3.5 text-xs font-medium">
+          <Button size="sm" type="button" variant="panel" onClick={onStart} disabled={busy}>
             Resume
           </Button>
         ) : null}
-        <Button asChild variant="ghost" size="dense" className="h-8 rounded-lg px-3 text-xs font-medium">
+        <Button size="sm" asChild variant="ghost">
           <Link href={`/agents/${agent.id}`}>View</Link>
         </Button>
       </div>

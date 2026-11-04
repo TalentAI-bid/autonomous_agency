@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   MapPin, Phone, Globe, Navigation, Star, Clock, Utensils, ExternalLink, Tag, Sparkles,
@@ -42,12 +43,9 @@ function Collapsible({ label, html }: { label: string; html: string }) {
   const [open, setOpen] = React.useState(false);
   return (
     <div className={SECTION}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="cursor-pointer self-start rounded-lg border border-line bg-bg-panel px-3 py-1.5 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hover"
-      >
+      <Button type="button" variant="panel" size="sm" onClick={() => setOpen((o) => !o)} className="self-start">
         {open ? `Hide ${label}` : `Show ${label}`}
-      </button>
+      </Button>
       {open && (
         <div
           dir="auto"

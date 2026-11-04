@@ -295,7 +295,7 @@ export default function ProductsPage() {
                   </div>
 
                   <div className="flex shrink-0 items-start gap-1">
-                    <Button type="button" variant="panel" size="dense" onClick={() => openEdit(product)} className="h-7 rounded-lg">
+                    <Button size="dense" type="button" variant="panel" onClick={() => openEdit(product)}>
                       Edit
                     </Button>
                     <button

@@ -55,7 +55,7 @@ export function IcpSegmentationCard({ agentMission, segments }: IcpSegmentationC
               </Badge>
               <p className="mb-0 mt-1.5 text-xs leading-relaxed text-ink-3">{segment.rationale}</p>
             </div>
-            <Button type="button" variant="panel" size="dense" onClick={() => launchSegment(segment)} className="h-8 shrink-0 rounded-lg">
+            <Button size="sm" type="button" variant="panel" onClick={() => launchSegment(segment)} className="shrink-0">
               Create agent
             </Button>
           </li>

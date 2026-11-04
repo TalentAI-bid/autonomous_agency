@@ -62,11 +62,11 @@ export function PipelineProposalCard({ proposal, onApprove, onRequestChanges, is
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <Button type="button" variant="brand" size="dense" onClick={onApprove} disabled={isApproving} className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold">
+        <Button type="button" variant="brand" onClick={onApprove} disabled={isApproving}>
           <Check size={14} strokeWidth={2.5} />
           {isApproving ? 'Launching…' : 'Approve & launch'}
         </Button>
-        <Button type="button" variant="panel" size="dense" onClick={onRequestChanges} className="h-9 rounded-lg px-4 text-body font-medium">
+        <Button type="button" variant="panel" onClick={onRequestChanges}>
           Request changes
         </Button>
         <span className="text-xs text-ink-3">Nothing sends until you approve drafts in Approvals.</span>

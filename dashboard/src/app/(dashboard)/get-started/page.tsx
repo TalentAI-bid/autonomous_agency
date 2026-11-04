@@ -105,20 +105,18 @@ export default function GetStartedPage() {
                       <Button
                         type="button"
                         variant="brand"
-                        size="dense"
                         onClick={() => setCopilotOpen(true)}
-                        className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold"
                       >
                         <Sparkles size={14} /> Set up with AI
                       </Button>
-                      <Button asChild variant="panel" size="dense" className="h-9 rounded-lg px-4 text-body font-medium">
+                      <Button asChild variant="panel">
                         <Link href={s.href}>Configure manually</Link>
                       </Button>
                       <span className="text-xs text-ink-3">Describe your company and the assistant fills in your profile and products.</span>
                     </div>
                   )}
                   {current && s.key !== 'profile' && (
-                    <Button asChild variant="brand" size="dense" className="mt-4 h-9 rounded-lg px-4 text-body font-semibold">
+                    <Button asChild variant="brand" className="mt-4">
                       <Link href={s.href}>{s.cta}</Link>
                     </Button>
                   )}

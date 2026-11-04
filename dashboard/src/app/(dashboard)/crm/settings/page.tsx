@@ -144,15 +144,13 @@ export default function CrmSettingsPage() {
         <Link href="/crm" className="inline-flex items-center gap-1.5 text-body font-medium text-ink-2 no-underline hover:text-accent">
           <ArrowLeft size={14} /> Back to pipeline
         </Link>
-        <Button
+        <Button size="sm"
           type="button"
           variant="brand"
-          size="dense"
           onClick={() => {
             setShowAdd(true);
             setNewPosition((stages?.length ?? 0) + 1);
           }}
-          className="h-8 rounded-lg px-3.5 text-body font-semibold"
         >
           <Plus className="mr-1.5 size-4" /> Add stage
         </Button>
@@ -252,10 +250,10 @@ export default function CrmSettingsPage() {
                     <Input className="w-36" value={editSlug} onChange={(e) => setEditSlug(e.target.value)} aria-label="Slug" />
                     <Input className="w-20" type="number" min={0} value={editPosition} onChange={(e) => setEditPosition(Number(e.target.value))} aria-label="Position" />
                     <div className="ml-auto flex items-center gap-1.5">
-                      <Button type="button" variant="brand" size="dense" onClick={() => handleUpdate(stage.id)} disabled={updateStage.isPending} className="h-8 rounded-lg px-3 text-xs font-semibold">
+                      <Button size="sm" type="button" variant="brand" onClick={() => handleUpdate(stage.id)} disabled={updateStage.isPending}>
                         <Save className="mr-1.5 size-3.5" /> Save
                       </Button>
-                      <Button type="button" variant="panel" size="dense" onClick={() => setEditingId(null)} className="h-8 rounded-lg px-3 text-xs">
+                      <Button size="sm" type="button" variant="panel" onClick={() => setEditingId(null)}>
                         <X className="mr-1.5 size-3.5" /> Cancel
                       </Button>
                     </div>
@@ -301,7 +299,7 @@ export default function CrmSettingsPage() {
                       )}
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
-                      <Button type="button" variant="panel" size="dense" onClick={() => startEdit(stage)} className="h-7 rounded-lg px-3 text-xs">
+                      <Button size="dense" type="button" variant="panel" onClick={() => startEdit(stage)}>
                         Edit
                       </Button>
                       <button

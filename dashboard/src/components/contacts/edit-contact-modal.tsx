@@ -198,11 +198,10 @@ export function EditContactModal({ contact, trigger }: EditContactModalProps) {
                     Pull the correct name &amp; role from the profile, then review it here.
                   </p>
                 </div>
-                <Button
+                <Button size="sm"
                   type="button"
                   variant="panel"
-                  size="dense"
-                  className="h-8 shrink-0 rounded-lg px-3 text-xs font-medium"
+                  className="shrink-0"
                   onClick={handleRescrape}
                   disabled={!linkedinUrl.trim() || rescrape.isPending || polling}
                 >

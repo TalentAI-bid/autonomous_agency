@@ -178,7 +178,7 @@ export default function StudioPage() {
 
   function CopyBtn({ text, label, children }: { text: string; label: string; children: ReactNode }) {
     return (
-      <Button type="button" size="dense" variant="panel" onClick={() => handleCopy(text, label)} className="h-8 rounded-lg">
+      <Button size="sm" type="button" variant="panel" onClick={() => handleCopy(text, label)}>
         {copied === label ? <Check size={13} className="text-up" /> : <Copy size={13} />}
         {children}
       </Button>
@@ -327,7 +327,7 @@ export default function StudioPage() {
               {needsRecap && <p className="m-0 text-xs text-warn-fg">Post-meeting messages need a recap of the conversation.</p>}
             </Section>
 
-            <Button type="button" variant="brand" onClick={handleGenerate} disabled={generate.isPending || needsRecap} className="h-10 w-full rounded-lg">
+            <Button size="lg" type="button" variant="brand" onClick={handleGenerate} disabled={generate.isPending || needsRecap} className="w-full">
               {generate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
               {generate.isPending ? 'Writing…' : result ? 'Generate again' : 'Generate message'}
             </Button>
@@ -413,18 +413,18 @@ export default function StudioPage() {
                   ) : (
                     <CopyBtn text={result.body} label="Message">Copy message</CopyBtn>
                   )}
-                  <Button type="button" size="dense" variant="panel" onClick={handleGenerate} className="h-8 rounded-lg">
+                  <Button size="sm" type="button" variant="panel" onClick={handleGenerate}>
                     <RefreshCw size={13} /> Regenerate
                   </Button>
                   {channel === 'email_cold' && result.subject && (
-                    <Button asChild size="dense" variant="panel" className="h-8 rounded-lg">
+                    <Button size="sm" asChild variant="panel">
                       <a href={`mailto:?subject=${encodeURIComponent(result.subject)}&body=${encodeURIComponent(result.body)}`}>
                         <Mail size={13} /> Open in mail app
                       </a>
                     </Button>
                   )}
                   {ext && (
-                    <Button asChild size="dense" variant="panel" className="h-8 rounded-lg">
+                    <Button size="sm" asChild variant="panel">
                       <a href={ext.href} target="_blank" rel="noopener noreferrer">
                         <ExternalLink size={13} /> {ext.label}
                       </a>

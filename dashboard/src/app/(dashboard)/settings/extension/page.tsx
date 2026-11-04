@@ -179,7 +179,7 @@ export default function ExtensionSettingsPage() {
   const b = BROWSERS[browser];
 
   const download = (
-    <Button asChild={!!downloadHref} variant="brand" disabled={!downloadHref} className="h-10 gap-2 rounded-lg px-5 text-body font-semibold">
+    <Button size="lg" asChild={!!downloadHref} variant="brand" disabled={!downloadHref} className="gap-2">
       {downloadHref ? (
         <a href={downloadHref}>
           <Download size={15} />
@@ -266,7 +266,7 @@ export default function ExtensionSettingsPage() {
                       <div className="mt-0.5 text-xs text-ink-3">{step.sub}</div>
                     </div>
                     {step.copy && (
-                      <Button type="button" variant="panel" size="dense" onClick={() => copy(step.copy!, `${step.copy} copied — paste it in the address bar`)} className="h-7 shrink-0 rounded-lg">
+                      <Button size="dense" type="button" variant="panel" onClick={() => copy(step.copy!, `${step.copy} copied — paste it in the address bar`)} className="shrink-0">
                         <Copy size={12} /> Copy link
                       </Button>
                     )}
@@ -315,7 +315,7 @@ export default function ExtensionSettingsPage() {
                 </div>
               </div>
               <StatusPill tone="up">Healthy</StatusPill>
-              <Button type="button" variant="ghost" size="dense" onClick={() => setConfirmRevoke(true)} disabled={revoke.isPending} className="h-8 rounded-lg text-ink-2">
+              <Button size="sm" type="button" variant="ghost" onClick={() => setConfirmRevoke(true)} disabled={revoke.isPending} className="text-ink-2">
                 Disconnect
               </Button>
             </div>
@@ -342,7 +342,7 @@ export default function ExtensionSettingsPage() {
                 <span>
                   {pending} task{pending === 1 ? '' : 's'} queued. Stopping tells the extension to halt immediately.
                 </span>
-                <Button type="button" variant="panel" size="dense" onClick={() => cancelPending.mutate()} disabled={cancelPending.isPending} className="h-7 shrink-0 rounded-lg">
+                <Button size="dense" type="button" variant="panel" onClick={() => cancelPending.mutate()} disabled={cancelPending.isPending} className="shrink-0">
                   <OctagonX size={12} /> Stop &amp; clear
                 </Button>
               </div>
@@ -385,7 +385,7 @@ export default function ExtensionSettingsPage() {
               title: `${b.label === 'Firefox' ? 'The browser' : b.label} turned it off after an update`,
               sub: `Open ${b.extensionsUrl} and switch Keenpipe back on. Developer-mode extensions are disabled on every ${b.label} update.`,
               action: (
-                <Button type="button" variant="panel" size="dense" onClick={() => copy(b.extensionsUrl, `${b.extensionsUrl} copied — paste it in the address bar`)} className="h-7 rounded-lg">
+                <Button size="dense" type="button" variant="panel" onClick={() => copy(b.extensionsUrl, `${b.extensionsUrl} copied — paste it in the address bar`)}>
                   <Copy size={12} /> Copy {b.extensionsUrl.split('#')[0]}
                 </Button>
               ),
@@ -394,7 +394,7 @@ export default function ExtensionSettingsPage() {
               title: 'LinkedIn signed you out',
               sub: 'Sign in to LinkedIn in the same browser profile. The extension reconnects on its own within a minute.',
               action: (
-                <Button asChild variant="panel" size="dense" className="h-7 rounded-lg">
+                <Button size="dense" asChild variant="panel">
                   <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer">
                     <ExternalLink size={12} /> Open LinkedIn
                   </a>
@@ -405,7 +405,7 @@ export default function ExtensionSettingsPage() {
               title: 'Session not seen for more than a day',
               sub: 'The browser was closed, or the profile changed. Open LinkedIn once; if the line stays amber, reinstall from the download above.',
               action: downloadHref ? (
-                <Button asChild variant="panel" size="dense" className="h-7 rounded-lg">
+                <Button size="dense" asChild variant="panel">
                   <a href={downloadHref}>
                     <Download size={12} /> Reinstall
                   </a>
@@ -416,7 +416,7 @@ export default function ExtensionSettingsPage() {
               title: 'LinkedIn asked for a check',
               sub: 'LinkedIn sometimes asks you to confirm it is you. Do it in the tab; requests pause until then and resume on their own.',
               action: (
-                <Button asChild variant="panel" size="dense" className="h-7 rounded-lg">
+                <Button size="dense" asChild variant="panel">
                   <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer">
                     <ExternalLink size={12} /> Open LinkedIn
                   </a>

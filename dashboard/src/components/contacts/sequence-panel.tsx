@@ -125,22 +125,19 @@ function SequencePanelContent({
         </CardTitle>
         {isActive && !isUnsubscribed && (
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
+            <Button size="dense"
               variant="outline"
               onClick={handleStop}
               disabled={stopMutation.isPending}
-              className="h-7 text-xs"
             >
               {stopMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <XCircle className="w-3 h-3 mr-1" />}
               Stop sequence (got a reply)
             </Button>
-            <Button
-              size="sm"
+            <Button size="dense"
               variant="outline"
               onClick={() => setShowUnsubConfirm(true)}
               disabled={unsubMutation.isPending}
-              className="h-7 text-xs text-down border-down/40 hover:bg-down/10"
+              className="text-down border-down/40 hover:bg-down/10"
             >
               <MailX className="w-3 h-3 mr-1" />
               Unsubscribe

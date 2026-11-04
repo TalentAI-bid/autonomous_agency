@@ -102,7 +102,6 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
                     disabled={startAgent.isPending}
                     onClick={() => startAgent.mutate(masterAgentId)}
                     title="Retry pipeline"
-                    className="rounded-lg"
                   >
                     <RotateCw size={12} /> Retry
                   </Button>
@@ -114,7 +113,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
                   disabled={resolveError.isPending}
                   onClick={() => resolveError.mutate(row.id)}
                   title="Dismiss"
-                  className="rounded-lg text-ink-3"
+                  className="text-ink-3"
                 >
                   <X size={12} /> Dismiss
                 </Button>

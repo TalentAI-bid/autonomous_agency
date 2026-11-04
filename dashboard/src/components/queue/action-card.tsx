@@ -222,17 +222,17 @@ export function ActionCard({
 
           <div className="flex flex-wrap items-center gap-2">
             {action.status === 'pending' && (
-              <Button type="button" variant="brand" size="dense" onClick={handleExecute} disabled={executeMut.isPending} className="h-8 rounded-lg px-3.5 text-xs font-semibold">
+              <Button size="sm" type="button" variant="brand" onClick={handleExecute} disabled={executeMut.isPending}>
                 {executeMut.isPending ? '…' : isResearch ? 'Find decision-makers' : 'Execute'}
               </Button>
             )}
             {action.status === 'in_progress' && (
-              <Button type="button" variant="brand" size="dense" onClick={handleMarkSent} disabled={completeMut.isPending} className="h-8 rounded-lg px-3.5 text-xs font-semibold">
+              <Button size="sm" type="button" variant="brand" onClick={handleMarkSent} disabled={completeMut.isPending}>
                 {isResearch ? 'Mark researched' : 'Mark sent'}
               </Button>
             )}
             {showDraft && action.status === 'pending' && (
-              <Button type="button" variant="panel" size="dense" onClick={() => setEditing(true)} className="h-8 rounded-lg px-3 text-xs">
+              <Button size="sm" type="button" variant="panel" onClick={() => setEditing(true)}>
                 Edit
               </Button>
             )}

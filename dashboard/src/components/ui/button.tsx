@@ -3,29 +3,38 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
+/**
+ * The one button. Pick a variant for emphasis and a size for density; avoid
+ * overriding height, radius or padding through className.
+ *
+ *  brand / default  primary action (violet)      panel     secondary action on a surface
+ *  outline          quiet bordered                ghost     toolbar / icon actions
+ *  destructive      irreversible action           secondary soft grey fill
+ *  ink              high-contrast dark            link      inline text action
+ */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground shadow hover:bg-primary/90',
-        destructive: 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-        outline: 'border border-input bg-transparent shadow-sm hover:bg-accent-weak hover:text-accent-foreground',
-        secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
-        ghost: 'hover:bg-accent-weak hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
-        // Dense app-chrome buttons (replace the old .btn CSS classes)
-        panel: 'border border-line-2 bg-bg-panel text-ink hover:bg-hover hover:border-line-strong',
+        default: 'border border-accent bg-accent font-semibold text-white hover:bg-accent/90',
+        brand: 'border border-accent bg-accent font-semibold text-white hover:bg-accent/90',
+        destructive: 'border border-down bg-down font-semibold text-white hover:bg-down/90',
+        outline: 'border border-line bg-transparent text-ink hover:border-line-strong hover:bg-hover',
+        panel: 'border border-line bg-bg-panel text-ink hover:border-line-strong hover:bg-hover',
+        secondary: 'border border-transparent bg-bg-soft text-ink hover:bg-hover',
+        ghost: 'border border-transparent text-ink-2 hover:bg-hover hover:text-ink',
         ink: 'border border-ink bg-ink text-bg hover:bg-ink/90',
-        brand: 'border border-accent bg-accent text-white hover:bg-accent/90',
+        link: 'text-accent underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-9 px-4 py-2',
-        sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-10 rounded-md px-8',
+        default: 'h-9 px-4 text-body',
+        lg: 'h-10 px-5 text-body',
+        sm: 'h-8 px-3 text-xs',
+        dense: 'h-7 px-3 text-xs',
+        xs: 'h-6 px-2 text-xs',
         icon: 'h-9 w-9',
-        dense: 'h-7 gap-1.5 px-3 text-xs',
-        xs: 'h-6 gap-1.5 px-2 text-xs',
+        iconSm: 'size-7',
       },
     },
     defaultVariants: { variant: 'default', size: 'default' },

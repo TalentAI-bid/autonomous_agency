@@ -206,13 +206,13 @@ export default function MailboxPage() {
       {tab === 'threads' && selectedThreadIds.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent-mid bg-accent-weak px-4 py-2.5">
           <span className="mr-1 text-body font-medium text-accent-fg">{selectedThreadIds.size} selected</span>
-          <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={() => handleBulkAction('archive')} disabled={bulkAction.isPending}>
+          <Button size="sm" type="button" variant="panel" onClick={() => handleBulkAction('archive')} disabled={bulkAction.isPending}>
             <Archive className="mr-1.5 size-3.5" /> Archive
           </Button>
-          <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={() => handleBulkAction('mark_spam')} disabled={bulkAction.isPending}>
+          <Button size="sm" type="button" variant="panel" onClick={() => handleBulkAction('mark_spam')} disabled={bulkAction.isPending}>
             <Ban className="mr-1.5 size-3.5" /> Mark spam
           </Button>
-          <Button type="button" variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={() => handleBulkAction('unsubscribe')} disabled={bulkAction.isPending}>
+          <Button size="sm" type="button" variant="panel" onClick={() => handleBulkAction('unsubscribe')} disabled={bulkAction.isPending}>
             Unsubscribe
           </Button>
           <button type="button" onClick={() => setSelectedThreadIds(new Set())} className="ml-auto text-xs font-medium text-accent-fg hover:underline">

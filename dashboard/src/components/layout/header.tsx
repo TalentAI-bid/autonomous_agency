@@ -81,11 +81,11 @@ export function Header() {
           <kbd className="ml-auto rounded-tag border border-line bg-bg-soft px-1.5 font-mono text-2xs text-ink-3">⌘K</kbd>
         </div>
         {onAgentsList ? (
-          <Button asChild variant="brand" size="dense" className="h-8 rounded-lg px-3.5 text-body font-semibold">
+          <Button size="sm" asChild variant="brand">
             <Link href="/agents/new">New agent</Link>
           </Button>
         ) : hasAgent && (
-          <Button asChild variant="brand" size="dense" className="h-8 rounded-lg px-3.5 text-body font-semibold">
+          <Button size="sm" asChild variant="brand">
             <Link href="/approvals">Open approvals</Link>
           </Button>
         )}

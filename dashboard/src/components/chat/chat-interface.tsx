@@ -134,7 +134,7 @@ export function ChatInterface({ onAgentCreated }: ChatInterfaceProps) {
             <p className="m-0 max-w-[380px] text-xs text-ink-3">
               The conversation request failed. Check that the backend is running and an AI provider key is configured, then try again.
             </p>
-            <Button type="button" variant="brand" size="dense" onClick={retryStart} className="mt-1 h-9 rounded-lg px-4 text-body font-semibold">
+            <Button type="button" variant="brand" onClick={retryStart} className="mt-1">
               Try again
             </Button>
           </>

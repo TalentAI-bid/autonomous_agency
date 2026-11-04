@@ -47,11 +47,11 @@ export function AgentHeader({ agent, stats, totalContacts, starting, stopping, o
         <div className="flex shrink-0 items-center gap-2">
           <ExportButton masterAgentId={agent.id} showFullBatch />
           {status === 'running' ? (
-            <Button type="button" variant="panel" size="dense" onClick={onStop} disabled={stopping} className="h-9 gap-1.5 rounded-lg px-4 text-body font-medium">
+            <Button type="button" variant="panel" onClick={onStop} disabled={stopping}>
               <Pause size={13} /> Pause
             </Button>
           ) : status !== 'awaiting_action_plan' ? (
-            <Button type="button" variant="brand" size="dense" onClick={onStart} disabled={starting} className="h-9 gap-1.5 rounded-lg px-4 text-body font-semibold">
+            <Button type="button" variant="brand" onClick={onStart} disabled={starting}>
               <Play size={13} /> {status === 'idle' ? 'Run' : 'Resume'}
             </Button>
           ) : null}

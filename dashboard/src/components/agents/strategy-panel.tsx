@@ -55,7 +55,7 @@ export function StrategyPanel({ masterAgentId }: StrategyPanelProps) {
         <Link href={`/agents/${masterAgentId}/strategy`} className="inline-flex items-center gap-1 text-xs font-medium text-accent-fg hover:underline">
           <History size={12} /> View history
         </Link>
-        <Button type="button" variant="panel" size="dense" onClick={handleTrigger} disabled={triggerStrategy.isPending} className="h-8 rounded-lg">
+        <Button size="sm" type="button" variant="panel" onClick={handleTrigger} disabled={triggerStrategy.isPending}>
           {triggerStrategy.isPending ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           Run now
         </Button>

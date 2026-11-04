@@ -163,14 +163,12 @@ function SearchQualityLowAlert({
         {choices.map((c) => {
           const isActive = activeChoice === c.id;
           return (
-            <Button
+            <Button size="dense"
               key={c.id}
               type="button"
-              size="sm"
               variant={c.id === 'broaden_auto' ? 'default' : 'secondary'}
               disabled={disabled || (c.id === 'broaden_manual' && !userTerm.trim())}
               onClick={() => handleChoice(c.id, c.id === 'broaden_manual' ? userTerm.trim() : undefined)}
-              className="h-7 text-xs"
             >
               {isActive && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
               {c.label}

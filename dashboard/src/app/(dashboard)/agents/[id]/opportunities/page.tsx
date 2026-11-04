@@ -171,19 +171,19 @@ export default function OpportunitiesPage() {
                         )}
                         <div className="ml-auto flex gap-1.5">
                           {opp.status === 'new' && (
-                            <Button type="button" size="dense" variant="panel" className="h-8 rounded-lg"
+                            <Button size="sm" type="button" variant="panel"
                               onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'researching' })}>
                               Research
                             </Button>
                           )}
                           {(opp.status === 'new' || opp.status === 'researching') && (
-                            <Button type="button" size="dense" variant="brand" className="h-8 rounded-lg"
+                            <Button size="sm" type="button" variant="brand"
                               onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'qualified' })}>
                               Qualify
                             </Button>
                           )}
                           {opp.status !== 'skipped' && opp.status !== 'converted' && (
-                            <Button type="button" size="dense" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                            <Button size="sm" type="button" variant="ghost" className="text-ink-3"
                               onClick={() => updateStatus.mutate({ masterAgentId, opportunityId: opp.id, status: 'skipped' })}>
                               Skip
                             </Button>

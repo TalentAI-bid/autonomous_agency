@@ -309,7 +309,7 @@ export default function TeamSettingsPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2.5">
-                    <Button type="button" variant="panel" size="dense" onClick={() => handleCopyLink(inv.inviteUrl)} className="h-7 rounded-lg">
+                    <Button size="dense" type="button" variant="panel" onClick={() => handleCopyLink(inv.inviteUrl)}>
                       <Copy size={12} /> Copy link
                     </Button>
                     <button

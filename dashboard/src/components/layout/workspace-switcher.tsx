@@ -154,7 +154,7 @@ export function WorkspaceSwitcher() {
                   className="h-8 text-body"
                   autoFocus
                 />
-                <Button type="submit" size="sm" className="h-8 px-2" disabled={createWorkspace.isPending || !newName.trim()}>
+                <Button size="sm" type="submit" disabled={createWorkspace.isPending || !newName.trim()}>
                   {createWorkspace.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 </Button>
               </form>

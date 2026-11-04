@@ -44,7 +44,7 @@ export function ReplyDetectionBanner() {
         <strong className="font-semibold">Reply detection is off</strong> — replies to anything you send today will not reach your Inbox.
         Nothing else is affected.
       </p>
-      <Button asChild variant="panel" size="dense" className="h-7 rounded-md border-warn/40 px-3 text-xs font-medium text-warn-fg">
+      <Button size="dense" asChild variant="panel" className="border-warn/40 text-warn-fg">
         <Link href="/settings/email">Connect reply detection</Link>
       </Button>
       <button type="button" onClick={dismiss} className="rounded-md px-1.5 py-1 text-xs font-medium hover:bg-warn/10">
@@ -67,7 +67,7 @@ export function NoAgentCard() {
       <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">
         Approvals appear here once your first agent has run — the drafts are ready the next morning, and nothing sends until you approve them.
       </p>
-      <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+      <Button asChild variant="brand">
         <Link href={onlyAgentLeft ? '/agents/new' : '/get-started'}>{onlyAgentLeft ? 'Create agent' : 'Finish setting up'}</Link>
       </Button>
     </section>
@@ -98,11 +98,9 @@ export function ClearedCard({ summary, quotaText, exhausted, pending, remaining,
         <Button
           type="button"
           variant="brand"
-          size="dense"
           onClick={onRefresh}
           disabled={pending || exhausted}
           title={title}
-          className="h-9 rounded-lg px-5 text-body font-semibold"
         >
           {pending ? 'Refreshing…' : exhausted ? 'Limit reached' : 'Refresh now'}
         </Button>

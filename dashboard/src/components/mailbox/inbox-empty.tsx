@@ -79,7 +79,7 @@ export function InboxEmptyState({ sent }: { sent: number }) {
         <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">{c.title}</h2>
         <p className="mb-5 mt-2 max-w-[470px] text-body leading-relaxed text-ink-3">{c.body}</p>
         {c.cta && (
-          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+          <Button asChild variant="brand">
             <Link href={c.cta.href}>{c.cta.label}</Link>
           </Button>
         )}

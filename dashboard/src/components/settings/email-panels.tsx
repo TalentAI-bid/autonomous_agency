@@ -150,7 +150,7 @@ export function AccountPanel({ account, busy, onToggle, onDisconnect }: AccountP
             onChange={(e) => setTo(e.target.value)}
             className="h-9 w-full max-w-[320px] rounded-lg bg-bg-panel text-body"
           />
-          <Button type="button" variant="panel" size="dense" onClick={sendTest} disabled={testSend.isPending || !to.trim()} className="h-9 rounded-lg px-4 text-body font-medium">
+          <Button type="button" variant="panel" onClick={sendTest} disabled={testSend.isPending || !to.trim()}>
             {testSend.isPending ? 'Sending…' : 'Send test'}
           </Button>
           {result && (

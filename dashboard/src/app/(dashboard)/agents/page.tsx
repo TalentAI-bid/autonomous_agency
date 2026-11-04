@@ -71,7 +71,7 @@ export default function AgentsPage() {
           <p className="mb-6 mt-3 max-w-[520px] text-body leading-relaxed text-ink-3">
             An agent finds leads, scores them and drafts messages. Nothing sends until you approve it in Approvals.
           </p>
-          <Button asChild variant="brand" size="dense" className="h-10 rounded-lg px-5 text-body font-semibold">
+          <Button size="lg" asChild variant="brand">
             <Link href="/agents/new">Create agent</Link>
           </Button>
         </section>

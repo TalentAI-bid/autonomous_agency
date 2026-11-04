@@ -410,14 +410,10 @@ function DraftPreview({ result, picked, onPick, onChangeDraft }: DraftPreviewPro
             <p className="text-xs text-muted-foreground">
               No existing contact matches <strong>{draft.contactName}</strong>.
             </p>
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-xs font-medium hover:bg-accent-weak hover:text-accent-foreground"
-            >
-              <UserPlus className="h-3 w-3" />
+            <Button type="button" variant="panel" size="sm" onClick={() => setCreating(true)}>
+              <UserPlus className="size-3" />
               Create contact &ldquo;{draft.contactName}&rdquo;
-            </button>
+            </Button>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">

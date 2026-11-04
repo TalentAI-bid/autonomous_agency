@@ -100,7 +100,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           </span>
           <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">Company not found</h2>
           <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">It may have been removed, or the link is out of date.</p>
-          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+          <Button asChild variant="brand">
             <Link href={`/agents/${agentId}?tab=companies`}>Back to companies</Link>
           </Button>
         </section>
@@ -181,7 +181,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
           {company.linkedinUrl && (
-            <Button asChild variant="panel" size="dense" className="h-8 shrink-0 rounded-lg px-3 text-xs font-medium">
+            <Button size="sm" asChild variant="panel" className="shrink-0">
               <a href={company.linkedinUrl} target="_blank" rel="noopener noreferrer">
                 <Linkedin className="mr-1.5 size-3.5" /> LinkedIn
               </a>
@@ -245,10 +245,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                       size="compact"
                     />
                     {!contact.email && (
-                      <Button
+                      <Button size="xs"
                         variant="ghost"
-                        size="sm"
-                        className="h-6 gap-1 px-2 text-xs text-ink-3"
+                        className="gap-1 text-ink-3"
                         disabled={pending}
                         onClick={() => handleFindEmail(contact.id)}
                         title="Auto-find email via patterns + Reacher"
@@ -275,12 +274,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   <EditContactModal
                     contact={contact}
                     trigger={
-                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit name / role">
+                      <Button variant="ghost" size="iconSm" title="Edit name / role">
                         <Pencil className="size-3.5" />
                       </Button>
                     }
                   />
-                  <Button asChild variant="ghost" size="icon" className="h-7 w-7" title="Open contact">
+                  <Button asChild variant="ghost" size="iconSm" title="Open contact">
                     <Link href={`/agents/${agentId}/contacts/${contact.id}`}>
                       <ExternalLink className="size-3.5" />
                     </Link>
@@ -297,7 +296,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               companyId={companyId}
               companyName={company.name}
               trigger={
-                <Button variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs font-medium">
+                <Button size="sm" variant="panel">
                   <Plus className="mr-1.5 size-3.5" /> Add the first person
                 </Button>
               }

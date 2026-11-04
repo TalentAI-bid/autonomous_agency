@@ -30,7 +30,7 @@ export function HomeSection({
 
 export function HomeAction({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Button asChild variant="panel" size="dense" className="h-8 shrink-0 rounded-lg px-3.5 text-body font-medium">
+    <Button size="sm" asChild variant="panel" className="shrink-0">
       <Link href={href}>{children}</Link>
     </Button>
   );

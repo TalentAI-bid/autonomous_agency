@@ -130,13 +130,13 @@ function SendingCard() {
 
   const connectButtons = (
     <>
-      <Button type="button" variant="brand" size="dense" onClick={() => setPreset('google')} className="h-9 rounded-lg px-4 text-body font-semibold">
+      <Button type="button" variant="brand" onClick={() => setPreset('google')}>
         Connect Google
       </Button>
-      <Button type="button" variant="panel" size="dense" onClick={() => setPreset('microsoft')} className="h-9 rounded-lg px-4 text-body font-medium">
+      <Button type="button" variant="panel" onClick={() => setPreset('microsoft')}>
         Connect Microsoft
       </Button>
-      <Button type="button" variant="ghost" size="dense" onClick={() => setPreset('smtp')} className="h-9 rounded-lg px-3 text-body font-medium">
+      <Button type="button" variant="ghost" onClick={() => setPreset('smtp')}>
         Other (SMTP)
       </Button>
     </>
@@ -351,10 +351,10 @@ function ReplyDetectionCard() {
           body="Reply detection watches the inbox you send from and matches each answer to the message that caused it. Until it is connected: your reply rate reads —, the Inbox stays empty, Reports stay at zero, and no deal ever moves on its own."
           note="Read-only. It reads replies to messages Keenpipe sent, nothing else."
         >
-          <Button type="button" variant="brand" size="dense" onClick={() => setAdding(true)} className="h-9 rounded-lg px-4 text-body font-semibold">
+          <Button type="button" variant="brand" onClick={() => setAdding(true)}>
             Connect reply detection
           </Button>
-          <Button type="button" variant="ghost" size="dense" onClick={() => setExplain((v) => !v)} aria-expanded={explain} className="h-9 rounded-lg px-3 text-body font-medium">
+          <Button type="button" variant="ghost" onClick={() => setExplain((v) => !v)} aria-expanded={explain}>
             What it reads
           </Button>
         </EmptyBlock>
@@ -373,7 +373,7 @@ function ReplyDetectionCard() {
           ))}
           <UnlocksNote />
           <div className="flex items-center gap-2">
-            <Button type="button" variant="panel" size="dense" onClick={() => setAdding(true)} className="h-8 rounded-lg px-3 text-xs font-medium">
+            <Button size="sm" type="button" variant="panel" onClick={() => setAdding(true)}>
               Add another inbox
             </Button>
           </div>

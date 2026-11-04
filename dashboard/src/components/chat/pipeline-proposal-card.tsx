@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Check, Clock } from 'lucide-react';
 import { PipelineStepsCard } from '@/components/agents/pipeline-steps-card';
 import type { PipelineProposalData } from '@/types/chat';
@@ -13,7 +14,7 @@ interface PipelineProposalCardProps {
 }
 
 const Chip = ({ children }: { children: React.ReactNode }) => (
-  <span className="rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2">{children}</span>
+  <Badge variant="soft">{children}</Badge>
 );
 
 export function PipelineProposalCard({ proposal, onApprove, onRequestChanges, isApproving }: PipelineProposalCardProps) {

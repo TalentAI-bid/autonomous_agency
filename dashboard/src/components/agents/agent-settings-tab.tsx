@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { FileSpreadsheet, Upload } from 'lucide-react';
 import { Field, Panel } from '@/components/settings/settings-ui';
@@ -79,9 +80,9 @@ export function AgentSettingsTab({ agent }: { agent: MasterAgent }) {
             lookups run in batches of 20 every ~2h (free plan: 200 Maps searches/day), so verification spans hours or days; LinkedIn runs in parallel.
           </p>
           {verificationCount > 0 && (
-            <div className="inline-flex items-center gap-2 rounded-md bg-accent-weak px-2.5 py-1 text-xs font-medium text-accent-fg">
+            <Badge variant="accent" className="w-fit">
               <FileSpreadsheet size={13} /> Current list: {verificationCount} companies
-            </div>
+            </Badge>
           )}
           <label
             htmlFor="verification-file"

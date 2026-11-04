@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import {
   MapPin, Phone, Globe, Navigation, Star, Clock, Utensils, ExternalLink, Tag, Sparkles,
 } from 'lucide-react';
@@ -23,8 +24,9 @@ const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const LABEL = 'mb-1.5 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4';
 
 function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={cn('inline-flex items-center rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2', className)}>{children}</span>;
+  return <Badge className={className}>{children}</Badge>;
 }
+
 const ROW = 'flex items-center gap-2 text-xs text-ink-2 no-underline transition-colors hover:text-accent';
 const SECTION = 'flex flex-col gap-1.5';
 

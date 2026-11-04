@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Check, FileText, Sparkles } from 'lucide-react';
@@ -57,10 +58,10 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
         {files && files.length > 0 && (
           <div className={cn('flex flex-wrap gap-1.5', isUser && 'justify-end')}>
             {files.map((f, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg-panel px-2 py-1 text-xs text-ink-2">
+              <Badge key={i} variant="outline" className="bg-bg-panel font-normal">
                 <FileText size={12} className="text-ink-3" />
                 {f.fileName}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
@@ -112,9 +113,9 @@ export function ChatBubble({ message, isStreaming, onApprove, onRequestChanges, 
         )}
 
         {message.type === 'pipeline_approved' && (
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-up/10 px-2.5 py-1 text-xs font-medium text-up">
+          <Badge variant="up">
             <Check size={12} strokeWidth={2.5} /> Pipeline launched successfully
-          </span>
+          </Badge>
         )}
       </div>
     </div>

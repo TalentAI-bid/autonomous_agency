@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, ChevronDown, Info, RotateCw, X } from 'lucide-react';
 import { useAgentErrors, useResolveError, useStartAgent, type PipelineErrorRow } from '@/hooks/use-agents';
@@ -64,7 +65,7 @@ export function IssuesBanner({ masterAgentId }: { masterAgentId: string }) {
         <div className="min-w-0 flex-1">
           <h2 className="m-0 text-body font-semibold text-ink">
             Pipeline issues
-            <span className="ml-2 rounded-tag bg-down/10 px-1.5 font-mono text-2xs leading-[18px] text-down">{rows.length}</span>
+            <Badge variant="down" size="sm" className="ml-2 font-mono">{rows.length}</Badge>
           </h2>
           <p className="mb-0 mt-0.5 text-xs text-ink-3">
             {errorCount > 0 ? 'Something stopped part of the pipeline. Retry once the cause is fixed.' : 'Worth a look, but the pipeline kept going.'}

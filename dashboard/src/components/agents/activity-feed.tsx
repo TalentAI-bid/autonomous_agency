@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, Clock, Loader2, Pause, XCircle } from 'lucide-react';
 import { useActivityFeed } from '@/hooks/use-activity';
 import { cn, formatDate } from '@/lib/utils';
@@ -47,7 +48,7 @@ export function ActivityFeed({ masterAgentId }: ActivityFeedProps) {
         <div className="flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Activity</h2>
           {activities.length > 0 && (
-            <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{activities.length}</span>
+            <Badge variant="muted" size="sm" className="font-mono">{activities.length}</Badge>
           )}
         </div>
         <div className="flex flex-wrap gap-1.5">

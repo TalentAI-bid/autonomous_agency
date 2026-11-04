@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 /** White rounded card with a titled header and optional right-hand meta. */
 export function HomeSection({
@@ -59,26 +60,9 @@ export function StatusPill({
   children: ReactNode;
 }) {
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium',
-        tone === 'warn' && 'bg-warn/15 text-warn-fg',
-        tone === 'muted' && 'bg-bg-soft text-ink-3',
-        tone === 'up' && 'bg-up/10 text-up',
-        tone === 'down' && 'bg-down/10 text-down',
-      )}
-    >
-      <span
-        className={cn(
-          'size-1.5 rounded-full',
-          tone === 'warn' && 'bg-warn',
-          tone === 'muted' && 'bg-ink-4',
-          tone === 'up' && 'bg-up',
-          tone === 'down' && 'bg-down',
-        )}
-      />
+    <Badge variant={tone} dot className="shrink-0">
       {children}
-    </span>
+    </Badge>
   );
 }
 
@@ -108,7 +92,7 @@ export function StatCard({
   );
 }
 
-/** Small rounded label used for tags, skills and categories. */
+/** Small rounded label used for tags, skills and categories. Thin wrapper over Badge. */
 export function Chip({
   children,
   tone = 'soft',
@@ -121,20 +105,9 @@ export function Chip({
   className?: string;
 }) {
   return (
-    <span
-      title={title}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-tag px-2 py-1 text-xs font-medium',
-        tone === 'soft' && 'bg-bg-soft text-ink-2',
-        tone === 'accent' && 'bg-accent-weak text-accent-fg',
-        tone === 'down' && 'bg-down/10 text-down',
-        tone === 'warn' && 'bg-warn/15 text-warn-fg',
-        tone === 'up' && 'bg-up/10 text-up',
-        className,
-      )}
-    >
+    <Badge variant={tone} title={title} className={className}>
       {children}
-    </span>
+    </Badge>
   );
 }
 

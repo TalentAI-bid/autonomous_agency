@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { StatusPill } from '@/components/home/home-parts';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   useEmailAccounts,
@@ -34,20 +35,6 @@ import { cn, formatRelative } from '@/lib/utils';
 /* ─── Shared pieces ─────────────────────────────────────────────────────────── */
 
 type PillTone = 'up' | 'warn';
-
-function StatusPill({ tone, children }: { tone: PillTone; children: React.ReactNode }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium',
-        tone === 'up' ? 'bg-up/10 text-up' : 'bg-warn/10 text-warn-fg',
-      )}
-    >
-      <span className="size-1.5 rounded-full bg-current" />
-      {children}
-    </span>
-  );
-}
 
 function SectionCard({
   title,

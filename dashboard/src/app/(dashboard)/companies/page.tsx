@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { Building2, Search, Rocket, Users } from 'lucide-react';
 import { useCompanies } from '@/hooks/use-companies';
@@ -228,9 +229,9 @@ export default function CompaniesPage() {
               title={c.name}
               badge={
                 c.size ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-tag bg-bg-soft px-2 py-1 text-2xs text-ink-3">
+                  <Badge variant="muted" size="sm">
                     <Users size={11} /> {c.size}
-                  </span>
+                  </Badge>
                 ) : undefined
               }
               contactGlyph={

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { useMailboxSent, useMailboxInbox, useMailboxStats, useMailboxThreads, useMailboxDigest, useBulkAction } from '@/hooks/use-mailbox';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,50 +18,48 @@ import { Mail, Inbox, Send, Search, MessageSquare, Archive, Ban, ExternalLink } 
 import Link from 'next/link';
 import type { MailboxEmail, MailboxThread } from '@/types';
 
-const TAG = 'inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium capitalize';
-
-function Tag({ tone, children, title }: { tone?: string; children: React.ReactNode; title?: string }) {
+function Tag({ tone, children, title }: { tone?: BadgeProps['variant']; children: React.ReactNode; title?: string }) {
   return (
-    <span className={cn(TAG, tone ?? 'bg-bg-soft text-ink-3')} title={title}>
+    <Badge variant={tone ?? 'muted'} className="capitalize" title={title}>
       {children}
-    </span>
+    </Badge>
   );
 }
 
-const CLASSIFICATION_TONE: Record<string, string> = {
-  interested: 'bg-up/10 text-up',
-  inquiry: 'bg-info/10 text-info',
-  application: 'bg-info/10 text-info',
-  partnership: 'bg-accent-weak text-accent-fg',
-  introduction: 'bg-accent-weak text-accent-fg',
-  objection: 'bg-warn/15 text-warn-fg',
-  not_now: 'bg-warn/15 text-warn-fg',
-  out_of_office: 'bg-bg-soft text-ink-3',
-  unsubscribe: 'bg-down/10 text-down',
-  bounce: 'bg-down/10 text-down',
-  spam: 'bg-down/10 text-down',
-  support_request: 'bg-warn/15 text-warn-fg',
+const CLASSIFICATION_TONE: Record<string, BadgeProps['variant']> = {
+  interested: 'up',
+  inquiry: 'info',
+  application: 'info',
+  partnership: 'accent',
+  introduction: 'accent',
+  objection: 'warn',
+  not_now: 'warn',
+  out_of_office: 'muted',
+  unsubscribe: 'down',
+  bounce: 'down',
+  spam: 'down',
+  support_request: 'warn',
 };
 
-const SENT_TONE: Record<string, string> = {
-  sent: 'bg-up/10 text-up',
-  queued: 'bg-info/10 text-info',
-  sending: 'bg-warn/15 text-warn-fg',
-  failed: 'bg-down/10 text-down',
-  cancelled: 'bg-bg-soft text-ink-3',
+const SENT_TONE: Record<string, BadgeProps['variant']> = {
+  sent: 'up',
+  queued: 'info',
+  sending: 'warn',
+  failed: 'down',
+  cancelled: 'muted',
 };
 
-const PRIORITY_TONE: Record<string, string> = {
-  high: 'bg-down/10 text-down',
-  medium: 'bg-warn/15 text-warn-fg',
-  low: 'bg-bg-soft text-ink-3',
+const PRIORITY_TONE: Record<string, BadgeProps['variant']> = {
+  high: 'down',
+  medium: 'warn',
+  low: 'muted',
 };
 
-const THREAD_TONE: Record<string, string> = {
-  active: 'bg-up/10 text-up',
-  needs_action: 'bg-down/10 text-down',
-  waiting: 'bg-info/10 text-info',
-  archived: 'bg-bg-soft text-ink-3',
+const THREAD_TONE: Record<string, BadgeProps['variant']> = {
+  active: 'up',
+  needs_action: 'down',
+  waiting: 'info',
+  archived: 'muted',
 };
 
 const TABS = [
@@ -344,7 +343,7 @@ export default function MailboxPage() {
                       <TableCell>{email.status && <Tag tone={SENT_TONE[email.status]}>{email.status}</Tag>}</TableCell>
                       <TableCell>
                         {email.openedAt ? (
-                          <Tag tone="bg-up/10 text-up" title={formatDate(email.openedAt, 'MMM d, h:mm a')}>
+                          <Tag tone="up" title={formatDate(email.openedAt, 'MMM d, h:mm a')}>
                             Opened {formatRelative(email.openedAt)}
                           </Tag>
                         ) : (

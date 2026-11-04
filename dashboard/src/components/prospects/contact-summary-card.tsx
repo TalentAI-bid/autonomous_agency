@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { Mail, Linkedin, Phone, MessageCircle, Twitter, X, type LucideIcon } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Mail, Linkedin, Phone, MessageCircle, Twitter, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -150,17 +151,9 @@ export function ContactSummaryCard({ prospect }: { prospect: ProspectDetailRespo
               <span className="text-xs text-ink-3">No tags yet</span>
             ) : (
               prospect.customTags.map((t) => (
-                <span key={t} className="inline-flex items-center gap-1 rounded-tag bg-bg-soft py-1 pl-2 pr-1 text-xs text-ink-2">
+                <Badge key={t} variant="soft" className="font-normal" onRemove={() => removeTag(t)} removeLabel={`Remove tag ${t}`}>
                   {t}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(t)}
-                    aria-label={`Remove tag ${t}`}
-                    className="grid size-4 place-items-center rounded-full border-0 bg-transparent text-ink-4 hover:bg-black/10 hover:text-ink"
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
+                </Badge>
               ))
             )}
           </div>

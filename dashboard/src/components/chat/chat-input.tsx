@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useRef, useCallback, type KeyboardEvent, type DragEvent } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Paperclip, ArrowUp, X, FileText } from 'lucide-react';
+import { Paperclip, ArrowUp, FileText } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (content: string, files?: File[]) => void;
@@ -92,18 +93,10 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         {files.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-3">
             {files.map((file, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 rounded-md bg-bg-soft py-1 pl-2 pr-1 text-xs text-ink-2">
+              <Badge key={i} variant="soft" className="font-normal" onRemove={() => removeFile(i)} removeLabel={`Remove ${file.name}`}>
                 <FileText size={12} className="text-ink-3" />
                 <span className="max-w-40 truncate">{file.name}</span>
-                <button
-                  type="button"
-                  onClick={() => removeFile(i)}
-                  aria-label={`Remove ${file.name}`}
-                  className="rounded p-0.5 text-ink-3 hover:bg-hover hover:text-ink"
-                >
-                  <X size={12} />
-                </button>
-              </span>
+              </Badge>
             ))}
           </div>
         )}

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct, useSuggestProduct } from '@/hooks/use-products';
 import { useAuthStore } from '@/stores/auth.store';
 import { Input } from '@/components/ui/input';
@@ -17,7 +18,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Package, Plus, Loader2, Sparkles, X } from 'lucide-react';
+import { Package, Plus, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Product } from '@/types';
 
@@ -262,10 +263,10 @@ export default function ProductsPage() {
                   <div className={cn('min-w-0 flex-1 space-y-3', !product.isActive && 'opacity-70')}>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="text-body font-semibold text-ink">{product.name}</span>
-                      {!product.isActive && <span className="rounded-tag bg-bg-soft px-2 py-0.5 text-2xs font-medium text-ink-3">Inactive</span>}
-                      {product.category && <span className="rounded-tag bg-accent-weak px-2 py-0.5 text-2xs font-medium text-accent-fg">{product.category}</span>}
+                      {!product.isActive && <Badge variant="muted" size="sm">Inactive</Badge>}
+                      {product.category && <Badge variant="accent" size="sm">{product.category}</Badge>}
                       {product.pricingModel && (
-                        <span className="rounded-tag bg-bg-soft px-2 py-0.5 text-2xs capitalize text-ink-2">{product.pricingModel.replace(/_/g, ' ')}</span>
+                        <Badge variant="soft" size="sm" className="capitalize">{product.pricingModel.replace(/_/g, ' ')}</Badge>
                       )}
                     </div>
 
@@ -456,28 +457,13 @@ export default function ProductsPage() {
 
 type Tone = 'accent' | 'warn' | 'neutral';
 
-const TONE_CLASS: Record<Tone, string> = {
-  accent: 'bg-accent-weak text-accent-fg',
-  warn: 'bg-warn/15 text-warn-fg',
-  neutral: 'bg-bg-soft text-ink-2',
-};
+const TONE_VARIANT: Record<Tone, 'accent' | 'warn' | 'soft'> = { accent: 'accent', warn: 'warn', neutral: 'soft' };
 
 function Chip({ children, tone, onRemove }: { children: React.ReactNode; tone: Tone; onRemove?: () => void }) {
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-tag px-2 py-1 text-xs', TONE_CLASS[tone])}>
-      {tone === 'warn' && <span className="size-1.5 rounded-full bg-current opacity-70" />}
+    <Badge variant={TONE_VARIANT[tone]} dot={tone === 'warn'} onRemove={onRemove} removeLabel={`Remove ${String(children)}`} className="font-normal">
       {children}
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={`Remove ${children}`}
-          className="-mr-0.5 grid size-4 place-items-center rounded-full opacity-60 transition hover:bg-black/10 hover:opacity-100"
-        >
-          <X size={11} />
-        </button>
-      )}
-    </span>
+    </Badge>
   );
 }
 

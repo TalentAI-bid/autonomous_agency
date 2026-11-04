@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { AgentMonitor } from '@/components/agents/agent-monitor';
 import { cn, formatDate, getStatusColor } from '@/lib/utils';
 import type { useAgentStats } from '@/hooks/use-agents';
@@ -88,7 +89,7 @@ export function OverviewTab({
           title="Pipeline"
           aside={
             stats?.avgScore != null ? (
-              <span className="rounded-tag bg-bg-soft px-2 py-1 font-mono text-xs text-ink-3">avg score {stats.avgScore}</span>
+              <Badge variant="muted" className="font-mono">avg score {stats.avgScore}</Badge>
             ) : undefined
           }
         >

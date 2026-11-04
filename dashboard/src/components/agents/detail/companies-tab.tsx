@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { ArrowUpRight, ChevronLeft, ChevronRight, MapPin, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FitScoreBadge } from '@/components/companies/fit-score-badge';
@@ -120,10 +121,10 @@ function CompanyRow({ agentId, company }: { agentId: string; company: Company })
           {keyPeople.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {keyPeople.slice(0, 3).map((person, i) => (
-                <span key={i} className="inline-flex items-center gap-1 rounded-full bg-bg-sub px-2.5 py-0.5 text-xs">
+                <Badge key={i} variant="soft" className="font-normal">
                   <span className="font-medium text-ink">{person.name}</span>
                   {person.title && <span className="text-ink-3">· {person.title}</span>}
-                </span>
+                </Badge>
               ))}
               {keyPeople.length > 3 && <span className="px-1 py-0.5 text-xs text-ink-4">+{keyPeople.length - 3} more</span>}
             </div>
@@ -132,9 +133,9 @@ function CompanyRow({ agentId, company }: { agentId: string; company: Company })
           {Array.isArray(company.techStack) && company.techStack.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {company.techStack.slice(0, 5).map((tech, i) => (
-                <span key={i} className="rounded-tag bg-info/10 px-1.5 py-0.5 text-2xs text-info">
+                <Badge key={i} variant="info" size="sm">
                   {tech}
-                </span>
+                </Badge>
               ))}
               {company.techStack.length > 5 && <span className="px-1 py-0.5 text-2xs text-ink-4">+{company.techStack.length - 5}</span>}
             </div>
@@ -174,10 +175,10 @@ export function CompaniesTab({
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <div className="mr-auto flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Companies</h2>
-          <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">
+          <Badge variant="muted" size="sm" className="font-mono">
             {companies.length}
             {pagination?.hasMore ? '+' : ''}
-          </span>
+          </Badge>
         </div>
         <Button
           type="button"

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useMemo, useEffect } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { useAgentRoomMessages, useSendHumanMessage, type AgentMessage } from '@/hooks/use-agent-room';
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { Button } from '@/components/ui/button';
@@ -264,7 +265,7 @@ export function AgentRoom({ masterAgentId }: { masterAgentId: string }) {
       <header className="space-y-3 border-b border-line px-5 py-3.5">
         <div className="flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Agent Room</h2>
-          <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{allMessages.length}</span>
+          <Badge variant="muted" size="sm" className="font-mono">{allMessages.length}</Badge>
           <span className="ml-auto text-xs text-ink-3">Live messages between your agents</span>
         </div>
         <div className="scroll-thin flex items-center gap-1.5 overflow-x-auto">

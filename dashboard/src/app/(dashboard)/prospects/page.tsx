@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Rocket, Plus, Building2, Search, X } from 'lucide-react';
@@ -252,7 +253,7 @@ export default function ProspectsPage() {
                 title={name}
                 badge={
                   p.doNotContact ? (
-                    <span className="rounded-tag bg-warn/15 px-2 py-1 text-2xs font-semibold text-warn-fg">DNC</span>
+                    <Badge variant="warn" size="sm" className="font-semibold">DNC</Badge>
                   ) : undefined
                 }
                 contactGlyph={

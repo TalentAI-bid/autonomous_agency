@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, type ReactNode } from 'react';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import {
   Check,
@@ -345,7 +346,7 @@ export default function StudioPage() {
                 {MESSAGE_TYPES.find((t) => t.id === messageType)?.label} · {TRACKS.find((t) => t.id === track)?.label}
               </p>
             </div>
-            {result && <span className="rounded-md bg-bg-sub px-2 py-0.5 text-2xs font-medium capitalize text-ink-2">{result.track} track</span>}
+            {result && <Badge variant="soft" size="sm" className="capitalize">{result.track} track</Badge>}
           </header>
 
           <div className="p-5">

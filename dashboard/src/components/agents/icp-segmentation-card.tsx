@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Layers, Sparkles } from 'lucide-react';
 
@@ -48,10 +49,10 @@ export function IcpSegmentationCard({ agentMission, segments }: IcpSegmentationC
         {recommended.map((segment) => (
           <li key={segment.name} className="flex items-start justify-between gap-4 px-5 py-3.5">
             <div className="min-w-0">
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-accent-weak px-2 py-0.5 text-xs font-medium text-accent-fg">
+              <Badge variant="accent">
                 <Sparkles size={11} />
                 {segment.name}
-              </span>
+              </Badge>
               <p className="mb-0 mt-1.5 text-xs leading-relaxed text-ink-3">{segment.rationale}</p>
             </div>
             <Button type="button" variant="panel" size="dense" onClick={() => launchSegment(segment)} className="h-8 shrink-0 rounded-lg">

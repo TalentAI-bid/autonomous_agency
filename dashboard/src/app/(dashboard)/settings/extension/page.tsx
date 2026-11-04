@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { StatusPill } from '@/components/home/home-parts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, Copy, Download, ExternalLink, Info, Linkedin, OctagonX, UserPlus,
@@ -96,20 +97,6 @@ function Panel({ title, aside, children, className }: { title: string; aside?: R
       </header>
       {children}
     </section>
-  );
-}
-
-function StatusPill({ tone, children }: { tone: 'up' | 'warn'; children: React.ReactNode }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium',
-        tone === 'up' ? 'bg-up/10 text-up' : 'bg-warn/15 text-warn-fg',
-      )}
-    >
-      <span className="size-1.5 rounded-full bg-current" />
-      {children}
-    </span>
   );
 }
 

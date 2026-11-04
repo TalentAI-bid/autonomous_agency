@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 /** Card with a title strip, used by the list-style agent tabs. */
@@ -21,7 +22,7 @@ export function ListPanel({
     <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
       <header className="flex items-center gap-2 border-b border-line px-5 py-3.5">
         <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
-        {count !== undefined && <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{count}</span>}
+        {count !== undefined && <Badge variant="muted" size="sm" className="font-mono">{count}</Badge>}
       </header>
       {isEmpty ? (
         <p className="m-0 px-5 py-10 text-center text-body text-ink-3">{empty}</p>

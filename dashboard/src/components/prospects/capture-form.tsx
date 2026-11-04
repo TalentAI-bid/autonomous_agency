@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
@@ -206,9 +207,9 @@ export function CaptureForm() {
           {tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {tags.map((t, i) => (
-                <span key={`${t}-${i}`} className="inline-flex items-center rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2">
+                <Badge key={`${t}-${i}`} variant="soft">
                   {t}
-                </span>
+                </Badge>
               ))}
             </div>
           )}

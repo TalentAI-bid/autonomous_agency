@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { useLatestStrategy, useTriggerStrategy } from '@/hooks/use-strategy';
 import { Button } from '@/components/ui/button';
 import { cn, formatDate } from '@/lib/utils';
@@ -94,9 +95,9 @@ export function StrategyPanel({ masterAgentId }: StrategyPanelProps) {
                 <div className={label}>New search queries</div>
                 <div className="flex flex-wrap gap-1.5">
                   {decisions!.search_query_changes.add.map((q: string, i: number) => (
-                    <span key={i} className="rounded-tag bg-accent-weak px-2 py-1 text-xs text-accent-fg">
+                    <Badge key={i} variant="accent">
                       {q}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
               </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   useTeamMembers,
@@ -221,12 +222,12 @@ export default function TeamSettingsPage() {
                         label={`Role for ${m.email}`}
                       />
                     ) : (
-                      <span className="rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2">{ROLE_LABEL[m.role]}</span>
+                      <Badge variant="soft">{ROLE_LABEL[m.role]}</Badge>
                     )}
                     {isLastOwner ? (
-                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-tag bg-bg-soft px-2 py-1 text-2xs text-ink-3">
-                        <span className="size-1.5 rounded-full bg-ink-4" /> Only owner — cannot change
-                      </span>
+                      <Badge variant="muted" size="sm" dot>
+                        Only owner — cannot change
+                      </Badge>
                     ) : (
                       canManage && (
                         <button

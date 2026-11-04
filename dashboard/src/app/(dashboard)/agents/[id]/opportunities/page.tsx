@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { useParams } from 'next/navigation';
 import { useOpportunities, useOpportunityStats, useUpdateOpportunityStatus } from '@/hooks/use-opportunities';
 import { Button } from '@/components/ui/button';
@@ -90,7 +91,7 @@ export default function OpportunitiesPage() {
         <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
           <div className="mr-auto flex items-center gap-2">
             <h2 className="m-0 text-body font-semibold text-ink">Opportunities</h2>
-            <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{opportunities.length}</span>
+            <Badge variant="muted" size="sm" className="font-mono">{opportunities.length}</Badge>
           </div>
           <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type" className={selectCls}>
             <option value="">All types</option>
@@ -158,7 +159,7 @@ export default function OpportunitiesPage() {
                       {opp.technologies && opp.technologies.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {opp.technologies.map((t) => (
-                            <span key={t} className="rounded-tag bg-info/10 px-1.5 py-0.5 text-2xs text-info">{t}</span>
+                            <Badge key={t} variant="info" size="sm">{t}</Badge>
                           ))}
                         </div>
                       )}

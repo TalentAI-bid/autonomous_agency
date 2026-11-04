@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import type { QueueAction, QueueContact, QueueCompany, TargetAlternative } from '@/lib/api/queue';
@@ -145,12 +146,12 @@ export function ActionCard({
               <span className={cn('rounded-tag px-2 py-0.5 text-2xs font-semibold', PRIORITY_TONE[action.priority] ?? PRIORITY_TONE.P3)}>
                 {action.priority}
               </span>
-              <span className="rounded-tag bg-bg-soft px-2 py-0.5 text-2xs text-ink-2">{labelInfo.label}</span>
+              <Badge variant="soft" size="sm">{labelInfo.label}</Badge>
               {action.status === 'in_progress' && (
-                <span className="rounded-tag bg-accent-weak px-2 py-0.5 text-2xs font-medium text-accent-fg">In progress</span>
+                <Badge variant="accent" size="sm">In progress</Badge>
               )}
               {action.draftConfidence != null && action.draftConfidence < 50 && (
-                <span className="rounded-tag bg-warn/15 px-2 py-0.5 text-2xs font-medium text-warn-fg">Low context</span>
+                <Badge variant="warn" size="sm">Low context</Badge>
               )}
             </div>
             <div className="mt-1 text-xs text-ink-3">

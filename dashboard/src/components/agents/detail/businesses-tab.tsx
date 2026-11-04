@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { ChevronRight, Phone, Sparkles, Star, Store } from 'lucide-react';
 import { ListPanel } from './list-panel';
 import type { Contact } from '@/types';
@@ -45,12 +46,12 @@ export function BusinessesTab({ agentId, businesses }: { agentId: string; busine
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {hasRec && (
-                  <span className="inline-flex items-center gap-1 rounded-md bg-accent-weak px-2 py-0.5 text-2xs font-medium text-accent-fg">
+                  <Badge variant="accent" size="sm">
                     <Sparkles size={10} /> AI
-                  </span>
+                  </Badge>
                 )}
-                {menuLink && <span className="rounded-md bg-bg-sub px-2 py-0.5 text-2xs font-medium text-ink-2">Menu</span>}
-                <span className="rounded-md bg-bg-sub px-2 py-0.5 text-2xs font-medium capitalize text-ink-2">{b.status}</span>
+                {menuLink && <Badge variant="soft" size="sm">Menu</Badge>}
+                <Badge variant="soft" size="sm" className="capitalize">{b.status}</Badge>
                 <ChevronRight size={14} className="text-ink-4 transition-transform group-hover:translate-x-0.5 group-hover:text-ink-2" />
               </div>
             </Link>

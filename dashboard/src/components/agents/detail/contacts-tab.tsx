@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { BadgeCheck, ChevronRight, MapPin, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -64,7 +65,7 @@ export function ContactsTab({
       <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <div className="mr-auto flex items-center gap-2">
           <h2 className="m-0 text-body font-semibold text-ink">Contacts</h2>
-          <span className="rounded-tag bg-bg-soft px-1.5 font-mono text-2xs leading-[18px] text-ink-3">{totalContacts}</span>
+          <Badge variant="muted" size="sm" className="font-mono">{totalContacts}</Badge>
         </div>
         {contacts.length > 0 && (
           <>

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Info, Inbox, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -153,10 +154,9 @@ export function AccountPanel({ account, busy, onToggle, onDisconnect }: AccountP
             {testSend.isPending ? 'Sending…' : 'Send test'}
           </Button>
           {result && (
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-up/10 px-2 py-1 text-xs font-medium text-up">
-              <span className="size-1.5 rounded-full bg-current" />
+            <Badge variant="up" dot>
               Sent · {formatDate(result.at, 'HH:mm')} · {(result.ms / 1000).toFixed(1)} s
-            </span>
+            </Badge>
           )}
         </div>
         <p className="mb-0 mt-2 text-xs text-ink-3">Sends one real email from {account.fromEmail} to the address above.</p>

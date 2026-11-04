@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Linkedin, ArrowRight, Briefcase } from 'lucide-react';
@@ -39,18 +40,14 @@ export interface LeadCardProps {
   isNew?: boolean;
 }
 
-const tagClass: Record<NonNullable<LeadTag['tone']>, string> = {
-  default: 'bg-bg-soft text-ink-2',
-  up: 'bg-accent-weak text-accent-fg',
-  warn: 'bg-warn/15 text-warn-fg',
+const TAG_VARIANT: Record<NonNullable<LeadTag['tone']>, 'soft' | 'accent' | 'warn'> = {
+  default: 'soft',
+  up: 'accent',
+  warn: 'warn',
 };
 
 function TagChip({ tag }: { tag: LeadTag }) {
-  return (
-    <span className={cn('inline-flex items-center whitespace-nowrap rounded-tag px-2 py-1 text-xs font-medium', tagClass[tag.tone ?? 'default'])}>
-      {tag.label}
-    </span>
-  );
+  return <Badge variant={TAG_VARIANT[tag.tone ?? 'default']}>{tag.label}</Badge>;
 }
 
 const CARD_BASE =

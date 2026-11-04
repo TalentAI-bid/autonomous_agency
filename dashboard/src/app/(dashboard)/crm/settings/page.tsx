@@ -1,8 +1,10 @@
 'use client';
 
 import * as React from 'react';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useCrmStages, useCreateStage, useUpdateStage, useDeleteStage, useFollowupCadence, useUpdateFollowupCadence } from '@/hooks/use-crm';
 import { Button } from '@/components/ui/button';
+import { ColorField } from '@/components/ui/color-field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,6 +22,7 @@ const CADENCE_LABELS: Record<CadenceStrategy, string> = {
 };
 
 export default function CrmSettingsPage() {
+  const confirm = useConfirm();
   const { data: stages, isLoading } = useCrmStages();
   const createStage = useCreateStage();
   const updateStage = useUpdateStage();
@@ -113,7 +116,12 @@ export default function CrmSettingsPage() {
   }
 
   async function handleDelete(stage: CrmStage) {
-    if (!confirm(`Delete the "${stage.name}" stage? Deals in it may need to be moved first.`)) return;
+    const ok = await confirm({
+      title: `Delete the "${stage.name}" stage?`,
+      description: 'Deals in it may need to be moved first.',
+      confirmLabel: 'Delete stage',
+    });
+    if (!ok) return;
     const id = stage.id;
     try {
       await deleteStage.mutateAsync(id);
@@ -128,7 +136,6 @@ export default function CrmSettingsPage() {
     [stages],
   );
 
-  const colorInput = 'h-9 w-11 shrink-0 cursor-pointer rounded-lg border border-line bg-bg-panel p-1';
 
   return (
     <div className="mx-auto flex max-w-[940px] flex-col gap-4 p-5">
@@ -199,13 +206,14 @@ export default function CrmSettingsPage() {
               <Label>Slug</Label>
               <Input placeholder="auto-generated" value={newSlug} onChange={(e) => setNewSlug(e.target.value)} />
             </div>
-            <div className="space-y-1.5">
-              <Label>Color</Label>
-              <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className={colorInput} />
-            </div>
             <div className="w-20 space-y-1.5">
               <Label>Position</Label>
               <Input type="number" min={0} value={newPosition} onChange={(e) => setNewPosition(Number(e.target.value))} />
+            </div>
+            <div className="w-full space-y-1.5">
+              <Label>Color</Label>
+              <ColorField value={newColor} onChange={setNewColor} />
+              <p className="m-0 text-xs text-ink-3">Used for the stage dot and the column header on the board.</p>
             </div>
             <div className="flex gap-2">
               <Button type="submit" variant="brand" size="sm" disabled={createStage.isPending}>
@@ -239,7 +247,7 @@ export default function CrmSettingsPage() {
               <div key={stage.id} className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
                 {editingId === stage.id ? (
                   <>
-                    <input type="color" value={editColor} onChange={(e) => setEditColor(e.target.value)} className={colorInput} />
+                    <ColorField compact value={editColor} onChange={setEditColor} />
                     <Input className="w-40" value={editName} onChange={(e) => setEditName(e.target.value)} aria-label="Stage name" />
                     <Input className="w-36" value={editSlug} onChange={(e) => setEditSlug(e.target.value)} aria-label="Slug" />
                     <Input className="w-20" type="number" min={0} value={editPosition} onChange={(e) => setEditPosition(Number(e.target.value))} aria-label="Position" />

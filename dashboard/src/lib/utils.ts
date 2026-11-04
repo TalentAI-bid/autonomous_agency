@@ -28,6 +28,17 @@ export function formatRelative(date: string | Date): string {
   return formatDistanceToNow(d, { addSuffix: true });
 }
 
+/** Display text of a research item that may be a string or a {value, citation} object. */
+export function citedText(item: unknown): string {
+  if (item == null) return '';
+  if (typeof item === 'string') return item;
+  if (typeof item === 'object') {
+    const o = item as { value?: unknown; claim?: unknown; name?: unknown };
+    return String(o.value ?? o.claim ?? o.name ?? '');
+  }
+  return String(item);
+}
+
 export function formatNumber(n: number): string {
   return new Intl.NumberFormat().format(n);
 }

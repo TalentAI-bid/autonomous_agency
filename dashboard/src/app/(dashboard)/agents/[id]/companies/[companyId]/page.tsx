@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, type ReactNode } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useCompany } from '@/hooks/use-companies';
 import { useMasterAgent } from '@/hooks/use-agents';
@@ -9,12 +9,12 @@ import { EmailEditor } from '@/components/contacts/email-editor';
 import { EditContactModal } from '@/components/contacts/edit-contact-modal';
 import { AddPersonModal } from '@/components/contacts/add-person-modal';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { HomeSection, Chip, SectionTitle } from '@/components/home/home-parts';
+import { cn, citedText } from '@/lib/utils';
 import {
-  Globe, Building2, Users, Cpu, DollarSign,
+  Globe, Building2, Users, Cpu,
   MapPin, Calendar, Briefcase, Heart, Newspaper, UserCircle,
   Mail, ExternalLink, Search, Linkedin,
   AlertTriangle, TrendingDown, FileText, Brain, ShieldAlert,
@@ -24,6 +24,21 @@ import Link from 'next/link';
 import type { CompanyDeepData, CompanyFitScoreVerdict, PainPoint } from '@/types';
 import { FitScorePanel } from '@/components/companies/fit-score-panel';
 import { GmapsBusinessCard } from '@/components/prospects/gmaps-business-card';
+
+const AVATAR_TONES = ['bg-accent', 'bg-ink-2', 'bg-up', 'bg-info'];
+
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="m-0 px-4 pb-4 text-body text-ink-3">{children}</p>;
+}
+
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="px-4 py-3">
+      <dt className="text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">{label}</dt>
+      <dd className="m-0 mt-1 text-body font-medium text-ink">{children}</dd>
+    </div>
+  );
+}
 
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string; companyId: string }> }) {
   // Route is /agents/[id]/companies/[companyId] — `id` is the agent, `companyId` is the company.
@@ -65,10 +80,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-48" />)}
+      <div className="mx-auto flex max-w-[1100px] flex-col gap-4 p-5" aria-hidden>
+        <Skeleton className="h-5 w-72" />
+        <Skeleton className="h-[170px] w-full rounded-2xl" />
+        <Skeleton className="h-[120px] w-full rounded-2xl" />
+        <div className="grid gap-4 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)}
         </div>
       </div>
     );
@@ -76,9 +93,17 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
   if (!company) {
     return (
-      <div className="text-center py-16 text-muted-foreground">
-        <Building2 className="w-8 h-8 mx-auto mb-3" />
-        <p className="font-medium">Company not found</p>
+      <div className="mx-auto max-w-[1100px] p-5">
+        <section className="rounded-2xl border border-line bg-bg-panel p-7 shadow-sm">
+          <span className="grid size-9 place-items-center rounded-full bg-accent-weak text-accent">
+            <Building2 size={16} />
+          </span>
+          <h2 className="mb-0 mt-4 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">Company not found</h2>
+          <p className="mb-5 mt-2 max-w-[460px] text-body leading-relaxed text-ink-3">It may have been removed, or the link is out of date.</p>
+          <Button asChild variant="brand" size="dense" className="h-9 rounded-lg px-5 text-body font-semibold">
+            <Link href={`/agents/${agentId}?tab=companies`}>Back to companies</Link>
+          </Button>
+        </section>
       </div>
     );
   }
@@ -92,13 +117,13 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
   const painPointIcon = (type: string) => {
     switch (type) {
-      case 'no_website': return <Globe className="w-3 h-3" />;
-      case 'broken_website': return <AlertTriangle className="w-3 h-3" />;
-      case 'poor_seo': return <TrendingDown className="w-3 h-3" />;
-      case 'thin_content': return <FileText className="w-3 h-3" />;
-      case 'hiring_engineers': return <Search className="w-3 h-3" />;
-      case 'llm_detected': return <Brain className="w-3 h-3" />;
-      default: return <ShieldAlert className="w-3 h-3" />;
+      case 'no_website': return <Globe className="size-3" />;
+      case 'broken_website': return <AlertTriangle className="size-3" />;
+      case 'poor_seo': return <TrendingDown className="size-3" />;
+      case 'thin_content': return <FileText className="size-3" />;
+      case 'hiring_engineers': return <Search className="size-3" />;
+      case 'llm_detected': return <Brain className="size-3" />;
+      default: return <ShieldAlert className="size-3" />;
     }
   };
 
@@ -114,8 +139,14 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     return String(val);
   };
 
+  const name = company.name ?? 'Company';
+  const avatarTone = AVATAR_TONES[(name.charCodeAt(0) || 0) % AVATAR_TONES.length];
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w.charAt(0)).join('').toUpperCase() || '?';
+
+  const mapsMeta = (company.rawData as { source?: string } | null)?.source === 'gmaps_extension';
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto flex max-w-[1100px] flex-col gap-4 p-5">
       {/* Breadcrumb + smart back */}
       <Breadcrumb
         showBack
@@ -124,430 +155,332 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           { href: '/agents', label: 'Agents' },
           { href: `/agents/${agentId}`, label: agent?.name ?? 'Agent' },
           { href: `/agents/${agentId}?tab=companies`, label: 'Companies' },
-          { label: company.name ?? 'Company' },
+          { label: name },
         ]}
       />
 
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">{company.name}</h1>
-          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-            {company.domain && (
-              <span className="flex items-center gap-1">
-                <Globe className="w-3.5 h-3.5" />
-                <a href={`https://${company.domain}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                  {company.domain}
+      {/* Header + overview */}
+      <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+        <div className="flex flex-wrap items-start gap-4 p-5">
+          <span className={cn('grid size-12 shrink-0 place-items-center rounded-xl text-body font-semibold text-white', avatarTone)}>{initials}</span>
+          <div className="min-w-0 flex-1">
+            <h1 className="m-0 font-display text-[26px] font-normal leading-tight tracking-[-0.01em] text-ink">{name}</h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-body text-ink-3">
+              {company.domain && (
+                <a
+                  href={`https://${company.domain}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-ink-2 no-underline hover:text-accent"
+                >
+                  <Globe size={13} /> {company.domain}
                 </a>
+              )}
+              {company.industry && <Chip>{company.industry}</Chip>}
+              {company.size && <span>{company.size} employees</span>}
+            </div>
+          </div>
+          {company.linkedinUrl && (
+            <Button asChild variant="panel" size="dense" className="h-8 shrink-0 rounded-lg px-3 text-xs font-medium">
+              <a href={company.linkedinUrl} target="_blank" rel="noopener noreferrer">
+                <Linkedin className="mr-1.5 size-3.5" /> LinkedIn
+              </a>
+            </Button>
+          )}
+        </div>
+
+        {company.description && <p className="m-0 px-5 pb-5 text-body leading-relaxed text-ink-2">{company.description}</p>}
+
+        <dl className="m-0 grid grid-cols-2 divide-x divide-y divide-line border-t border-line sm:grid-cols-4 sm:divide-y-0 [&>div:nth-child(odd)]:border-l-0">
+          <Fact label="Funding">{company.funding || '—'}</Fact>
+          <Fact label="Founded">{safeStr(deep.foundedYear) || '—'}</Fact>
+          <Fact label="Headquarters">{safeStr(deep.headquarters) || '—'}</Fact>
+          <Fact label="Website">
+            {company.websiteStatus ? (
+              <span className="capitalize">{company.websiteStatus.replace('_', ' ')}</span>
+            ) : (
+              '—'
+            )}
+            {company.seoScore != null && (
+              <span className={cn('ml-2 font-mono text-xs', company.seoScore >= 70 ? 'text-up' : company.seoScore >= 40 ? 'text-warn-fg' : 'text-down')}>
+                SEO {company.seoScore}/100
               </span>
             )}
-            {company.industry && <Badge variant="secondary">{company.industry}</Badge>}
-            {company.size && <span>{company.size} employees</span>}
-          </div>
-        </div>
-      </div>
+          </Fact>
+        </dl>
+      </section>
 
-      {/* Triage panel — always rendered (offers a "Triage now" button when no verdict yet) */}
+      {/* Fit score — always rendered (offers a "Score now" button when no verdict yet) */}
       <FitScorePanel companyId={company.id} triage={fitScore} />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Basic Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="w-4 h-4" /> Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {company.description && <p className="text-muted-foreground">{company.description}</p>}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <p className="text-muted-foreground">Funding</p>
-                <p className="font-medium">{company.funding || '—'}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Founded</p>
-                <p className="font-medium">{safeStr(deep.foundedYear) || '—'}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Headquarters</p>
-                <p className="font-medium">{safeStr(deep.headquarters) || '—'}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">LinkedIn</p>
-                {company.linkedinUrl ? (
-                  <a href={company.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-info hover:underline font-medium">
-                    View Profile
-                  </a>
-                ) : (
-                  <p className="font-medium">—</p>
-                )}
-              </div>
-              {company.websiteStatus && (
-                <div>
-                  <p className="text-muted-foreground">Website</p>
-                  <p className="font-medium capitalize">{company.websiteStatus.replace('_', ' ')}</p>
+      {/* People / Contacts */}
+      <HomeSection
+        title={<SectionTitle icon={Users}>People</SectionTitle>}
+        meta={
+          <div className="flex items-center gap-3">
+            {companyContacts.length > 0 && <span>{companyContacts.length} {companyContacts.length === 1 ? 'person' : 'people'}</span>}
+            <AddPersonModal masterAgentId={agentId} companyId={companyId} companyName={company.name} />
+          </div>
+        }
+      >
+        {companyContacts.length > 0 ? (
+          companyContacts.map((contact) => {
+            const fullName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown';
+            const pending = findEmail.isPending && findEmail.variables === contact.id;
+            return (
+              <div key={contact.id} className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-bg-soft text-xs font-semibold text-ink-2">
+                  {fullName.charAt(0).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1 basis-56">
+                  <Link href={`/agents/${agentId}/contacts/${contact.id}`} className="text-body font-medium text-ink no-underline hover:text-accent">
+                    {fullName}
+                  </Link>
+                  {contact.title && <p className="m-0 truncate text-xs text-ink-3">{contact.title}</p>}
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <EmailEditor
+                      contactId={contact.id}
+                      currentEmail={contact.email ?? null}
+                      emailVerified={!!contact.emailVerified}
+                      size="compact"
+                    />
+                    {!contact.email && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs text-ink-3"
+                        disabled={pending}
+                        onClick={() => handleFindEmail(contact.id)}
+                        title="Auto-find email via patterns + Reacher"
+                      >
+                        {pending ? <Loader2 className="size-3 animate-spin" /> : <Mail className="size-3" />}
+                        Auto-find
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              )}
-              {company.seoScore != null && (
-                <div>
-                  <p className="text-muted-foreground">SEO Score</p>
-                  <p className={`font-medium ${company.seoScore >= 70 ? 'text-up' : company.seoScore >= 40 ? 'text-warn-fg' : 'text-down'}`}>
-                    {company.seoScore}/100
-                  </p>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {contact.score != null && contact.score > 0 && <Chip tone="accent" className="font-mono">{contact.score}</Chip>}
+                  {contact.linkedinUrl && (
+                    <a
+                      href={contact.linkedinUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="LinkedIn profile"
+                      className="grid size-7 place-items-center rounded-lg text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+                    >
+                      <Linkedin className="size-3.5" />
+                    </a>
+                  )}
+                  <EditContactModal
+                    contact={contact}
+                    trigger={
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit name / role">
+                        <Pencil className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <Button asChild variant="ghost" size="icon" className="h-7 w-7" title="Open contact">
+                    <Link href={`/agents/${agentId}/contacts/${contact.id}`}>
+                      <ExternalLink className="size-3.5" />
+                    </Link>
+                  </Button>
                 </div>
-              )}
+              </div>
+            );
+          })
+        ) : (
+          <div className="flex flex-col items-start gap-3 border-t border-line px-4 py-6">
+            <p className="m-0 text-body text-ink-3">No contacts discovered yet for this company.</p>
+            <AddPersonModal
+              masterAgentId={agentId}
+              companyId={companyId}
+              companyName={company.name}
+              trigger={
+                <Button variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs font-medium">
+                  <Plus className="mr-1.5 size-3.5" /> Add the first person
+                </Button>
+              }
+            />
+          </div>
+        )}
+      </HomeSection>
+
+      <div className="grid items-start gap-4 md:grid-cols-2">
+        {/* Tech Stack */}
+        <HomeSection title={<SectionTitle icon={Cpu}>Tech stack</SectionTitle>}>
+          {(company.techStack ?? []).length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 px-4 pb-4">
+              {company.techStack!.map((tech) => (
+                <Chip key={tech}>{tech}</Chip>
+              ))}
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <Empty>No tech stack data available.</Empty>
+          )}
+        </HomeSection>
+
+        {/* Pain Points */}
+        {(company.painPoints ?? []).length > 0 && (
+          <HomeSection title={<SectionTitle icon={ShieldAlert}>Pain points</SectionTitle>} meta={`${company.painPoints!.length}`}>
+            <div className="flex flex-wrap gap-1.5 px-4 pb-4">
+              {company.painPoints!.map((p: PainPoint, i: number) => (
+                <Chip key={i} tone={p.severity === 'high' ? 'down' : p.severity === 'medium' ? 'warn' : 'soft'}>
+                  {painPointIcon(p.type)} {p.description}
+                </Chip>
+              ))}
+            </div>
+          </HomeSection>
+        )}
 
         {/* Google Maps — phone / address / hours / reviews land on the company's
             rawData via the "Enrich via Google Maps" button. Same rich card the
             business-contact page uses, rendered straight from company.rawData so
             the info lives on the company, not a separate "business" entity. */}
-        {(company.rawData as { source?: string } | null)?.source === 'gmaps_extension' && (
-          <GmapsBusinessCard sourceType="gmaps_business" meta={company.rawData as Record<string, unknown>} />
+        {mapsMeta && (
+          <div className="md:col-span-2">
+            <GmapsBusinessCard sourceType="gmaps_business" meta={company.rawData as Record<string, unknown>} />
+          </div>
         )}
-
-        {/* Tech Stack */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Cpu className="w-4 h-4" /> Tech Stack
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(company.techStack ?? []).length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {company.techStack!.map((tech) => (
-                  <Badge key={tech} variant="secondary">{tech}</Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No tech stack data available</p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Pain Points */}
-        {(company.painPoints ?? []).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ShieldAlert className="w-4 h-4" /> Pain Points
-                <Badge variant="secondary" className="ml-1 text-xs">{company.painPoints!.length}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {company.painPoints!.map((p: PainPoint, i: number) => (
-                  <Badge
-                    key={i}
-                    variant={p.severity === 'high' ? 'destructive' : p.severity === 'medium' ? 'warning' : 'secondary'}
-                    className="flex items-center gap-1"
-                  >
-                    {painPointIcon(p.type)} {p.description}
-                  </Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* People / Contacts */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users className="w-4 h-4" /> People
-                {companyContacts.length > 0 && (
-                  <Badge variant="secondary" className="ml-1 text-xs">{companyContacts.length}</Badge>
-                )}
-              </CardTitle>
-              <AddPersonModal masterAgentId={agentId} companyId={companyId} companyName={company.name} />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {companyContacts.length > 0 ? (
-              <div className="space-y-3">
-                {companyContacts.map((contact) => (
-                  <div key={contact.id} className="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="min-w-0">
-                        <Link href={`/agents/${agentId}/contacts/${contact.id}`} className="font-medium text-sm hover:underline">
-                          {[contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Unknown'}
-                        </Link>
-                        {contact.title && (
-                          <p className="text-xs text-muted-foreground truncate">{contact.title}</p>
-                        )}
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <EmailEditor
-                            contactId={contact.id}
-                            currentEmail={contact.email ?? null}
-                            emailVerified={!!contact.emailVerified}
-                            size="compact"
-                          />
-                          {!contact.email && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 text-xs gap-1 text-muted-foreground"
-                              disabled={findEmail.isPending && findEmail.variables === contact.id}
-                              onClick={() => handleFindEmail(contact.id)}
-                              title="Auto-find email via patterns + Reacher"
-                            >
-                              {findEmail.isPending && findEmail.variables === contact.id ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <Mail className="w-3 h-3" />
-                              )}
-                              Auto-find
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {contact.score != null && contact.score > 0 && (
-                        <Badge variant="outline" className="text-xs">{contact.score}</Badge>
-                      )}
-                      {contact.linkedinUrl && (
-                        <a href={contact.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground">
-                          <Linkedin className="w-3.5 h-3.5" />
-                        </a>
-                      )}
-                      <EditContactModal
-                        contact={contact}
-                        trigger={
-                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit name / role">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                        }
-                      />
-                      <Link href={`/agents/${agentId}/contacts/${contact.id}`}>
-                        <Button variant="ghost" size="icon" className="h-7 w-7">
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Button>
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">No contacts discovered yet for this company</p>
-                <AddPersonModal
-                  masterAgentId={agentId}
-                  companyId={companyId}
-                  companyName={company.name}
-                  trigger={
-                    <Button variant="outline" size="sm">
-                      <Plus className="w-3.5 h-3.5 mr-1.5" /> Add the first person
-                    </Button>
-                  }
-                />
-              </div>
-            )}
-          </CardContent>
-        </Card>
 
         {/* Products */}
         {(deep.products ?? []).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Briefcase className="w-4 h-4" /> Products
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-1 text-sm">
-                {deep.products!.map((product, i) => (
-                  <li key={i} className="text-muted-foreground">
-                    {product}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          <HomeSection title={<SectionTitle icon={Briefcase}>Products</SectionTitle>} meta={`${deep.products!.length}`}>
+            {deep.products!.map((product, i) => (
+              <div key={i} className="border-t border-line px-4 py-2.5 text-body text-ink-2">
+                {citedText(product)}
+              </div>
+            ))}
+          </HomeSection>
         )}
 
         {/* Key People */}
         {(deep.keyPeople ?? []).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <UserCircle className="w-4 h-4" /> Key People
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {deep.keyPeople!.map((person, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{person.name}</span>
-                    <span className="text-muted-foreground">{person.title}</span>
-                  </div>
-                ))}
+          <HomeSection title={<SectionTitle icon={UserCircle}>Key people</SectionTitle>} meta={`${deep.keyPeople!.length}`}>
+            {deep.keyPeople!.map((person, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-body">
+                <span className="font-medium text-ink">{person.name}</span>
+                <span className="truncate text-xs text-ink-3">{person.title}</span>
               </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Open Positions */}
-        {(deep.openPositions ?? []).length > 0 && (
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Briefcase className="w-4 h-4" /> Open Positions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {deep.openPositions!.map((pos, i) => (
-                  <div key={i} className="border-b border-border pb-3 last:border-0 last:pb-0">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">
-                        {pos.url ? (
-                          <a href={pos.url} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1">
-                            {pos.title} <ExternalLink className="w-3 h-3" />
-                          </a>
-                        ) : pos.title}
-                      </span>
-                      <span className="text-muted-foreground text-sm flex items-center gap-1">
-                        <MapPin className="w-3 h-3" /> {pos.location || '—'}
-                      </span>
-                    </div>
-                    {pos.salary && <p className="text-xs text-muted-foreground mt-1">{pos.salary}</p>}
-                    {pos.description && <p className="text-xs text-muted-foreground mt-1">{pos.description}</p>}
-                    {(pos.requiredSkills ?? []).length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {pos.requiredSkills!.map((skill) => (
-                          <Badge key={skill} variant="secondary" className="text-xs">{skill}</Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+            ))}
+          </HomeSection>
         )}
 
         {/* Hiring Contacts */}
         {(deep.contactEmail || (deep.hiringContactEmails ?? []).length > 0) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Mail className="w-4 h-4" /> Hiring Contacts
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+          <HomeSection title={<SectionTitle icon={Mail}>Hiring contacts</SectionTitle>}>
+            <div className="space-y-3 border-t border-line px-4 py-3 text-body">
               {deep.contactEmail && (
                 <div>
-                  <p className="text-muted-foreground text-xs">Company Email</p>
-                  <a href={`mailto:${deep.contactEmail}`} className="text-info hover:underline">{deep.contactEmail}</a>
+                  <p className="m-0 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">Company email</p>
+                  <a href={`mailto:${deep.contactEmail}`} className="text-info no-underline hover:underline">{deep.contactEmail}</a>
                 </div>
               )}
               {(deep.hiringContactEmails ?? []).length > 0 && (
                 <div>
-                  <p className="text-muted-foreground text-xs">HR / Recruiting</p>
+                  <p className="m-0 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4">HR / Recruiting</p>
                   {deep.hiringContactEmails!.map((email, i) => (
-                    <a key={i} href={`mailto:${email}`} className="block text-info hover:underline">{email}</a>
+                    <a key={i} href={`mailto:${email}`} className="block text-info no-underline hover:underline">{email}</a>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Job Listings Found */}
-        {(deep.jobListings ?? []).length > 0 && (
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Search className="w-4 h-4" /> Job Listings Found
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {deep.jobListings!.map((listing, i) => (
-                  <div key={i} className="border-b border-border pb-3 last:border-0 last:pb-0">
-                    <a href={listing.url} target="_blank" rel="noopener noreferrer" className="font-medium text-sm hover:underline flex items-center gap-1">
-                      {listing.title} <ExternalLink className="w-3 h-3" />
-                    </a>
-                    {listing.snippet && <p className="text-xs text-muted-foreground mt-1">{listing.snippet}</p>}
-                    {listing.skills.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {listing.skills.map((skill) => (
-                          <Badge key={skill} variant="secondary" className="text-xs">{skill}</Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </HomeSection>
         )}
 
         {/* Culture & Values */}
         {(deep.cultureValues ?? []).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Heart className="w-4 h-4" /> Culture & Values
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {deep.cultureValues!.map((val, i) => (
-                  <Badge key={i} variant="outline">{val}</Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <HomeSection title={<SectionTitle icon={Heart}>Culture &amp; values</SectionTitle>}>
+            <div className="flex flex-wrap gap-1.5 px-4 pb-4">
+              {deep.cultureValues!.map((val, i) => (
+                <Chip key={i} title={typeof val === 'object' && val.citation ? val.citation : undefined}>{citedText(val)}</Chip>
+              ))}
+            </div>
+          </HomeSection>
         )}
 
         {/* Recent News */}
         {(deep.recentNews ?? []).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Newspaper className="w-4 h-4" /> Recent News
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {deep.recentNews!.map((news, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <span>{news.headline}</span>
-                    <span className="text-muted-foreground text-xs flex items-center gap-1">
-                      <Calendar className="w-3 h-3" /> {news.date}
-                    </span>
-                  </div>
-                ))}
+          <HomeSection title={<SectionTitle icon={Newspaper}>Recent news</SectionTitle>}>
+            {deep.recentNews!.map((news, i) => (
+              <div key={i} className="flex items-start justify-between gap-3 border-t border-line px-4 py-2.5 text-body">
+                <span className="text-ink-2">{news.headline}</span>
+                <span className="inline-flex shrink-0 items-center gap-1 text-xs text-ink-3">
+                  <Calendar className="size-3" /> {news.date}
+                </span>
               </div>
-            </CardContent>
-          </Card>
+            ))}
+          </HomeSection>
         )}
 
         {/* Competitors */}
         {(deep.competitors ?? []).length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users className="w-4 h-4" /> Competitors
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {deep.competitors!.map((comp, i) => (
-                  <Badge key={i} variant="secondary">{comp}</Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <HomeSection title={<SectionTitle icon={Users}>Competitors</SectionTitle>}>
+            <div className="flex flex-wrap gap-1.5 px-4 pb-4">
+              {deep.competitors!.map((comp, i) => (
+                <Chip key={i} title={typeof comp === 'object' && comp.citation ? comp.citation : undefined}>{citedText(comp)}</Chip>
+              ))}
+            </div>
+          </HomeSection>
         )}
       </div>
+
+      {/* Open Positions */}
+      {(deep.openPositions ?? []).length > 0 && (
+        <HomeSection title={<SectionTitle icon={Briefcase}>Open positions</SectionTitle>} meta={`${deep.openPositions!.length}`}>
+          {deep.openPositions!.map((pos, i) => (
+            <div key={i} className="border-t border-line px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-body font-medium text-ink">
+                  {pos.url ? (
+                    <a href={pos.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-ink no-underline hover:text-accent">
+                      {pos.title} <ExternalLink className="size-3" />
+                    </a>
+                  ) : pos.title}
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs text-ink-3">
+                  <MapPin className="size-3" /> {pos.location || '—'}
+                </span>
+              </div>
+              {pos.salary && <p className="m-0 mt-1 text-xs font-medium text-ink-2">{pos.salary}</p>}
+              {pos.description && <p className="m-0 mt-1 text-xs leading-relaxed text-ink-3">{pos.description}</p>}
+              {(pos.requiredSkills ?? []).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {pos.requiredSkills!.map((skill) => (
+                    <Chip key={skill}>{skill}</Chip>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </HomeSection>
+      )}
+
+      {/* Job Listings Found */}
+      {(deep.jobListings ?? []).length > 0 && (
+        <HomeSection title={<SectionTitle icon={Search}>Job listings found</SectionTitle>} meta={`${deep.jobListings!.length}`}>
+          {deep.jobListings!.map((listing, i) => (
+            <div key={i} className="border-t border-line px-4 py-3">
+              <a
+                href={listing.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-body font-medium text-ink no-underline hover:text-accent"
+              >
+                {listing.title} <ExternalLink className="size-3" />
+              </a>
+              {listing.snippet && <p className="m-0 mt-1 text-xs leading-relaxed text-ink-3">{listing.snippet}</p>}
+              {listing.skills.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {listing.skills.map((skill) => (
+                    <Chip key={skill}>{skill}</Chip>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </HomeSection>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { useWorkspaces, useCreateWorkspace, useSwitchWorkspace, useDeleteWorkspace } from '@/hooks/use-workspaces';
@@ -10,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ChevronDown, Check, Plus, Loader2, Trash2 } from 'lucide-react';
 
 export function WorkspaceSwitcher() {
+  const confirm = useConfirm();
   const router = useRouter();
   const tenant = useAuthStore((s) => s.tenant);
   const { data: workspaces } = useWorkspaces();
@@ -53,13 +55,12 @@ export function WorkspaceSwitcher() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (
-      !confirm(
-        `Delete workspace "${name}"?\n\nThis permanently deletes all its agents, companies, contacts and other data. This cannot be undone.`
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete workspace "${name}"?`,
+      description: 'This permanently deletes all its agents, companies, contacts and other data. This cannot be undone.',
+      confirmLabel: 'Delete workspace',
+    });
+    if (!ok) return;
     try {
       await deleteWorkspace.mutateAsync(id);
       toast({ title: `Workspace "${name}" deleted` });

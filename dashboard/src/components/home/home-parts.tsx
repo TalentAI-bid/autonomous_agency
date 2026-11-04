@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -104,5 +105,44 @@ export function StatCard({
       </div>
       {detail && <div className="mt-2.5 text-xs text-ink-3">{detail}</div>}
     </div>
+  );
+}
+
+/** Small rounded label used for tags, skills and categories. */
+export function Chip({
+  children,
+  tone = 'soft',
+  title,
+  className,
+}: {
+  children: ReactNode;
+  tone?: 'soft' | 'accent' | 'down' | 'warn' | 'up';
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-tag px-2 py-1 text-xs font-medium',
+        tone === 'soft' && 'bg-bg-soft text-ink-2',
+        tone === 'accent' && 'bg-accent-weak text-accent-fg',
+        tone === 'down' && 'bg-down/10 text-down',
+        tone === 'warn' && 'bg-warn/15 text-warn-fg',
+        tone === 'up' && 'bg-up/10 text-up',
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Icon + text title for a HomeSection header. */
+export function SectionTitle({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
+  return (
+    <span className="flex items-center gap-2">
+      <Icon size={14} className="text-ink-3" /> {children}
+    </span>
   );
 }

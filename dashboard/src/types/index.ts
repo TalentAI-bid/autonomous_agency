@@ -189,11 +189,14 @@ export interface Company {
   updatedAt: string;
 }
 
+/** Research output is either a plain string or a value with the source text that supports it. */
+export type CitedText = string | { value?: string; claim?: string; name?: string; citation?: string | null };
+
 export interface CompanyDeepData {
-  products?: string[];
+  products?: CitedText[];
   foundedYear?: string;
   headquarters?: string;
-  cultureValues?: string[];
+  cultureValues?: CitedText[];
   recentNews?: Array<{ headline: string; date: string }>;
   openPositions?: Array<{
     title: string;
@@ -204,7 +207,7 @@ export interface CompanyDeepData {
     url?: string;
   }>;
   keyPeople?: Array<{ name: string; title: string }>;
-  competitors?: string[];
+  competitors?: CitedText[];
   masterAgentId?: string;
   contactEmail?: string;
   hiringContactEmails?: string[];

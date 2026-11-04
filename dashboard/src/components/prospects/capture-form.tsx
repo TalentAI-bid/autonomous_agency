@@ -122,118 +122,157 @@ export function CaptureForm() {
     }
   }
 
+  const tags = form.tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-xl">
-      <div className="grid gap-2">
-        <Label htmlFor="sourceType">Source <span className="text-down">*</span></Label>
-        <Select
-          id="sourceType"
-          value={form.sourceType ?? 'manual_linkedin'}
-          onChange={(e) => update('sourceType', e.target.value)}
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          required
-        >
-          {SOURCE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </Select>
-      </div>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <FormCard title="Who is it" hint="Where you found them and how to reach them.">
+        <Field id="sourceType" label="Source" required>
+          <Select
+            id="sourceType"
+            value={form.sourceType ?? 'manual_linkedin'}
+            onChange={(e) => update('sourceType', e.target.value)}
+            className="w-full"
+            required
+          >
+            {SOURCE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </Select>
+        </Field>
 
-      <div className="grid gap-2">
-        <Label htmlFor="name">Name <span className="text-down">*</span></Label>
-        <Input
-          id="name"
-          value={form.name ?? ''}
-          onChange={(e) => update('name', e.target.value)}
-          placeholder="Mantas Kazlauskas"
-          required
-        />
-      </div>
+        <Field id="name" label="Name" required>
+          <Input
+            id="name"
+            value={form.name ?? ''}
+            onChange={(e) => update('name', e.target.value)}
+            placeholder="Mantas Kazlauskas"
+            required
+          />
+        </Field>
 
-      <div className="grid gap-2">
-        <Label htmlFor="email">Email</Label>
-        <Input
-          id="email"
-          type="email"
-          value={form.email ?? ''}
-          onChange={(e) => update('email', e.target.value)}
-          placeholder="mantas@hoppacard.eu"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="linkedinUrl">LinkedIn URL</Label>
-        <Input
-          id="linkedinUrl"
-          value={form.linkedinUrl ?? ''}
-          onChange={(e) => update('linkedinUrl', e.target.value)}
-          placeholder="https://www.linkedin.com/in/mantas-kazlauskas/"
-        />
-        <p className="text-xs text-muted-foreground">We&apos;ll auto-enrich if provided.</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-2">
-          <Label htmlFor="phone">Phone</Label>
-          <Input id="phone" value={form.phone ?? ''} onChange={(e) => update('phone', e.target.value)} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field id="email" label="Email">
+            <Input
+              id="email"
+              type="email"
+              value={form.email ?? ''}
+              onChange={(e) => update('email', e.target.value)}
+              placeholder="mantas@hoppacard.eu"
+            />
+          </Field>
+          <Field id="linkedinUrl" label="LinkedIn URL" hint="We auto-enrich the profile when this is set.">
+            <Input
+              id="linkedinUrl"
+              value={form.linkedinUrl ?? ''}
+              onChange={(e) => update('linkedinUrl', e.target.value)}
+              placeholder="linkedin.com/in/mantas-kazlauskas"
+            />
+          </Field>
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor="whatsapp">WhatsApp</Label>
-          <Input id="whatsapp" value={form.whatsapp ?? ''} onChange={(e) => update('whatsapp', e.target.value)} />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field id="phone" label="Phone">
+            <Input id="phone" value={form.phone ?? ''} onChange={(e) => update('phone', e.target.value)} />
+          </Field>
+          <Field id="whatsapp" label="WhatsApp">
+            <Input id="whatsapp" value={form.whatsapp ?? ''} onChange={(e) => update('whatsapp', e.target.value)} />
+          </Field>
         </div>
-      </div>
+      </FormCard>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-2">
-          <Label htmlFor="company">Company</Label>
-          <Input id="company" value={form.company ?? ''} onChange={(e) => update('company', e.target.value)} />
+      <FormCard title="Role" hint="Helps agents pitch the right angle.">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field id="company" label="Company">
+            <Input id="company" value={form.company ?? ''} onChange={(e) => update('company', e.target.value)} />
+          </Field>
+          <Field id="title" label="Title">
+            <Input id="title" value={form.title ?? ''} onChange={(e) => update('title', e.target.value)} />
+          </Field>
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor="title">Title</Label>
-          <Input id="title" value={form.title ?? ''} onChange={(e) => update('title', e.target.value)} />
+        <Field id="location" label="Location">
+          <Input id="location" value={form.location ?? ''} onChange={(e) => update('location', e.target.value)} />
+        </Field>
+      </FormCard>
+
+      <FormCard title="Context" hint="Anything you want the timeline to start with.">
+        <Field id="tags" label="Tags" hint="Comma-separated.">
+          <Input
+            id="tags"
+            value={form.tagsRaw}
+            onChange={(e) => update('tagsRaw', e.target.value)}
+            placeholder="hot, vilnius, ceo"
+          />
+          {tags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {tags.map((t, i) => (
+                <span key={`${t}-${i}`} className="inline-flex items-center rounded-tag bg-bg-soft px-2 py-1 text-xs text-ink-2">
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </Field>
+        <Field id="initialNote" label="Initial note">
+          <Textarea
+            id="initialNote"
+            rows={3}
+            value={form.initialNote ?? ''}
+            onChange={(e) => update('initialNote', e.target.value)}
+            placeholder="Met at FintechCon — they mentioned hiring 4 devops in Q2."
+          />
+        </Field>
+      </FormCard>
+
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-bg-panel px-5 py-3.5 shadow-sm">
+        <span className="text-xs text-ink-3">
+          {rateLimited ? 'Daily capture limit reached. Try again tomorrow.' : <><span className="text-down">*</span> Required</>}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => router.back()} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="brand" size="sm" disabled={!canSubmit}>
+            {submitting ? 'Adding…' : 'Add to pipeline'}
+          </Button>
         </div>
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="location">Location</Label>
-        <Input id="location" value={form.location ?? ''} onChange={(e) => update('location', e.target.value)} />
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="tags">Tags</Label>
-        <Input
-          id="tags"
-          value={form.tagsRaw}
-          onChange={(e) => update('tagsRaw', e.target.value)}
-          placeholder="hot, vilnius, ceo"
-        />
-        <p className="text-xs text-muted-foreground">Comma-separated.</p>
-      </div>
-
-      <div className="grid gap-2">
-        <Label htmlFor="initialNote">Initial note</Label>
-        <Textarea
-          id="initialNote"
-          rows={3}
-          value={form.initialNote ?? ''}
-          onChange={(e) => update('initialNote', e.target.value)}
-          placeholder="Met at FintechCon — they mentioned hiring 4 devops in Q2."
-        />
-      </div>
-
-      <div className="flex items-center gap-2 pt-2">
-        <Button type="submit" disabled={!canSubmit}>
-          {submitting ? 'Adding…' : 'Add to Pipeline'}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.back()}
-          disabled={submitting}
-        >
-          Cancel
-        </Button>
       </div>
     </form>
+  );
+}
+
+function FormCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="border-b border-line px-5 py-3.5">
+        <h2 className="m-0 text-body font-semibold text-ink">{title}</h2>
+        {hint && <p className="m-0 mt-0.5 text-xs text-ink-3">{hint}</p>}
+      </header>
+      <div className="flex flex-col gap-4 p-5">{children}</div>
+    </section>
+  );
+}
+
+function Field({
+  id,
+  label,
+  hint,
+  required,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>
+        {label} {required && <span className="text-down">*</span>}
+      </Label>
+      {children}
+      {hint && <p className="m-0 text-xs text-ink-3">{hint}</p>}
+    </div>
   );
 }

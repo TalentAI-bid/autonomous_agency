@@ -58,7 +58,7 @@ export function useGetStarted() {
         title: 'Create your workspace',
         pending: 'Name the workspace everything lives in.',
         doneText: `${tenant?.name ?? 'Workspace'}${tenant?.createdAt ? ` · created ${shortDate(tenant.createdAt)}` : ''}`,
-        href: '/settings',
+        href: '/settings/company',
         cta: 'Set up',
         done: !!tenant,
       },

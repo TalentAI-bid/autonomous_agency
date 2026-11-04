@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   useEmailAccounts,
   useCreateEmailAccount,
@@ -100,6 +101,7 @@ export default function EmailSettingsPage() {
 /* ─── Sending ───────────────────────────────────────────────────────────────── */
 
 function SendingCard() {
+  const confirm = useConfirm();
   const { data: accounts, isLoading } = useEmailAccounts();
   const updateAccount = useUpdateEmailAccount();
   const deleteAccount = useDeleteEmailAccount();
@@ -125,7 +127,12 @@ function SendingCard() {
   }
 
   async function handleDisconnect(id: string, email: string) {
-    if (!confirm(`Disconnect ${email}? Agents will stop sending from it.`)) return;
+    const ok = await confirm({
+      title: `Disconnect ${email}?`,
+      description: 'Agents will stop sending from it.',
+      confirmLabel: 'Disconnect',
+    });
+    if (!ok) return;
     try {
       await deleteAccount.mutateAsync(id);
       toast({ title: 'Mailbox disconnected' });
@@ -291,6 +298,7 @@ function AccountDialog({ preset, onClose }: { preset: Preset | null; onClose: ()
 /* ─── Reply detection ───────────────────────────────────────────────────────── */
 
 function ReplyDetectionCard() {
+  const confirm = useConfirm();
   const { data: listeners, isLoading } = useEmailListeners();
   const deleteListener = useDeleteEmailListener();
   const testConnection = useTestListenerConnection();
@@ -315,7 +323,12 @@ function ReplyDetectionCard() {
   const busy = deleteListener.isPending || testConnection.isPending || pollNow.isPending;
 
   async function handleDisconnect(id: string, name: string) {
-    if (!confirm(`Disconnect reply detection for ${name}? Replies will stop reaching your Inbox.`)) return;
+    const ok = await confirm({
+      title: `Disconnect reply detection for ${name}?`,
+      description: 'Replies will stop reaching your Inbox.',
+      confirmLabel: 'Disconnect',
+    });
+    if (!ok) return;
     try {
       await deleteListener.mutateAsync(id);
       toast({ title: 'Reply detection disconnected' });

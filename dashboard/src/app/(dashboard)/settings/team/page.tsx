@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   useTeamMembers,
   useTeamInvitations,
@@ -18,7 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { Check, CheckCircle2, ChevronDown, Copy, Loader2, X } from 'lucide-react';
+import { CheckCircle2, Copy, Loader2, X } from 'lucide-react';
+import { Select } from '@/components/ui/select';
 
 const INVITABLE_ROLES: InvitableRole[] = ['admin', 'member', 'viewer'];
 const ALL_ROLES: TeamRole[] = ['owner', 'admin', 'member', 'viewer'];
@@ -66,74 +68,22 @@ function RoleSelect<T extends TeamRole>({
   id?: string;
   label?: string;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        id={id}
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={label}
-        onClick={() => setOpen((o) => !o)}
-        className={cn(
-          'flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-bg-panel text-ink transition-colors hover:border-line-strong focus-visible:border-accent-mid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak disabled:cursor-not-allowed disabled:bg-bg-soft disabled:text-ink-4 disabled:hover:border-line',
-          compact ? 'h-8 min-w-[104px] px-2.5 text-xs' : 'h-10 px-3 text-body',
-          open && 'border-accent-mid ring-2 ring-accent-weak',
-        )}
-      >
-        <span className="font-medium">{ROLE_LABEL[value]}</span>
-        <ChevronDown size={compact ? 13 : 14} className={cn('shrink-0 text-ink-4 transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <ul
-          role="listbox"
-          className={cn(
-            'absolute z-30 m-0 mt-1.5 w-72 list-none rounded-xl border border-line bg-bg-panel p-1.5 shadow-lg',
-            compact ? 'right-0' : 'left-0',
-          )}
-        >
-          {options.map((r) => {
-            const active = r === value;
-            return (
-              <li key={r} role="option" aria-selected={active}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    if (!active) onChange(r);
-                  }}
-                  className={cn('flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors', active ? 'bg-accent-weak' : 'hover:bg-hover')}
-                >
-                  <span className="mt-0.5 grid size-4 shrink-0 place-items-center text-accent">{active && <Check size={14} />}</span>
-                  <span className="min-w-0">
-                    <span className={cn('block text-body font-medium', active ? 'text-accent-fg' : 'text-ink')}>{ROLE_LABEL[r]}</span>
-                    <span className="mt-0.5 block text-xs leading-snug text-ink-3">{ROLE_HINT[r]}</span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+    <Select
+      id={id}
+      value={value}
+      disabled={disabled}
+      aria-label={label}
+      onChange={(e) => onChange(e.target.value as T)}
+      hints={ROLE_HINT}
+      className={compact ? 'h-8 min-w-[104px] px-2.5 text-xs font-medium' : 'h-10 w-full font-medium'}
+      menuClassName="w-72"
+      menuAlign={compact ? 'right' : 'left'}
+    >
+      {options.map((r) => (
+        <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+      ))}
+    </Select>
   );
 }
 
@@ -150,6 +100,7 @@ function Panel({ title, aside, children }: { title: string; aside?: React.ReactN
 }
 
 export default function TeamSettingsPage() {
+  const confirm = useConfirm();
   const currentUser = useAuthStore((s) => s.user);
   const { toast } = useToast();
 
@@ -215,7 +166,12 @@ export default function TeamSettingsPage() {
   }
 
   async function handleRemove(userId: string, memberEmail: string) {
-    if (!confirm(`Remove ${memberEmail} from this workspace?`)) return;
+    const ok = await confirm({
+      title: `Remove ${memberEmail}?`,
+      description: 'They lose access to this workspace right away.',
+      confirmLabel: 'Remove member',
+    });
+    if (!ok) return;
     try {
       await removeMember.mutateAsync(userId);
       toast({ title: 'Member removed' });

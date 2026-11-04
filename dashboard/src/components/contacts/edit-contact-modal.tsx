@@ -7,6 +7,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
   DialogTrigger,
   DialogClose,
@@ -138,84 +139,98 @@ export function EditContactModal({ contact, trigger }: EditContactModalProps) {
         )}
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Edit contact</DialogTitle>
+      <DialogContent className="gap-0 overflow-hidden rounded-2xl border-line p-0 sm:max-w-md">
+        <DialogHeader className="flex-row items-center gap-3 space-y-0 border-b border-line px-5 py-4 pr-12 text-left">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-weak text-xs font-semibold text-accent">
+            {(
+              ((contact.firstName ?? '').charAt(0) + (contact.lastName ?? '').charAt(0)) || (contact.email ?? '?').charAt(0)
+            ).toUpperCase()}
+          </span>
+          <div className="min-w-0">
+            <DialogTitle className="text-body font-semibold leading-tight text-ink">Edit contact</DialogTitle>
+            <DialogDescription className="mt-0.5 truncate text-xs text-ink-3">
+              {[contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Fix a name, role or LinkedIn link.'}
+            </DialogDescription>
+          </div>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-firstName">First name</Label>
-              <Input id="edit-firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-lastName">Last name</Label>
-              <Input id="edit-lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-title">Title / role</Label>
-            <Input
-              id="edit-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Head of Engineering"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-linkedin">LinkedIn URL</Label>
-            <Input
-              id="edit-linkedin"
-              value={linkedinUrl}
-              onChange={(e) => setLinkedinUrl(e.target.value)}
-              placeholder="https://www.linkedin.com/in/…"
-            />
-          </div>
-
-          <div className="rounded-md border border-dashed border-input p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium flex items-center gap-1.5">
-                  <Linkedin className="w-3.5 h-3.5" /> Re-scrape from LinkedIn
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Pull the correct name &amp; role from the profile, then review below.
-                </p>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-firstName">First name</Label>
+                <Input id="edit-firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleRescrape}
-                disabled={!linkedinUrl.trim() || rescrape.isPending || polling}
-              >
-                {polling ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Waiting…
-                  </>
-                ) : (
-                  'Re-scrape'
-                )}
-              </Button>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-lastName">Last name</Label>
+                <Input id="edit-lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              </div>
             </div>
-            {polling && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Make sure the TalentAI browser extension is connected — it opens this profile in a tab and reads it back here.
-              </p>
-            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-title">Title / role</Label>
+              <Input
+                id="edit-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Head of Engineering"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-linkedin">LinkedIn URL</Label>
+              <Input
+                id="edit-linkedin"
+                value={linkedinUrl}
+                onChange={(e) => setLinkedinUrl(e.target.value)}
+                placeholder="https://www.linkedin.com/in/…"
+              />
+            </div>
+
+            <div className="rounded-xl border border-line bg-bg-sub p-3.5">
+              <div className="flex items-center gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[color:#0a66c2] text-white">
+                  <Linkedin size={15} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="m-0 text-body font-medium text-ink">Re-scrape from LinkedIn</p>
+                  <p className="m-0 text-xs leading-snug text-ink-3">
+                    Pull the correct name &amp; role from the profile, then review it here.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="panel"
+                  size="dense"
+                  className="h-8 shrink-0 rounded-lg px-3 text-xs font-medium"
+                  onClick={handleRescrape}
+                  disabled={!linkedinUrl.trim() || rescrape.isPending || polling}
+                >
+                  {polling ? (
+                    <>
+                      <Loader2 className="mr-1.5 size-3.5 animate-spin" /> Waiting…
+                    </>
+                  ) : (
+                    'Re-scrape'
+                  )}
+                </Button>
+              </div>
+              {polling && (
+                <p className="m-0 mt-2.5 border-t border-line pt-2.5 text-xs leading-snug text-ink-3">
+                  Make sure the KeenPipe browser extension is connected. It opens this profile in a tab and reads it back here.
+                </p>
+              )}
+            </div>
           </div>
 
-          <DialogFooter className="pt-2">
+          <DialogFooter className="items-center gap-2 border-t border-line bg-bg-sub px-5 py-3 sm:space-x-0">
             <DialogClose asChild>
               <Button type="button" variant="outline" size="sm">
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" size="sm" disabled={updateContact.isPending}>
-              {updateContact.isPending ? 'Saving…' : 'Save'}
+            <Button type="submit" variant="brand" size="sm" disabled={updateContact.isPending}>
+              {updateContact.isPending ? 'Saving…' : 'Save changes'}
             </Button>
           </DialogFooter>
         </form>

@@ -250,7 +250,7 @@ export function CreateContactInline({
         <Select
           value={agentId}
           onChange={(e) => setAgentId(e.target.value)}
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+          className="w-full"
         >
           {(agents ?? []).map((a) => (
             <option key={a.id} value={a.id}>{a.name}</option>

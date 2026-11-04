@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Building2, Search, ChevronDown, Rocket, Users } from 'lucide-react';
+import { Building2, Search, Rocket, Users } from 'lucide-react';
 import { useCompanies } from '@/hooks/use-companies';
 import { ExportButton } from '@/components/shared/export-button';
-import { LeadCard, DiscoveringCard, type LeadTag } from '@/components/leads/lead-card';
+import { LeadCard, LeadCardSkeleton, type LeadTag } from '@/components/leads/lead-card';
 import type { Company } from '@/types';
 
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 const PAGE_SIZE = 24;
 const AVATAR_HUES = [255, 210, 160, 95, 35, 320, 285];
@@ -154,20 +155,15 @@ export default function CompaniesPage() {
           Scored only
         </button>
 
-        <label className="flex h-9 items-center gap-2 rounded-lg border border-line bg-bg-panel pl-3 text-body text-ink-3 transition-colors hover:border-line-strong">
-          Sort
-          <span className="relative">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'fit_score' | 'createdAt')}
-              className="h-[34px] cursor-pointer appearance-none border-0 bg-transparent pl-1 pr-7 text-body font-medium text-ink outline-none"
-            >
-              <option value="fit_score">Fit score</option>
-              <option value="createdAt">Newest</option>
-            </select>
-            <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-4" />
-          </span>
-        </label>
+        <Select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as 'fit_score' | 'createdAt')}
+          aria-label="Sort companies"
+          className="font-medium"
+        >
+          <option value="fit_score">Sort: Fit score</option>
+          <option value="createdAt">Sort: Newest</option>
+        </Select>
 
         <div className="ml-auto flex items-center gap-2">
           <ExportButton />
@@ -202,7 +198,7 @@ export default function CompaniesPage() {
       {isLoading ? (
         <div className="leads-grid">
           {Array.from({ length: 6 }).map((_, i) => (
-            <DiscoveringCard key={i} />
+            <LeadCardSkeleton key={i} />
           ))}
         </div>
       ) : count === 0 ? (

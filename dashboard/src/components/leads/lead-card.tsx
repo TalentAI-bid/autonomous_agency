@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Linkedin, ArrowRight, Briefcase } from 'lucide-react';
 import { FitGauge } from './fit-gauge';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export interface LeadTag {
   label: string;
@@ -55,45 +56,47 @@ function TagChip({ tag }: { tag: LeadTag }) {
 const CARD_BASE =
   'flex min-h-[240px] min-w-0 flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-bg-panel p-[18px] shadow-sm';
 
-/** Discovering placeholder — a live agent is still enriching this lead. */
-export function DiscoveringCard() {
-  const bar = (w: number) => (
-    <span className="block h-2 rounded-tag bg-bg-soft" style={{ width: w }} />
-  );
+/** Loading placeholder that mirrors the LeadCard layout, so nothing jumps when data arrives. */
+export function LeadCardSkeleton() {
   return (
-    <div
-      className={cn(CARD_BASE, "border-dashed border-accent-mid bg-accent-weak shadow-none")}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="w-5 h-5 rounded-tag bg-bg-soft"/>
-          {bar(70)}
-        </div>
-        <span
-          className="pill is-accent text-2xs bg-accent-weak text-accent-fg"
-        >
-          New
-        </span>
+    <div className={cn(CARD_BASE)} aria-hidden>
+      {/* Header: glyph + title + badge */}
+      <div className="flex items-center gap-2">
+        <Skeleton className="size-7 shrink-0 rounded-full" />
+        <Skeleton className="h-3.5 w-32" />
+        <Skeleton className="ml-auto h-5 w-12 rounded-tag" />
       </div>
+
+      {/* Body: secondary entity + gauge */}
       <div className="flex items-center gap-2.5">
-        <span className="w-10 h-10 rounded-full bg-bg-soft"/>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-label text-ink-3">Discovering lead…</span>
-          {bar(48)}
+        <Skeleton className="size-10 shrink-0 rounded-lg" />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Skeleton className="h-3.5 w-3/5" />
+          <Skeleton className="h-3 w-2/5" />
         </div>
-        <span
-          className="ml-auto w-14 h-14 rounded-full border-[3px] border-dashed border-accent-line"
-        />
+        <Skeleton className="size-14 shrink-0 rounded-full" />
       </div>
+
+      {/* Role chip */}
+      <Skeleton className="h-6 w-36 rounded-tag" />
+
+      {/* Description */}
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-11/12" />
+        <Skeleton className="h-3 w-2/3" />
+      </div>
+
+      {/* Tags */}
       <div className="flex gap-1.5">
-        {bar(64)}
-        {bar(80)}
+        <Skeleton className="h-6 w-16 rounded-tag" />
+        <Skeleton className="h-6 w-20 rounded-tag" />
       </div>
-      <div className="mt-auto flex items-center gap-1.5 text-accent-fg">
-        <span
-          className="pulse-dot w-1.5 h-1.5 rounded-full bg-accent"
-        />
-        <span className="text-xs">Adding to results…</span>
+
+      {/* Footer */}
+      <div className="mt-auto flex items-center justify-between border-t border-line pt-3">
+        <Skeleton className="size-7 rounded-lg" />
+        <Skeleton className="h-8 w-28 rounded-lg" />
       </div>
     </div>
   );

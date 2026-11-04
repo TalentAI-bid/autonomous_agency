@@ -253,7 +253,14 @@ export function ActionCard({
         </div>
       </div>
 
-      {editing && <DraftEditorDialog action={action} onClose={() => setEditing(false)} />}
+      {editing && (
+        <DraftEditorDialog
+          action={action}
+          label={labelInfo.label}
+          recipient={[recommendedName, company.name].filter(Boolean).join(' · ')}
+          onClose={() => setEditing(false)}
+        />
+      )}
       {skipping && <SkipDialog actionId={action.id} onClose={() => setSkipping(false)} />}
       {executing?.kind === 'email_confirm' && contact && (
         <ExecuteConfirmDialog

@@ -1,16 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { CompanyFitScoreVerdict } from '@/types';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useReScoreCompany } from '@/hooks/use-fit-score';
 import { useToast } from '@/hooks/use-toast';
 import { apiPost } from '@/lib/api';
-import { RefreshCw, Loader2, Quote, Download, Users } from 'lucide-react';
+import { RefreshCw, Loader2, Quote, Download, Users, Target } from 'lucide-react';
+import { StatusPill } from '@/components/home/home-parts';
 import { FitScoreBadge } from './fit-score-badge';
 
 interface FitScorePanelProps {
@@ -21,7 +20,7 @@ interface FitScorePanelProps {
 }
 
 function componentBarColor(score: number | null): string {
-  if (score == null) return 'bg-muted';
+  if (score == null) return 'bg-bg-soft';
   if (score >= 80) return 'bg-up';
   if (score >= 60) return 'bg-up';
   if (score >= 40) return 'bg-warn';
@@ -97,35 +96,50 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
     }
   };
 
+  const actions = (short: boolean) => (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={handleRefetchInfo} disabled={refetchInfo.isPending} title="Re-enqueue the about-page scrape">
+        <Download className="mr-1.5 size-3.5" /> {short ? 'Info' : 'Refetch info'}
+      </Button>
+      <Input
+        value={teamKeyword}
+        onChange={(e) => setTeamKeyword(e.target.value)}
+        placeholder="Role, e.g. sales manager"
+        className="h-8 w-44 text-xs"
+        title="Optional: fetch only employees whose title matches this role"
+      />
+      <Button variant="panel" size="dense" className="h-8 rounded-lg px-3 text-xs" onClick={handleRefetchTeam} disabled={refetchTeam.isPending} title="Re-enqueue the people-page scrape (optionally filtered by role)">
+        <Users className="mr-1.5 size-3.5" /> {short ? 'Team' : 'Refetch team'}
+      </Button>
+      <Button variant="brand" size="dense" className="h-8 rounded-lg px-3 text-xs font-semibold" onClick={handleReScore} disabled={reScore.isPending}>
+        {reScore.isPending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 size-3.5" />}
+        {triage ? 'Re-score' : 'Score now'}
+      </Button>
+    </div>
+  );
+
+  const shell = (children: ReactNode, title: ReactNode, short: boolean) => (
+    <section className="overflow-hidden rounded-2xl border border-line bg-bg-panel shadow-sm">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-8 place-items-center rounded-lg bg-accent-weak text-accent">
+            <Target size={15} />
+          </span>
+          {title}
+        </div>
+        {actions(short)}
+      </header>
+      {children}
+    </section>
+  );
+
   if (!triage) {
-    return (
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-          <CardTitle className="text-sm font-medium">Buyer fit score</CardTitle>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleRefetchInfo} disabled={refetchInfo.isPending}>
-              <Download className="w-3 h-3 mr-1" /> Refetch info
-            </Button>
-            <Input
-              value={teamKeyword}
-              onChange={(e) => setTeamKeyword(e.target.value)}
-              placeholder="role e.g. sales manager"
-              className="h-8 w-40 text-xs"
-              title="Optional: fetch only employees whose title matches this role"
-            />
-            <Button variant="outline" size="sm" onClick={handleRefetchTeam} disabled={refetchTeam.isPending}>
-              <Users className="w-3 h-3 mr-1" /> Refetch team
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleReScore} disabled={reScore.isPending}>
-              {reScore.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              <span className="ml-1.5 text-xs">Score now</span>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No score yet for this company. Click Score now or wait for the next scrape to land.</p>
-        </CardContent>
-      </Card>
+    return shell(
+      <p className="m-0 px-5 py-6 text-body text-ink-3">
+        No score yet for this company. Click <span className="font-medium text-ink-2">Score now</span> or wait for the next scrape to land.
+      </p>,
+      <h2 className="m-0 text-body font-semibold text-ink">Buyer fit score</h2>,
+      false,
     );
   }
 
@@ -141,123 +155,102 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
     { key: 'tech_signals', label: 'Tech' },
   ];
 
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-sm font-medium flex items-center gap-3">
-          <FitScoreBadge score={triage.buyer_fit_score} explanation={triage.fit_summary} />
-          {triage.data_completeness === 'partial' && (
-            <Badge variant="outline" className="text-xs text-warn-fg border-warn/40">
-              partial data — score will refine
-            </Badge>
-          )}
-        </CardTitle>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleRefetchInfo} disabled={refetchInfo.isPending} title="Re-enqueue the about-page scrape">
-            <Download className="w-3 h-3 mr-1" /> Info
-          </Button>
-          <Input
-            value={teamKeyword}
-            onChange={(e) => setTeamKeyword(e.target.value)}
-            placeholder="role e.g. sales manager"
-            className="h-8 w-40 text-xs"
-            title="Optional: fetch only employees whose title matches this role"
-          />
-          <Button variant="outline" size="sm" onClick={handleRefetchTeam} disabled={refetchTeam.isPending} title="Re-enqueue the people-page scrape (optionally filtered by role)">
-            <Users className="w-3 h-3 mr-1" /> Team
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleReScore} disabled={reScore.isPending}>
-            {reScore.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            <span className="ml-1.5 text-xs">Re-score</span>
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        {/* Big score + summary */}
-        <div className="flex items-baseline gap-3">
-          <span className="text-3xl font-bold">{triage.buyer_fit_score}</span>
-          <span className="text-xs text-muted-foreground">/ 100</span>
-        </div>
-        <p className="text-sm text-muted-foreground italic">{triage.fit_summary}</p>
+  const LABEL = 'mb-2 text-3xs font-medium uppercase tracking-[0.09em] text-ink-4';
+  const hasSignals =
+    signalGroups.some(({ key }) => (triage.signals[key] as unknown[]).length > 0) || triage.signals.pain_hypotheses.length > 0;
 
-        {/* Component breakdown — 4 horizontal bars */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowRationale((v) => !v)}
-            className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 hover:text-foreground"
-          >
-            Component breakdown {showRationale ? '−' : '+'}
-          </button>
-          <div className="space-y-2">
-            {componentKeys.map((key) => {
-              const c = components[key];
-              const score = c.score;
-              const display = score == null ? '—' : String(score);
-              const widthPct = score == null ? 0 : Math.max(2, score);
-              return (
-                <div key={key} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium">{COMPONENT_LABELS[key]}</span>
-                    <span className="font-mono">{display}</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                    <div className={`h-full ${componentBarColor(score)}`} style={{ width: `${widthPct}%` }} />
-                  </div>
-                  {showRationale && c.reasoning && (
-                    <p className="text-xs text-muted-foreground">{c.reasoning}</p>
-                  )}
+  return shell(
+    <div className="space-y-6 p-5">
+      {/* Big score + summary */}
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+        <div className="flex items-baseline gap-1.5">
+          <span className="font-mono text-[40px] font-semibold leading-none text-ink">{triage.buyer_fit_score}</span>
+          <span className="text-xs text-ink-3">/ 100</span>
+        </div>
+        <p className="m-0 min-w-[240px] flex-1 text-body leading-relaxed text-ink-2">{triage.fit_summary}</p>
+      </div>
+
+      {/* Component breakdown */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowRationale((v) => !v)}
+          className={`${LABEL} border-0 bg-transparent p-0 transition-colors hover:text-ink-2`}
+        >
+          Component breakdown · {showRationale ? 'hide reasoning' : 'show reasoning'}
+        </button>
+        <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+          {componentKeys.map((key) => {
+            const c = components[key];
+            const score = c.score;
+            const display = score == null ? '—' : String(score);
+            const widthPct = score == null ? 0 : Math.max(2, score);
+            return (
+              <div key={key}>
+                <div className="mb-1.5 flex items-center justify-between text-xs">
+                  <span className="font-medium text-ink">{COMPONENT_LABELS[key]}</span>
+                  <span className="font-mono text-ink-2">{display}</span>
                 </div>
-              );
-            })}
-          </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-soft">
+                  <div className={`h-full rounded-full ${componentBarColor(score)}`} style={{ width: `${widthPct}%` }} />
+                </div>
+                {showRationale && c.reasoning && <p className="m-0 mt-1.5 text-xs leading-snug text-ink-3">{c.reasoning}</p>}
+              </div>
+            );
+          })}
         </div>
+      </div>
 
-        {/* Key person */}
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Key person</p>
-          {triage.key_person ? (
-            <div className="rounded-md border bg-muted/20 p-3 space-y-1">
-              <p className="font-medium">{triage.key_person.name}</p>
-              <p className="text-xs text-muted-foreground">{triage.key_person.title}</p>
-              <p className="text-xs italic">{triage.key_person.rationale}</p>
+      {/* Key person */}
+      <div>
+        <p className={LABEL}>Key person</p>
+        {triage.key_person ? (
+          <div className="rounded-xl border border-line bg-bg-sub p-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="m-0 text-body font-medium text-ink">{triage.key_person.name}</p>
+                <p className="m-0 text-xs text-ink-3">{triage.key_person.title}</p>
+              </div>
               {triage.key_person.linkedinUrl && (
                 <a
                   href={triage.key_person.linkedinUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-info hover:underline"
+                  className="shrink-0 text-xs font-medium text-info no-underline hover:underline"
                 >
                   LinkedIn ↗
                 </a>
               )}
             </div>
-          ) : (
-            <p className="text-muted-foreground text-xs">
-              {triage.key_person_problem === 'people_list_was_empty'
-                ? 'Team data not scraped yet — click Refetch team to populate.'
-                : (triage.key_person_problem ?? 'No suitable decision maker surfaced.')}
-            </p>
-          )}
-        </div>
+            <p className="m-0 mt-2 text-xs italic leading-snug text-ink-2">{triage.key_person.rationale}</p>
+          </div>
+        ) : (
+          <p className="m-0 text-xs text-ink-3">
+            {triage.key_person_problem === 'people_list_was_empty'
+              ? 'Team data not scraped yet. Click Refetch team to populate.'
+              : (triage.key_person_problem ?? 'No suitable decision maker surfaced.')}
+          </p>
+        )}
+      </div>
 
-        {/* Signals */}
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Signals</p>
-          <div className="space-y-3">
+      {/* Signals */}
+      <div>
+        <p className={LABEL}>Signals</p>
+        {hasSignals ? (
+          <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
             {signalGroups.map(({ key, label }) => {
               const items = triage.signals[key] as Array<{ claim: string; citation: string }>;
               if (!items.length) return null;
               return (
                 <div key={key}>
-                  <p className="text-xs font-medium mb-1">{label}</p>
-                  <ul className="space-y-1.5">
-                    {items.map((s, i) => (
-                      <li key={i} className="text-xs">
-                        <span>{s.claim}</span>
-                        <span className="block text-muted-foreground italic mt-0.5">
-                          <Quote className="inline w-3 h-3 mr-1" />
-                          {s.citation}
+                  <p className="m-0 mb-1.5 text-xs font-semibold text-ink">{label}</p>
+                  <ul className="m-0 list-none space-y-2 p-0">
+                    {items.map((sig, i) => (
+                      <li key={i} className="text-xs text-ink-2">
+                        <span>{sig.claim}</span>
+                        <span className="mt-0.5 block italic text-ink-3">
+                          <Quote className="mr-1 inline size-3" />
+                          {sig.citation}
                         </span>
                       </li>
                     ))}
@@ -266,33 +259,37 @@ export function FitScorePanel({ companyId, triage }: FitScorePanelProps) {
               );
             })}
             {triage.signals.pain_hypotheses.length > 0 && (
-              <div>
-                <p className="text-xs font-medium mb-1">Pain hypotheses</p>
-                <ul className="space-y-1.5">
-                  {triage.signals.pain_hypotheses.map((p, i) => (
-                    <li key={i} className="text-xs">
-                      <span className="font-medium">{p.inferred_pain}</span>
-                      <span className="text-muted-foreground"> — confidence {p.confidence.toFixed(2)}</span>
-                      <span className="block text-muted-foreground italic mt-0.5">
-                        <Quote className="inline w-3 h-3 mr-1" />
-                        {p.stated_fact}
+              <div className="md:col-span-2">
+                <p className="m-0 mb-1.5 text-xs font-semibold text-ink">Pain hypotheses</p>
+                <ul className="m-0 list-none space-y-2 p-0">
+                  {triage.signals.pain_hypotheses.map((pp, i) => (
+                    <li key={i} className="text-xs text-ink-2">
+                      <span className="font-medium text-ink">{pp.inferred_pain}</span>
+                      <span className="text-ink-3"> · confidence {pp.confidence.toFixed(2)}</span>
+                      <span className="mt-0.5 block italic text-ink-3">
+                        <Quote className="mr-1 inline size-3" />
+                        {pp.stated_fact}
                       </span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            {signalGroups.every(({ key }) => (triage.signals[key] as unknown[]).length === 0) &&
-              triage.signals.pain_hypotheses.length === 0 && (
-                <p className="text-xs text-muted-foreground">No grounded signals — that's fine and honest.</p>
-              )}
           </div>
-        </div>
+        ) : (
+          <p className="m-0 text-xs text-ink-3">No grounded signals, and that is fine and honest.</p>
+        )}
+      </div>
 
-        <p className="text-2xs text-muted-foreground pt-2 border-t">
-          Scored at {new Date(triage.scored_at).toLocaleString()} · {triage.model_used} · Data: {triage.data_completeness}
-        </p>
-      </CardContent>
-    </Card>
+      <p className="m-0 border-t border-line pt-3 text-2xs text-ink-4">
+        Scored {new Date(triage.scored_at).toLocaleString()} · {triage.model_used} · Data: {triage.data_completeness}
+      </p>
+    </div>,
+    <div className="flex flex-wrap items-center gap-2.5">
+      <h2 className="m-0 text-body font-semibold text-ink">Buyer fit score</h2>
+      <FitScoreBadge score={triage.buyer_fit_score} explanation={triage.fit_summary} />
+      {triage.data_completeness === 'partial' && <StatusPill tone="warn">Partial data · score will refine</StatusPill>}
+    </div>,
+    true,
   );
 }

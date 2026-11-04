@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import type { Product } from '@/types';
 
 import { Select } from '@/components/ui/select';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 const PRICING_MODELS = [
   { value: '', label: 'Select pricing model' },
   { value: 'subscription', label: 'Subscription' },
@@ -100,6 +101,7 @@ function toPayload(form: ProductForm) {
 }
 
 export default function ProductsPage() {
+  const confirm = useConfirm();
   const { data: products, isLoading } = useProducts();
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
@@ -129,7 +131,12 @@ export default function ProductsPage() {
   }
 
   async function handleDelete(product: Product) {
-    if (!confirm(`Delete "${product.name}"? Agents will stop using it.`)) return;
+    const ok = await confirm({
+      title: `Delete "${product.name}"?`,
+      description: 'Agents will stop using it. This cannot be undone.',
+      confirmLabel: 'Delete product',
+    });
+    if (!ok) return;
     try {
       const id = product.id;
       await deleteProduct.mutateAsync(id);

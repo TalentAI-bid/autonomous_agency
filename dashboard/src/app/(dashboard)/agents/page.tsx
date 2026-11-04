@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Cpu, Info } from 'lucide-react';
 import { useAgents, useDeleteAgent, useStartAgent, useStopAgent } from '@/hooks/use-agents';
 import { SCORE_BAR } from '@/hooks/use-home';
@@ -10,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AgentCard } from '@/components/agents/agent-card';
 
 export default function AgentsPage() {
+  const confirm = useConfirm();
   const { data, isLoading } = useAgents();
   const deleteAgent = useDeleteAgent();
   const startAgent = useStartAgent();
@@ -38,7 +40,12 @@ export default function AgentsPage() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete agent "${name}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete agent "${name}"?`,
+      description: 'Its settings and history are removed. This cannot be undone.',
+      confirmLabel: 'Delete agent',
+    });
+    if (!ok) return;
     try {
       await deleteAgent.mutateAsync(id);
       toast({ title: `Agent "${name}" deleted` });

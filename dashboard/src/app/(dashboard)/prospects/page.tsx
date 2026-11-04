@@ -3,14 +3,15 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Rocket, Plus, Building2, Search, ChevronDown, X } from 'lucide-react';
+import { Rocket, Plus, Building2, Search, X } from 'lucide-react';
 import { useProspects } from '@/hooks/use-prospect';
 import type { ProspectListRow } from '@/lib/api/prospects';
 import { ExportButton } from '@/components/shared/export-button';
-import { LeadCard, DiscoveringCard, type LeadTag } from '@/components/leads/lead-card';
+import { LeadCard, LeadCardSkeleton, type LeadTag } from '@/components/leads/lead-card';
 import { Users } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 const STAGES = [
   { value: '', label: 'All stages' },
   { value: 'new', label: 'New' },
@@ -62,20 +63,13 @@ function Avatar({ text, hueSeed, size = 40 }: { text: string; hueSeed: string; s
 
 function FilterSelect({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
-    <span className="relative inline-flex h-9 items-center rounded-lg border border-line bg-bg-panel transition-colors hover:border-line-strong focus-within:border-accent-mid focus-within:ring-2 focus-within:ring-accent-weak">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-[34px] cursor-pointer appearance-none border-0 bg-transparent pl-3 pr-8 text-body font-medium text-ink outline-none"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={13} className="pointer-events-none absolute right-2.5 text-ink-4" />
-    </span>
+    <Select value={value} onChange={(e) => onChange(e.target.value)} className="font-medium">
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </Select>
   );
 }
 
@@ -224,7 +218,7 @@ export default function ProspectsPage() {
       {isLoading ? (
         <div className="leads-grid">
           {Array.from({ length: 6 }).map((_, i) => (
-            <DiscoveringCard key={i} />
+            <LeadCardSkeleton key={i} />
           ))}
         </div>
       ) : count === 0 ? (

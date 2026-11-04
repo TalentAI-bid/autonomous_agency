@@ -13,7 +13,8 @@ import { useSetupStatus } from '@/hooks/use-setup-status';
 import { useGetStarted } from '@/hooks/use-get-started';
 import { apiPost } from '@/lib/api';
 
-type NavItem = { href: string; label: string; icon: IconName; count?: number; meta?: string };
+/** `match` is the route prefix that lights the item up, when it differs from where `href` goes. */
+type NavItem = { href: string; label: string; icon: IconName; count?: number; meta?: string; match?: string };
 type NavGroup = { title: string; items: NavItem[] };
 
 function initials(source?: string | null) {
@@ -137,14 +138,14 @@ export function Sidebar() {
     {
       title: 'Account',
       items: [
-        { href: '/settings', label: 'Settings', icon: 'cog' },
+        { href: '/settings/company', match: '/settings', label: 'Settings', icon: 'cog' },
       ],
     },
   ];
 
   // A route is active when it is the path or a parent of it; the longest
   // matching href wins so /settings doesn't light up on /settings/email.
-  const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
+  const allHrefs = groups.flatMap((g) => g.items.map((i) => i.match ?? i.href));
   const activeHref = allHrefs
     .filter((h) => pathname === h || pathname.startsWith(h + '/'))
     .sort((a, b) => b.length - a.length)[0];
@@ -162,7 +163,7 @@ export function Sidebar() {
             <div className="px-2.5 pb-1.5 pt-3.5 text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">{g.title}</div>
             <div className="flex flex-col gap-0.5">
               {g.items.map((item) => (
-                <NavLink key={g.title + item.href} {...item} active={item.href === activeHref} />
+                <NavLink key={g.title + item.href} {...item} active={(item.match ?? item.href) === activeHref} />
               ))}
             </div>
           </div>

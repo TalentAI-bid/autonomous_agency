@@ -7,6 +7,7 @@ import { setAuthInterceptors } from '@/lib/api';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { StatusBar } from '@/components/layout/status-bar';
+import { ShellSkeleton } from '@/components/layout/shell-skeleton';
 import { ActivityFab } from '@/components/copilot/activity-fab';
 import { useWebSocket } from '@/hooks/use-websocket';
 import { useSetupStatus } from '@/hooks/use-setup-status';
@@ -51,8 +52,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!isAuthenticated || !token) router.replace('/login');
   }, [hasHydrated, isAuthenticated, token, router]);
 
-  if (!hasHydrated) return null;
-  if (!isAuthenticated || !token) return null;
+  // Until the saved login is read (and while redirecting to /login) show the shell outline, not a blank page.
+  if (!hasHydrated || !isAuthenticated || !token) return <ShellSkeleton />;
 
   return <DashboardContent>{children}</DashboardContent>;
 }

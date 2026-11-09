@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Building2, Target, TrendingUp, Award, Send, Loader2, Save, Sparkles, X } from 'lucide-react';
-import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { CopilotPanel } from '@/components/copilot/copilot-panel.lazy';
 import type { CompanyProfile } from '@/types';
 
 const COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];

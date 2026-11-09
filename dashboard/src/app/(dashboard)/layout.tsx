@@ -8,9 +8,12 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { StatusBar } from '@/components/layout/status-bar';
 import { ShellSkeleton } from '@/components/layout/shell-skeleton';
-import { ActivityFab } from '@/components/copilot/activity-fab';
+import dynamic from 'next/dynamic';
 import { useWebSocket } from '@/hooks/use-websocket';
 import { useSetupStatus } from '@/hooks/use-setup-status';
+
+// Floating helper: not needed for first paint, so keep it out of every page's initial JS.
+const ActivityFab = dynamic(() => import('@/components/copilot/activity-fab').then((m) => m.ActivityFab), { ssr: false });
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   useWebSocket();

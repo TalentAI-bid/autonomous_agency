@@ -11,7 +11,7 @@ import { useContactTimeline, useDeals, useCrmStages } from '@/hooks/use-crm';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageBadge } from '@/components/crm/stage-badge';
 import { AddActivityDialog } from '@/components/crm/add-activity-dialog';
-import { EmailComposeModal } from '@/components/contacts/email-compose-modal';
+import { EmailComposeModal } from '@/components/contacts/email-compose-modal.lazy';
 import { EmailEditor } from '@/components/contacts/email-editor';
 import { EditContactModal } from '@/components/contacts/edit-contact-modal';
 import { SequencePanel } from '@/components/contacts/sequence-panel';

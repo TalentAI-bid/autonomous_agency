@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Check, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CopilotPanel } from '@/components/copilot/copilot-panel';
+import { CopilotPanel } from '@/components/copilot/copilot-panel.lazy';
 import { cn } from '@/lib/utils';
 import { numberWord, useGetStarted, type GetStartedStep } from '@/hooks/use-get-started';
 

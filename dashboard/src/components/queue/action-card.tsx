@@ -5,9 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import type { QueueAction, QueueContact, QueueCompany, TargetAlternative } from '@/lib/api/queue';
-import { DraftEditorDialog } from './draft-editor-dialog';
-import { SkipDialog } from './skip-dialog';
-import { ExecuteConfirmDialog } from './execute-confirm-dialog';
+import dynamic from 'next/dynamic';
+
 import {
   useExecuteAction,
   useCompleteAction,
@@ -16,6 +15,11 @@ import {
 import { toast } from '@/hooks/use-toast';
 
 import { cn } from '@/lib/utils';
+
+const DraftEditorDialog = dynamic(() => import('./draft-editor-dialog').then((m) => m.DraftEditorDialog), { ssr: false });
+const SkipDialog = dynamic(() => import('./skip-dialog').then((m) => m.SkipDialog), { ssr: false });
+const ExecuteConfirmDialog = dynamic(() => import('./execute-confirm-dialog').then((m) => m.ExecuteConfirmDialog), { ssr: false });
+
 const ACTION_LABELS: Record<string, { icon: string; label: string }> = {
   linkedin_connect:                  { icon: '🤝', label: 'Connection Request' },
   linkedin_dm_first:                 { icon: '💼', label: 'LinkedIn DM (first)' },

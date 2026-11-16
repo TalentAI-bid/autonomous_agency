@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '@/lib/api';
+import { usePollInterval } from '@/hooks/use-poll-interval';
 
 export interface AgentMessage {
   id: string;
@@ -16,6 +17,8 @@ export interface AgentMessage {
 }
 
 export function useAgentRoomMessages(masterAgentId: string, filters?: { fromAgent?: string; messageType?: string }) {
+  // 'agent:message' over the WebSocket already invalidates this; polling is the fallback.
+  const refetchInterval = usePollInterval(5000, 30000);
   return useQuery({
     queryKey: ['agent-room', masterAgentId, filters],
     queryFn: () => {
@@ -27,7 +30,7 @@ export function useAgentRoomMessages(masterAgentId: string, filters?: { fromAgen
         `/agent-room/${masterAgentId}/messages?${params.toString()}`
       );
     },
-    refetchInterval: 5000,
+    refetchInterval,
     enabled: !!masterAgentId,
   });
 }

@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import axiosInstance from '@/lib/api';
+import { usePollInterval } from '@/hooks/use-poll-interval';
 import type { ActivityLogEntry } from '@/types';
 
 interface ActivityFeedParams {
@@ -18,6 +19,8 @@ interface ActivityFeedResponse {
 }
 
 export function useActivityFeed(params: ActivityFeedParams) {
+  // 'agent:activity' over the WebSocket already invalidates this; polling is the fallback.
+  const refetchInterval = usePollInterval(15000, 60000);
   return useQuery({
     queryKey: ['activity', 'feed', params],
     queryFn: async () => {
@@ -32,7 +35,7 @@ export function useActivityFeed(params: ActivityFeedParams) {
       return res.data;
     },
     staleTime: 10000,
-    refetchInterval: 15000,
+    refetchInterval,
   });
 }
 

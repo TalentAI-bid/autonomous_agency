@@ -82,7 +82,7 @@ export function StatCard({
       <div className="text-2xs font-medium uppercase tracking-[0.09em] text-ink-4">{label}</div>
       <div className={cn('mt-2 flex items-baseline gap-1.5 text-[18px] font-semibold leading-none', muted ? 'text-ink-4' : 'text-ink')}>
         <span>{value}</span>
-        {tail && <span className={cn('text-[18px] font-semibold', muted ? 'text-ink-4' : 'text-ink')}>{tail}</span>}
+        {tail && <span>{tail}</span>}
       </div>
       {detail && <div className="mt-2.5 text-xs text-ink-3">{detail}</div>}
     </Card>

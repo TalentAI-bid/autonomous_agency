@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, ChevronDown, Info, RotateCw, X } from 'lucide-react';
-import { useAgentErrors, useResolveError, useStartAgent, type PipelineErrorRow } from '@/hooks/use-agents';
+import { useAgentErrors, useResolveError, useStartAgent } from '@/hooks/use-agents';
 import { useRealtimeStore } from '@/stores/realtime.store';
 
 import { Button } from '@/components/ui/button';

@@ -71,7 +71,6 @@ export function EmailComposeModal({
   }, [contactId, toast]);
 
   const track = draftMeta?.track ?? 'NORMAL_OUTREACH';
-  const classification = draftMeta?.classification ?? 'POTENTIAL_BUYER';
   const isSkip = track === 'SKIP';
   const isPartnership = track === 'PARTNERSHIP_OUTREACH';
   const isCollaboration = track === 'COLLABORATION_OUTREACH';

@@ -66,7 +66,6 @@ export function ContactPicker({
   const contacts = results?.data ?? [];
 
   // Show the selected contact's display label even after the user types something else
-  const { data: selectedRes } = useContacts(value ? undefined : undefined);
   const selectedContact = value ? contacts.find((c) => c.id === value) ?? null : null;
   // Best-effort: keep the last picked label even when query changes
   const [pickedLabel, setPickedLabel] = React.useState<string | null>(null);

@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiGetPaginated, apiPatch, apiPost } from '@/lib/api';
-import type { Contact, ContactFilters, PaginatedResponse } from '@/types';
+import type { Contact, ContactFilters } from '@/types';
 
 export interface FindEmailResult {
   email: string | null;

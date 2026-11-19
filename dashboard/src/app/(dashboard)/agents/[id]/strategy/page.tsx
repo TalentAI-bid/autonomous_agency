@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate } from '@/lib/utils';
-import { Brain, CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react';
+import { Brain, CheckCircle2, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import type { DailyStrategy, StrategyExecutionStatus } from '@/types';

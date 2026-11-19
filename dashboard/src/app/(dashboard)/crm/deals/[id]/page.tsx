@@ -7,8 +7,6 @@ import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageBadge } from '@/components/crm/stage-badge';
 import { AddActivityDialog } from '@/components/crm/add-activity-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDate, formatRelative } from '@/lib/utils';
 import { DollarSign, User, Building, Clock, FileText } from 'lucide-react';

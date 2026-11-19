@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, apiGetPaginated } from '@/lib/api';
-import type { Company, CompanyFilters, PaginatedResponse } from '@/types';
+import type { Company, CompanyFilters } from '@/types';
 
 export function useCompanies(filters?: CompanyFilters) {
   return useQuery({

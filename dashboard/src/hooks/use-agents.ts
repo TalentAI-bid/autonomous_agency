@@ -3,12 +3,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiGetPaginated, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import type { MasterAgent, Company, Document } from '@/types';
+import { STALE } from '@/lib/query';
 
 export function useAgents() {
   return useQuery({
     queryKey: ['agents'],
     queryFn: () => apiGet<MasterAgent[]>('/master-agents'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 
@@ -17,7 +18,7 @@ export function useMasterAgent(id: string) {
     queryKey: ['agents', id],
     queryFn: () => apiGet<MasterAgent>(`/master-agents/${id}`),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -28,7 +29,6 @@ export function useUpdateAgent() {
       apiPatch<MasterAgent>(`/master-agents/${id}`, data),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['agents'] });
-      qc.invalidateQueries({ queryKey: ['agents', vars.id] });
     },
   });
 }
@@ -39,7 +39,6 @@ export function useStartAgent() {
     mutationFn: (id: string) => apiPost<{ status: string; queryCount: number; dispatchedJobIds: string[] }>(`/master-agents/${id}/start`),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['agents'] });
-      qc.invalidateQueries({ queryKey: ['agents', id] });
     },
   });
 }
@@ -50,7 +49,6 @@ export function useStopAgent() {
     mutationFn: (id: string) => apiPost<{ status: string }>(`/master-agents/${id}/stop`),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['agents'] });
-      qc.invalidateQueries({ queryKey: ['agents', id] });
     },
   });
 }
@@ -87,7 +85,7 @@ export function useAgentStats(id: string) {
     queryKey: ['agents', id, 'stats'],
     queryFn: () => apiGet<AgentStats>(`/master-agents/${id}/stats`),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -107,7 +105,7 @@ export function useAgentEmails(id: string) {
     queryKey: ['agents', id, 'emails'],
     queryFn: () => apiGet<AgentEmail[]>(`/master-agents/${id}/emails`),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -128,7 +126,7 @@ export function useAgentCompanies(
       ...(sortBy ? { sortBy } : {}),
     }),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -137,7 +135,7 @@ export function useAgentDocuments(id: string) {
     queryKey: ['agents', id, 'documents'],
     queryFn: () => apiGet<Document[]>(`/master-agents/${id}/documents`),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -177,7 +175,7 @@ export function useMasterAgentQuota(id: string) {
     queryKey: ['agents', id, 'quota'],
     queryFn: () => apiGet<QuotaSnapshot>(`/master-agents/${id}/quota`),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
     refetchInterval: 30000,
   });
 }
@@ -203,7 +201,7 @@ export function useAgentErrors(id: string, unresolved = true) {
     queryKey: ['agents', id, 'errors', unresolved],
     queryFn: () => apiGet<PipelineErrorRow[]>(`/master-agents/${id}/errors?unresolved=${unresolved}`),
     enabled: !!id,
-    staleTime: 10000,
+    staleTime: STALE.short,
     refetchInterval: 15000,
   });
 }

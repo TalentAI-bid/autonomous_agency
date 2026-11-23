@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, apiGet } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { STALE } from '@/lib/query';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -35,7 +36,7 @@ export function useCopilotSession(id: string | null) {
     queryKey: ['copilot-session', id],
     queryFn: () => apiGet<CopilotSession>(`/copilot/sessions/${id}`),
     enabled: !!id,
-    staleTime: 10000,
+    staleTime: STALE.short,
   });
 }
 

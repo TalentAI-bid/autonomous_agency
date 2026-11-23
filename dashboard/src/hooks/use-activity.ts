@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import axiosInstance from '@/lib/api';
 import { usePollInterval } from '@/hooks/use-poll-interval';
 import type { ActivityLogEntry } from '@/types';
+import { STALE } from '@/lib/query';
 
 interface ActivityFeedParams {
   masterAgentId?: string;
@@ -34,7 +35,7 @@ export function useActivityFeed(params: ActivityFeedParams) {
       const res = await axiosInstance.get<ActivityFeedResponse>('/activity/feed', { params: searchParams });
       return res.data;
     },
-    staleTime: 10000,
+    staleTime: STALE.short,
     refetchInterval,
   });
 }

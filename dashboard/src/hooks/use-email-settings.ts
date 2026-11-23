@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import type { EmailAccount, EmailListenerConfig, QuotaStatus } from '@/types';
+import { STALE } from '@/lib/query';
 
 // ── Email Accounts ────────────────────────────────────────────────────────────
 
@@ -10,7 +11,7 @@ export function useEmailAccounts() {
   return useQuery({
     queryKey: ['email-accounts'],
     queryFn: () => apiGet<EmailAccount[]>('/email-accounts'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 
@@ -68,7 +69,7 @@ export function useEmailAccountQuota(id: string) {
     queryKey: ['email-accounts', id, 'quota'],
     queryFn: () => apiGet<QuotaStatus>(`/email-accounts/${id}/quota-status`),
     enabled: !!id,
-    staleTime: 10000,
+    staleTime: STALE.short,
   });
 }
 
@@ -78,7 +79,7 @@ export function useEmailListeners() {
   return useQuery({
     queryKey: ['email-listeners'],
     queryFn: () => apiGet<EmailListenerConfig[]>('/email-listeners'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 

@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '@/lib/api';
+import { STALE } from '@/lib/query';
 
 export interface DashboardAnalytics {
   contacts: {
@@ -31,7 +32,7 @@ export function useDashboardAnalytics() {
   return useQuery({
     queryKey: ['analytics', 'dashboard'],
     queryFn: () => apiGet<DashboardAnalytics>('/analytics/dashboard'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 
@@ -47,6 +48,6 @@ export function useOutreachActivity() {
   return useQuery({
     queryKey: ['analytics', 'outreach-activity'],
     queryFn: () => apiGet<OutreachActivity>('/analytics/outreach-activity'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }

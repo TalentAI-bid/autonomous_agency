@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { STALE } from '@/lib/query';
 import {
   listProspects,
   getProspect,
@@ -15,7 +16,7 @@ export function useProspects(filters: ProspectListFilters = {}) {
   return useQuery({
     queryKey: ['prospects', filters],
     queryFn: () => listProspects(filters),
-    staleTime: 10_000,
+    staleTime: STALE.short,
   });
 }
 
@@ -35,7 +36,7 @@ export function useProspectTimeline(
     queryKey: ['prospect-timeline', id, opts],
     queryFn: () => getProspectTimeline(id!, opts),
     enabled: !!id,
-    staleTime: 5_000,
+    staleTime: STALE.realtime,
   });
 }
 

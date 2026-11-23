@@ -4,12 +4,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import type { Workspace, Tenant } from '@/types';
+import { STALE } from '@/lib/query';
 
 export function useWorkspaces() {
   return useQuery({
     queryKey: ['workspaces'],
     queryFn: () => apiGet<Workspace[]>('/workspaces'),
-    staleTime: 60000,
+    staleTime: STALE.static,
   });
 }
 

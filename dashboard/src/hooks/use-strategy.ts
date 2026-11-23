@@ -3,13 +3,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '@/lib/api';
 import type { DailyStrategy } from '@/types';
+import { STALE } from '@/lib/query';
 
 export function useStrategyHistory(masterAgentId: string) {
   return useQuery({
     queryKey: ['strategy', masterAgentId, 'history'],
     queryFn: () => apiGet<DailyStrategy[]>(`/strategy/${masterAgentId}/history`),
     enabled: !!masterAgentId,
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 
@@ -18,7 +19,7 @@ export function useLatestStrategy(masterAgentId: string) {
     queryKey: ['strategy', masterAgentId, 'latest'],
     queryFn: () => apiGet<DailyStrategy | null>(`/strategy/${masterAgentId}/latest`),
     enabled: !!masterAgentId,
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 

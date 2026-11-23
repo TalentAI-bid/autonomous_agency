@@ -15,6 +15,7 @@ import {
 import { useRealtimeStore } from '@/stores/realtime.store';
 import { useToast } from '@/hooks/use-toast';
 import { wsManager } from '@/lib/websocket';
+import { STALE } from '@/lib/query';
 
 const POLL_WINDOW_MS = 120_000;
 const POLL_INTERVAL_MS = 4_000;
@@ -57,7 +58,7 @@ export function useQueue(masterAgentId?: string) {
     queryKey: ['queue', masterAgentId ?? null],
     queryFn: () => getQueue({ masterAgentId }),
     refetchOnWindowFocus: true,
-    staleTime: 5_000,
+    staleTime: STALE.realtime,
     refetchInterval: pollOpen ? POLL_INTERVAL_MS : false,
   });
 

@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPut } from '@/lib/api';
+import { STALE } from '@/lib/query';
 
 export type StudioChannel =
   | 'email_cold'
@@ -70,7 +71,7 @@ export function useMessagingConfig() {
   return useQuery({
     queryKey: ['studio', 'config'],
     queryFn: () => apiGet<MessagingConfig>('/studio/config'),
-    staleTime: 30_000,
+    staleTime: STALE.long,
   });
 }
 

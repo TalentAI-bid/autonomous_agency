@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPatch } from '@/lib/api';
 import type { Opportunity, OpportunityStats } from '@/types';
+import { STALE } from '@/lib/query';
 
 interface OpportunityFilters {
   type?: string;
@@ -30,7 +31,7 @@ export function useOpportunities(masterAgentId: string, filters?: OpportunityFil
         `/opportunities/${masterAgentId}/list${qs ? `?${qs}` : ''}`
       ),
     enabled: !!masterAgentId,
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 
@@ -39,7 +40,7 @@ export function useOpportunityStats(masterAgentId: string) {
     queryKey: ['opportunities', masterAgentId, 'stats'],
     queryFn: () => apiGet<OpportunityStats>(`/opportunities/${masterAgentId}/stats`),
     enabled: !!masterAgentId,
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 

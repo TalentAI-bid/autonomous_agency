@@ -5,6 +5,7 @@ import { apiGet } from '@/lib/api';
 import { useCompanyProfile } from '@/hooks/use-company-profile';
 import { useEmailAccounts } from '@/hooks/use-email-settings';
 import { useAgents } from '@/hooks/use-agents';
+import { STALE } from '@/lib/query';
 
 export interface SetupSteps {
   company: boolean;
@@ -40,7 +41,7 @@ export function useSetupStatus(): SetupStatus {
   const extensionQ = useQuery({
     queryKey: ['ext-status'],
     queryFn: () => apiGet<{ connected: boolean; pendingTaskCount?: number }>('/extension/status'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 
   const steps: SetupSteps = {

@@ -10,6 +10,7 @@ import { useMailboxDigest, useMailboxThreads } from '@/hooks/use-mailbox';
 import { useQueue } from '@/hooks/use-queue';
 import { useMessagingConfig } from '@/hooks/use-studio';
 import type { MasterAgent, QuotaStatus } from '@/types';
+import { STALE } from '@/lib/query';
 
 /* ─── Not-yet-available inputs ─────────────────────────────────────────
    The Home design needs a few things the backend does not expose yet. The UI is
@@ -99,7 +100,7 @@ export function useHomeData() {
   const ext = useQuery({
     queryKey: ['ext-status'],
     queryFn: () => apiGet<{ connected: boolean; lastSeenAt?: string | null; hasKey?: boolean }>('/extension/status'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 
   const accountList = accounts.data ?? [];
@@ -107,7 +108,7 @@ export function useHomeData() {
     queries: accountList.map((a) => ({
       queryKey: ['email-accounts', a.id, 'quota'],
       queryFn: () => apiGet<QuotaStatus>(`/email-accounts/${a.id}/quota-status`),
-      staleTime: 30000,
+      staleTime: STALE.long,
     })),
   });
 
@@ -116,7 +117,7 @@ export function useHomeData() {
     queries: agentList.slice(0, 6).map((a) => ({
       queryKey: ['agents', a.id, 'stats'],
       queryFn: () => apiGet<{ totalContacts: number; byStatus: Record<string, number>; avgScore: number | null }>(`/master-agents/${a.id}/stats`),
-      staleTime: 15000,
+      staleTime: STALE.normal,
     })),
   });
 

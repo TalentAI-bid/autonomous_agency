@@ -3,12 +3,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import type { Product } from '@/types';
+import { STALE } from '@/lib/query';
 
 export function useProducts() {
   return useQuery({
     queryKey: ['products'],
     queryFn: () => apiGet<Product[]>('/products'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 

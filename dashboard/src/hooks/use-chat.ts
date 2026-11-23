@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiPost, apiGet } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import type { ConversationWithMessages, ChatMessage, PipelineProposalData } from '@/types/chat';
+import { STALE } from '@/lib/query';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -19,7 +20,7 @@ export function useConversation(id: string | null) {
     queryKey: ['conversation', id],
     queryFn: () => apiGet<ConversationWithMessages>(`/chat/conversations/${id}`),
     enabled: !!id,
-    staleTime: 10000,
+    staleTime: STALE.short,
   });
 }
 

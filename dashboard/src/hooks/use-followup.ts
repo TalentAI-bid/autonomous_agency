@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '@/lib/api';
+import { STALE } from '@/lib/query';
 
 export interface FollowupSequenceCampaign {
   id: string;
@@ -56,7 +57,7 @@ export function useContactSequence(contactId: string) {
     queryKey: ['followup', 'sequence', contactId],
     queryFn: () => apiGet<FollowupSequenceData>(`/followup/contacts/${contactId}/sequence`),
     enabled: !!contactId,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 

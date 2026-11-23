@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '@/lib/api';
 import type { MailboxEmail, MailboxStats, MailboxThread, MailboxThreadDetail, MailboxDigest } from '@/types';
+import { STALE } from '@/lib/query';
 
 interface MailboxListResponse {
   data: MailboxEmail[];
@@ -20,7 +21,7 @@ export function useMailboxSent(filters?: { limit?: number; cursor?: string; sear
   return useQuery({
     queryKey: ['mailbox', 'sent', filters],
     queryFn: () => apiGet<MailboxListResponse>('/mailbox/sent', filters as Record<string, unknown>),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -28,7 +29,7 @@ export function useMailboxInbox(filters?: { limit?: number; cursor?: string; sea
   return useQuery({
     queryKey: ['mailbox', 'inbox', filters],
     queryFn: () => apiGet<MailboxListResponse>('/mailbox/inbox', filters as Record<string, unknown>),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -36,7 +37,7 @@ export function useMailboxStats() {
   return useQuery({
     queryKey: ['mailbox', 'stats'],
     queryFn: () => apiGet<MailboxStats>('/mailbox/stats'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 
@@ -51,7 +52,7 @@ export function useMailboxThreads(filters?: {
   return useQuery({
     queryKey: ['mailbox', 'threads', filters],
     queryFn: () => apiGet<ThreadListResponse>('/mailbox/threads', filters as Record<string, unknown>),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -60,7 +61,7 @@ export function useMailboxThread(id: string | null) {
     queryKey: ['mailbox', 'thread', id],
     queryFn: () => apiGet<MailboxThreadDetail>(`/mailbox/threads/${id}`),
     enabled: !!id,
-    staleTime: 10000,
+    staleTime: STALE.short,
   });
 }
 
@@ -68,7 +69,7 @@ export function useMailboxDigest() {
   return useQuery({
     queryKey: ['mailbox', 'digest'],
     queryFn: () => apiGet<MailboxDigest>('/mailbox/digest'),
-    staleTime: 30000,
+    staleTime: STALE.long,
   });
 }
 

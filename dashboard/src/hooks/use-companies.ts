@@ -3,12 +3,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, apiGetPaginated } from '@/lib/api';
 import type { Company, CompanyFilters } from '@/types';
+import { STALE } from '@/lib/query';
 
 export function useCompanies(filters?: CompanyFilters) {
   return useQuery({
     queryKey: ['companies', filters],
     queryFn: () => apiGetPaginated<Company>('/companies', filters as Record<string, unknown>),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 

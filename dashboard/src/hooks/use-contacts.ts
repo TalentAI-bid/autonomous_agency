@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiGetPaginated, apiPatch, apiPost } from '@/lib/api';
 import type { Contact, ContactFilters } from '@/types';
+import { STALE } from '@/lib/query';
 
 export interface FindEmailResult {
   email: string | null;
@@ -15,7 +16,7 @@ export function useContacts(filters?: ContactFilters) {
   return useQuery({
     queryKey: ['contacts', filters],
     queryFn: () => apiGetPaginated<Contact>('/contacts', filters as Record<string, unknown>),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 

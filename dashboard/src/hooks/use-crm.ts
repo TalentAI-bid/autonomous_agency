@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from '@/lib/api';
 import type { CrmStage, Deal, DealWithContact, CrmActivity, BoardColumn, CadenceStrategy, FollowupCadence } from '@/types';
+import { STALE } from '@/lib/query';
 
 // ── Stages ────────────────────────────────────────────────────────────────────
 
@@ -10,7 +11,7 @@ export function useCrmStages() {
   return useQuery({
     queryKey: ['crm', 'stages'],
     queryFn: () => apiGet<CrmStage[]>('/crm/stages'),
-    staleTime: 60000,
+    staleTime: STALE.static,
   });
 }
 
@@ -53,7 +54,7 @@ export function useFollowupCadence() {
   return useQuery({
     queryKey: ['crm', 'followup-cadence'],
     queryFn: () => apiGet<FollowupCadence>('/crm/followup-cadence'),
-    staleTime: 60000,
+    staleTime: STALE.static,
   });
 }
 
@@ -72,7 +73,7 @@ export function useDeals(filters?: { stageId?: string; contactId?: string; maste
   return useQuery({
     queryKey: ['crm', 'deals', filters],
     queryFn: () => apiGet<Deal[]>('/crm/deals', filters as Record<string, unknown>),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -81,7 +82,7 @@ export function useDeal(id: string) {
     queryKey: ['crm', 'deals', id],
     queryFn: () => apiGet<DealWithContact>(`/crm/deals/${id}`),
     enabled: !!id,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -119,7 +120,7 @@ export function useDealActivities(dealId: string) {
     queryKey: ['crm', 'activities', { dealId }],
     queryFn: () => apiGet<CrmActivity[]>('/crm/activities', { dealId }),
     enabled: !!dealId,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -128,7 +129,7 @@ export function useContactTimeline(contactId: string) {
     queryKey: ['crm', 'timeline', contactId],
     queryFn: () => apiGet<CrmActivity[]>(`/crm/contacts/${contactId}/timeline`),
     enabled: !!contactId,
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
 
@@ -153,6 +154,6 @@ export function useCrmBoard() {
   return useQuery({
     queryKey: ['crm', 'board'],
     queryFn: () => apiGet<BoardColumn[]>('/crm/board'),
-    staleTime: 15000,
+    staleTime: STALE.normal,
   });
 }
